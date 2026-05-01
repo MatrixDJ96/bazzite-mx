@@ -17,20 +17,13 @@ dnf5 install -y \
     podman-machine \
     podman-tui
 
-### Section 2: Docker CE (repo isolato, enablerepo puntuale) ###
-# Add the upstream Docker .repo, immediately neutralise every section
-# (enabled=1 → 0) so the repo is never globally active, then install
-# with --enablerepo=docker-ce-stable as a runtime-only override.
-#
-# Why sed and not `dnf5 config-manager setopt`: setopt is a silent
-# no-op on .repo files added via `addrepo --from-repofile=URL` (verified
-# on dnf5 5.x, Bazzite 44.20260501). It returns 0 and writes nothing,
-# which would silently break repo isolation. validate-repos.sh would
-# then catch it, but failing-fast at the source is cleaner.
-dnf5 config-manager addrepo \
-    --from-repofile=https://download.docker.com/linux/fedora/docker-ce.repo
-sed -i 's/^enabled=1/enabled=0/g' /etc/yum.repos.d/docker-ce.repo
-dnf5 -y --enablerepo=docker-ce-stable install \
+### Section 2: Docker CE (vendored repo, enablerepo puntuale) ###
+# The repo file is vendored at system_files/etc/yum.repos.d/docker-ce.repo
+# with enabled=0 already set, so it lands on disk via the rsync in build.sh
+# before this script runs. We only need --enablerepo=docker-ce as a
+# runtime-only override during install. No network fetch at build time
+# (supply-chain auditability via git diff) and no setopt/sed dance needed.
+dnf5 -y --enablerepo=docker-ce install \
     docker-ce \
     docker-ce-cli \
     containerd.io \
