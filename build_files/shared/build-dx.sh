@@ -1,11 +1,13 @@
 #!/usr/bin/bash
-# DX overlay entry point. Runs only when IMAGE_TIER=dx.
+# DX overlay entry point. Always invoked by build.sh because bazzite-mx
+# is a DX-tier image by definition.
 # Style: ported from ublue-os/aurora build-dx.sh + 00-dx.sh structure.
 #
 # Sequence:
 #   1. Copy DX-specific system_files
 #   2. IP forwarding for Docker (sysctl + iptable_nat module)
-#   3. Branding "Developer Experience" in kcm-about
+#   3. Branding "Developer Experience" in kcm-about (best-effort: only if
+#      the upstream KCM file exists; Bazzite path may differ from Aurora)
 #   4. Run all numbered DX scripts (build_files/dx/*.sh) in lexical order
 
 echo "::group:: ===$(basename "$0")==="

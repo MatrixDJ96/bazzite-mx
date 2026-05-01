@@ -37,20 +37,10 @@ jobs:
         include:
           - image_name: bazzite-mx
             base_image: bazzite
-            flavor: base
-            tier: base
           - image_name: bazzite-mx-nvidia
             base_image: bazzite-nvidia
-            flavor: nvidia
-            tier: base
           - image_name: bazzite-mx-nvidia-open
             base_image: bazzite-nvidia-open
-            flavor: nvidia
-            tier: base
-          - image_name: bazzite-mx-dx
-            base_image: bazzite
-            flavor: base
-            tier: dx
     steps:
       - name: Prepare environment
         env:
@@ -155,8 +145,6 @@ jobs:
           cat <<EOF > build_args.txt
           BASE_IMAGE=${{ matrix.base_image }}
           BASE_TAG=${{ env.UPSTREAM_TAG }}
-          IMAGE_FLAVOR=${{ matrix.flavor }}
-          IMAGE_TIER=${{ matrix.tier }}
           IMAGE_NAME=${{ env.IMAGE_NAME }}
           IMAGE_VENDOR=${{ env.IMAGE_VENDOR }}
           VERSION=${{ env.STREAM_VERSION }}

@@ -2,9 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **ARCHITECTURE UPDATE — 2026-05-01 v2 (post Phase 1 push):**
+> L'asse `IMAGE_TIER=base|dx` è stato **rimosso**. `bazzite-mx` è una distribuzione DX-tier per definizione: l'overlay DX è always-on. Le 3 varianti restano `bazzite-mx`, `bazzite-mx-nvidia`, `bazzite-mx-nvidia-open` (tutte DX). Niente `bazzite-mx-dx` separato.
+> Conseguenze: `IMAGE_TIER` rimosso dal Containerfile e dal workflow; `build.sh` chiama sempre `build-dx.sh`; il test `10-tests-dx.sh` gira sempre. Il branding `Variant=Developer Experience` resta best-effort (path KCM Bazzite-specifico da scoprire in fase successiva).
+> Tutti i riferimenti seguenti a `IMAGE_TIER`, `bazzite-mx-dx`, `tier:` nella matrix, `--build-arg IMAGE_TIER=dx` vanno **letti come obsoleti**.
+
 **Goal:** Trasformare `bazzite-mx` in una variante DX di Bazzite migliore di `bazzite-dx` ufficiale, adottando la struttura di build di Aurora DX (script numerati per dominio, repo isolati, test bloccanti, cleanup mirato) e includendo sia il superset di pacchetti DX di Aurora sia le chicche uniche di Bazzite DX, senza duplicare quanto già presente in Bazzite base.
 
-**Architecture:** Aggiungere un flavor `dx` al `Containerfile` esistente di `bazzite-mx`. Split di `build_files/` in `shared/`, `dx/`, `tests/` (stile Aurora). Ogni dominio (container, virt, IDE, cockpit, CLI, branding) è uno script separato con commenti header e sezioni. Repo terzi sempre `enabled=0` con `--enablerepo=` puntuale; COPR via helper `copr_install_isolated()` portato da Aurora. Test `10-tests-dx.sh` bloccante (rpm-q + systemctl is-enabled). Cleanup mirato in stile `clean-stage.sh` Aurora; niente `rm -rf /var`. `bootc container lint` strict (no `|| true`). Validation pre-flight `validate-repos.sh`.
+**Architecture (v2):** Su un `Containerfile` flat con `BASE_IMAGE` (bazzite/bazzite-nvidia/bazzite-nvidia-open) e `IMAGE_FLAVOR` (base/nvidia per gli hook HW), `build_files/shared/build.sh` orchestratore unico applica sempre l'overlay DX (`build-dx.sh` → `build_files/dx/*.sh` numerati). Split di `build_files/` in `shared/`, `dx/`, `tests/` (stile Aurora). Ogni dominio (container, virt, IDE, cockpit, CLI, branding) è uno script separato con commenti header e sezioni. Repo terzi sempre `enabled=0` con `--enablerepo=` puntuale; COPR via helper `copr_install_isolated()` portato da Aurora. Test `10-tests-dx.sh` bloccante (rpm-q + systemctl is-enabled). Cleanup mirato in stile `clean-stage.sh` Aurora; niente `rm -rf /var`. `bootc container lint` strict (no `|| true`). Validation pre-flight `validate-repos.sh`.
 
 **Tech stack:** Bash (`set -euxo pipefail`), `dnf5`, podman/buildah/skopeo (rootful), GitHub Actions (`reusable-build.yml` esistente), cosign (firma esistente), rpm-ostree, Containerfile multi-stage.
 

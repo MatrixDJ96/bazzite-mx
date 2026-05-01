@@ -12,10 +12,6 @@ FROM ghcr.io/ublue-os/${BASE_IMAGE}:${BASE_TAG}
 
 ARG BASE_IMAGE
 ARG BASE_TAG
-ARG IMAGE_FLAVOR=base
-# Valid: base | nvidia
-ARG IMAGE_TIER=base
-# Valid: base | dx
 ARG IMAGE_NAME=bazzite-mx
 ARG IMAGE_VENDOR=matrixdj96
 ARG VERSION=
@@ -29,20 +25,18 @@ LABEL org.opencontainers.image.base.name="ghcr.io/ublue-os/${BASE_IMAGE}:${UPSTR
 LABEL org.opencontainers.image.base.digest="${UPSTREAM_DIGEST}"
 LABEL containers.bootc=1
 
-# Single orchestrated build pass: build.sh handles system_files copy,
-# flavor-specific hooks (base/nvidia), DX overlay (when IMAGE_TIER=dx),
-# cleanup, and repo-isolation validation.
+# bazzite-mx is a single-flavour distribution: MX = Bazzite + DX overlay.
+# The three GHCR variants (bazzite-mx, -nvidia, -nvidia-open) differ only
+# in BASE_IMAGE; the build pipeline is identical.
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=cache,dst=/var/cache \
     --mount=type=cache,dst=/var/log \
     --mount=type=tmpfs,dst=/tmp \
     CTX=/ctx \
-    IMAGE_FLAVOR="${IMAGE_FLAVOR}" \
-    IMAGE_TIER="${IMAGE_TIER}" \
     /ctx/build_files/shared/build.sh
 
-# DX smoke tests (only when IMAGE_TIER=dx). Bloccante.
+# DX smoke tests. Bloccante.
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
-    if [ "${IMAGE_TIER}" = "dx" ]; then /ctx/build_files/tests/10-tests-dx.sh; fi
+    /ctx/build_files/tests/10-tests-dx.sh
 
 RUN bootc container lint
