@@ -24,5 +24,21 @@ if [ ! -f /etc/modules-load.d/90-bazzite-mx-dx.conf ]; then
     exit 1
 fi
 
+# --- Phase 2: Container runtime packages ---
+CONTAINER_RPMS=(
+    podman-compose podman-machine podman-tui podman-bootc
+    docker-ce docker-ce-cli containerd.io
+    docker-buildx-plugin docker-compose-plugin docker-model-plugin
+)
+for p in "${CONTAINER_RPMS[@]}"; do
+    rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
+done
+
+# --- Phase 2: Container runtime services ---
+CONTAINER_UNITS=( docker.socket podman.socket )
+for u in "${CONTAINER_UNITS[@]}"; do
+    systemctl is-enabled "$u" >/dev/null || { echo "FAIL: $u not enabled"; exit 1; }
+done
+
 echo "DX smoke tests OK."
 echo "::endgroup::"
