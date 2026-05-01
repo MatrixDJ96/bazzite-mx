@@ -8,10 +8,10 @@ echo "::group:: ===$(basename "$0")==="
 set -eoux pipefail
 
 # Revert dnf cache to default
-dnf config-manager setopt keepcache=0 || true
+dnf5 config-manager setopt keepcache=0 || true
 
 # Clear any versionlock entries (idempotent)
-dnf versionlock clear 2>/dev/null || true
+dnf5 versionlock clear 2>/dev/null || true
 
 # Prevent Fedora flatpak repos from being added (idempotent, safe if absent)
 if [ -f /usr/lib/systemd/system/flatpak-add-fedora-repos.service ]; then

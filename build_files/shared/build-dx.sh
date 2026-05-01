@@ -33,12 +33,11 @@ fi
 
 # 3. Run all numbered DX scripts (build_files/dx/*.sh) in lexical order
 DX="$CTX/build_files/dx"
-if compgen -G "$DX/[0-9]*-*.sh" > /dev/null; then
-    for s in $(ls -1v "$DX"/[0-9]*-*.sh); do
-        echo "::group::Running $(basename "$s")"
-        bash "$s"
-        echo "::endgroup::"
-    done
-fi
+mapfile -t DX_SCRIPTS < <(find "$DX" -maxdepth 1 -type f -name '[0-9]*-*.sh' | sort -V)
+for s in "${DX_SCRIPTS[@]}"; do
+    echo "::group::Running $(basename "$s")"
+    bash "$s"
+    echo "::endgroup::"
+done
 
 echo "::endgroup::"
