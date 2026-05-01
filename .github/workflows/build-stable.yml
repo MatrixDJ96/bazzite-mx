@@ -1,0 +1,33 @@
+name: Build Stable
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: "Override upstream release tag (leave empty for latest)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/reusable-build.yml
+    secrets: inherit
+    with:
+      stream_name: stable
+      upstream_tag: ${{ inputs.upstream_tag || '' }}

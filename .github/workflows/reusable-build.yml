@@ -1,0 +1,288 @@
+name: Reusable Build
+
+on:
+  workflow_call:
+    inputs:
+      stream_name:
+        description: "Upstream stream: stable or testing"
+        required: true
+        type: string
+      upstream_tag:
+        description: "Immutable upstream release tag (e.g. 44.20260430). If empty, latest release for the stream is resolved at runtime."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+env:
+  IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+  REGISTRY_AUTH_FILE: /tmp/registry-auth/config.json
+  DOCKER_CONFIG: /tmp/registry-auth
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}-${{ inputs.stream_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.image_name }}-${{ inputs.stream_name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image_name: bazzite-mx
+            base_image: bazzite
+            flavor: base
+          - image_name: bazzite-mx-nvidia
+            base_image: bazzite-nvidia
+            flavor: nvidia
+          - image_name: bazzite-mx-nvidia-open
+            base_image: bazzite-nvidia-open
+            flavor: nvidia
+    steps:
+      - name: Prepare environment
+        env:
+          MATRIX_IMAGE_NAME: ${{ matrix.image_name }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >> "$GITHUB_ENV"
+          echo "IMAGE_VENDOR=${REPO_OWNER,,}" >> "$GITHUB_ENV"
+          echo "IMAGE_NAME=${MATRIX_IMAGE_NAME}" >> "$GITHUB_ENV"
+
+      - name: Resolve upstream tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+          INPUT_STREAM_NAME: ${{ inputs.stream_name }}
+        run: |
+          set -euo pipefail
+          UPSTREAM_TAG="$INPUT_UPSTREAM_TAG"
+          if [ -z "$UPSTREAM_TAG" ]; then
+            if [ "$INPUT_STREAM_NAME" = "stable" ]; then
+              UPSTREAM_TAG=$(gh release view --repo ublue-os/bazzite --json tagName -q .tagName)
+            else
+              UPSTREAM_TAG=$(gh release list --repo ublue-os/bazzite --json tagName,createdAt --limit 50 \
+                | jq -r '[.[] | select(.tagName|startswith("testing-"))] | sort_by(.createdAt) | last | .tagName')
+            fi
+          fi
+          echo "UPSTREAM_TAG=$UPSTREAM_TAG" >> "$GITHUB_ENV"
+          echo "Resolved upstream tag: $UPSTREAM_TAG"
+
+      - name: Get current date
+        id: date
+        run: |
+          set -euo pipefail
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Mount BTRFS for podman storage
+        uses: ublue-os/container-storage-action@dc1f4c8f17b672069e921f001132f7cf98a423a6
+        continue-on-error: true
+        with:
+          target-dir: /var/lib/containers
+          mount-opts: compress-force=zstd:2
+          loopback-free: '1'
+
+      - name: Resolve upstream digest
+        id: digest
+        env:
+          BASE_IMAGE: ${{ matrix.base_image }}
+        run: |
+          set -euo pipefail
+          DIGEST=$(skopeo inspect --no-tags "docker://ghcr.io/ublue-os/${BASE_IMAGE}:${UPSTREAM_TAG}" | jq -r .Digest)
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Upstream digest: $DIGEST"
+
+      - name: Compute version tags
+        env:
+          STREAM: ${{ inputs.stream_name }}
+        run: |
+          set -euo pipefail
+          # STREAM_VERSION: upstream tag without the "<stream>-" prefix
+          # (stable tags from ublue-os/bazzite have no prefix; testing tags do)
+          STREAM_VERSION="${UPSTREAM_TAG#${STREAM}-}"
+          # FEDORA_MAJOR: leading numeric component of STREAM_VERSION
+          FEDORA_MAJOR="${STREAM_VERSION%%.*}"
+          echo "STREAM_VERSION=${STREAM_VERSION}" >> "$GITHUB_ENV"
+          echo "FEDORA_MAJOR=${FEDORA_MAJOR}" >> "$GITHUB_ENV"
+          echo "Stream version: ${STREAM_VERSION}"
+          echo "Fedora major: ${FEDORA_MAJOR}"
+
+      - name: Image Metadata
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        id: metadata
+        with:
+          tags: |
+            type=raw,value=latest,enable=${{ inputs.stream_name == 'stable' }}
+            type=raw,value=${{ inputs.stream_name }}
+            type=raw,value=${{ inputs.stream_name }}-${{ env.FEDORA_MAJOR }}
+            type=raw,value=${{ inputs.stream_name }}-${{ env.STREAM_VERSION }},enable=${{ inputs.stream_name == 'stable' }}
+            type=raw,value=${{ env.UPSTREAM_TAG }}
+            type=sha,enable=${{ github.event_name == 'pull_request' }}
+            type=ref,event=pr
+          labels: |
+            org.opencontainers.image.title=${{ env.IMAGE_NAME }}
+            org.opencontainers.image.description=${{ github.event.repository.description }}
+            org.opencontainers.image.vendor=${{ env.IMAGE_VENDOR }}
+            org.opencontainers.image.version=${{ env.STREAM_VERSION }}
+            org.opencontainers.image.created=${{ steps.date.outputs.date }}
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}/tree/${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}/blob/${{ github.sha }}/Containerfile
+            org.opencontainers.image.documentation=https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/README.md
+            org.opencontainers.image.base.name=ghcr.io/ublue-os/${{ matrix.base_image }}:${{ env.UPSTREAM_TAG }}
+            org.opencontainers.image.base.digest=${{ steps.digest.outputs.digest }}
+            containers.bootc=1
+          sep-tags: " "
+          sep-annotations: " "
+
+      - name: Prepare build args file
+        run: |
+          cat <<EOF > build_args.txt
+          BASE_IMAGE=${{ matrix.base_image }}
+          BASE_TAG=${{ env.UPSTREAM_TAG }}
+          IMAGE_FLAVOR=${{ matrix.flavor }}
+          IMAGE_NAME=${{ env.IMAGE_NAME }}
+          IMAGE_VENDOR=${{ env.IMAGE_VENDOR }}
+          VERSION=${{ env.STREAM_VERSION }}
+          UPSTREAM_DIGEST=${{ steps.digest.outputs.digest }}
+          UPSTREAM_TAG=${{ env.UPSTREAM_TAG }}
+          EOF
+
+      # Build the image into a single, repository-only reference (raw-img).
+      # No labels here: they are applied in the next step so they survive
+      # rechunk's commit cycle, exactly as bazzite-dx does.
+      - name: Build Image
+        id: build_image
+        run: |
+          set -euo pipefail
+          sudo -E buildah build \
+            --file Containerfile \
+            --build-arg-file build_args.txt \
+            --tag raw-img \
+            .
+
+      # Re-apply OCI labels and annotations on the buildah image, then
+      # commit with --identity-label=false to strip io.buildah.commit.id
+      # (rpm-ostree compose build-chunked-oci is sensitive to it).
+      - name: Apply Labels
+        env:
+          IMAGE_LABELS: ${{ steps.metadata.outputs.labels }}
+        run: |
+          set -euo pipefail
+          mapfile -t labels <<< "$IMAGE_LABELS"
+          container=$(sudo buildah from raw-img)
+          for line in "${labels[@]}"; do
+            [ -z "$line" ] && continue
+            sudo buildah config --label "$line" --annotation "$line" "$container"
+          done
+          sudo buildah commit --identity-label=false --rm "$container" raw-img
+
+      # Rechunker (bazzite-dx PR 168 pattern). Validated working in commit
+      # 3309c5b: produces correctly-chunked, signed, multi-tag images. The
+      # cost is high (~13-15 min added per matrix job) and the gain on an
+      # overlay-only fork that adds at most a couple of layers on top of an
+      # already-rechunked bazzite is marginal: the user's incremental pulls
+      # come from bazzite's own chunked layout, our delta is one layer
+      # regardless. Re-enable when build_files/*/build.sh ships
+      # customisations heavy enough to benefit from semantic re-layering.
+      #
+      # When re-enabling, also point the push step at the rechunk output ref
+      # (containers-storage:localhost/chunked-img) instead of raw-img.
+      #
+      # - name: Run Rechunker
+      #   id: rechunk
+      #   if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      #   run: |
+      #     set -euo pipefail
+      #     container=$(sudo buildah from raw-img)
+      #     mnt=$(sudo buildah mount "$container")
+      #     sudo bash -c "rm -rf $mnt/run/.* $mnt/run/* $mnt/tmp/.* $mnt/tmp/*"
+      #     sudo buildah umount "$container"
+      #     sudo buildah commit --identity-label=false --rm "$container" raw-img
+      #
+      #     sudo podman run --rm --privileged \
+      #         --volume /var/lib/containers:/var/lib/containers \
+      #         localhost/raw-img \
+      #         rpm-ostree compose build-chunked-oci \
+      #         --bootc --max-layers 127 --format-version 2 \
+      #         --from localhost/raw-img \
+      #         --output containers-storage:localhost/chunked-img
+      #     sudo podman untag raw-img
+      #
+      #     echo "ref=containers-storage:localhost/chunked-img" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          GH_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          sudo mkdir -p "$(dirname "$REGISTRY_AUTH_FILE")"
+          echo "$GH_REGISTRY_TOKEN" | sudo -E podman login ghcr.io -u "$GH_REGISTRY_USER" --password-stdin
+
+      - name: Push to GHCR
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        id: push
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4.0.0
+        env:
+          OUTPUT_IMAGE: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}
+          IMAGE_TAGS: ${{ steps.metadata.outputs.tags }}
+          SOURCE_REF: containers-storage:localhost/raw-img
+          DEFAULT_TAG: ${{ inputs.stream_name }}
+        with:
+          max_attempts: 3
+          retry_wait_seconds: 15
+          timeout_minutes: 10
+          command: |
+            set -euo pipefail
+            for tag in $IMAGE_TAGS; do
+              sudo -E skopeo copy "${SOURCE_REF}" "docker://${OUTPUT_IMAGE}:${tag}"
+            done
+            digest=$(sudo -E skopeo inspect --format '{{.Digest}}' "docker://${OUTPUT_IMAGE}:${DEFAULT_TAG}")
+            echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+        with:
+          cosign-release: 'v2.6.1'
+
+      - name: Sign container image
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          COSIGN_PASSWORD: ""
+          IMAGE_FULL: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          sudo -E "$(command -v cosign)" sign -y --key env://COSIGN_PRIVATE_KEY --new-bundle-format=false "${IMAGE_FULL}@${DIGEST}"
+
+  check:
+    name: Check all ${{ inputs.stream_name }} builds successful
+    if: always()
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - name: Check Jobs
+        env:
+          JOBS: ${{ toJson(needs) }}
+        run: |
+          set -euo pipefail
+          echo "Job status:"
+          echo "$JOBS" | jq -r 'to_entries[] | " - \(.key): \(.value.result)"'
+          for r in $(echo "$JOBS" | jq -r 'to_entries[] | .value.result'); do
+            if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+              echo "Status check not okay!"
+              exit 1
+            fi
+          done
