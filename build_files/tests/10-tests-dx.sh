@@ -88,5 +88,11 @@ if [ ! -x "$GROUPS_SCRIPT" ]; then
     exit 1
 fi
 
+# --- Phase 4: IDE / GUI git client packages ---
+IDE_RPMS=( code gitkraken )
+for p in "${IDE_RPMS[@]}"; do
+    rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
+done
+
 echo "DX smoke tests OK."
 echo "::endgroup::"
