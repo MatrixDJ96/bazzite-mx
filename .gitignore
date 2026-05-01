@@ -2,3 +2,6 @@ cosign.key
 _build_*
 output
 _build-*/**
+
+# Claude Code per-user settings (project-level settings.json IS committed)
+.claude/settings.local.json

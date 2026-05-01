@@ -7,6 +7,34 @@
 > Conseguenze: `IMAGE_TIER` rimosso dal Containerfile e dal workflow; `build.sh` chiama sempre `build-dx.sh`; il test `10-tests-dx.sh` gira sempre. Il branding `Variant=Developer Experience` resta best-effort (path KCM Bazzite-specifico da scoprire in fase successiva).
 > Tutti i riferimenti seguenti a `IMAGE_TIER`, `bazzite-mx-dx`, `tier:` nella matrix, `--build-arg IMAGE_TIER=dx` vanno **letti come obsoleti**.
 
+---
+
+## STATUS — 2026-05-02
+
+| Phase | Status | Commit(s) | Note |
+|---|---|---|---|
+| 1 — Scaffold | ✅ Done | `335142a`, `98dcba3`, `cf65dc8` | build_files {shared,dx,tests}, helpers, validate-repos, single-flavour refactor |
+| Hardening — Round 1 | ✅ Done | `caa7eae` | sed pattern (dnf5 setopt no-op), mapfile loop, catch-all info, dnf5 consistency |
+| Hardening — Vendoring | ✅ Done | `650f002` | docker-ce.repo vendored to system_files |
+| 2 — Container runtime | ✅ Done | `ccb34c4` | Docker CE, podman extras, podman-bootc, sockets |
+| 3 — Virtualization | ✅ Done | `906abd7` | libvirt+qemu+swtpm+waypipe+groups |
+| Hardening — Round 2 | ✅ Done | `3200764` | After=local-fs.target on groups, tighter is-enabled check |
+| 4 — IDE | ✅ Done | `5e88c35`, `5a0dd78` | vscode + gitkraken; cleanup splits 30-ide / 35-git-tools, adds vscode atomic settings, git-credential-libsecret |
+| **5 — Cockpit** | ❌ **SKIPPED** | — | **Bazzite already ships cockpit as a podman quadlet (`quay.io/cockpit/ws:latest`) with full module bundle. Adding host-side cockpit-machines/cockpit-ostree RPMs would duplicate what the container already serves and waste image space. See updated Phase 5 section below.** |
+| 6 — Dev/sysadmin CLI | ⏳ Todo | — | android-tools, bcc, bpftrace, bpftop, sysprof, iotop, nicstat, numactl, trace-cmd, kcli, **+ flatpak-builder** (relocated from Phase 4) |
+| 7 — Bazzite-DX gems | ⏳ Todo | — | python3-ramalama, ccache, restic, rclone, zsh, usbmuxd, tiptop, git-subtree, ublue-setup-services. NB: waypipe + guestfs-tools already in Phase 3. |
+| 8 — Justfile + hooks | ⏳ Todo | — | 95-bazzite-mx.just, privileged-setup hooks, user-setup hooks (incl. vscode extensions hook now possible since Phase 7 ublue-setup-services lands `libsetup.sh`) |
+| 9 — Final hardening | ⏳ Todo | — | image-info.json, README dev section, cosign verification |
+
+**Acquired wins over bazzite-dx upstream** (cumulative):
+1. Strict repo isolation via `validate-repos.sh` + informational catch-all sweep.
+2. `docker-ce.repo` vendored in git (auditable supply chain) instead of fetched at build time.
+3. `swtpm` out-of-the-box (bazzite-dx skips it via `weak_deps=False`).
+4. VSCode `gpgcheck=1` (signature verification works on F44 dnf5; bazzite-dx kept historical `gpgcheck=0`).
+5. Single-flavour MX architecture (no IMAGE_TIER axis).
+6. `bazzite-mx-groups.service` granting docker+libvirt to wheel users on first boot.
+7. Phase 4 split: `30-ide.sh` (editor) and `35-git-tools.sh` (Git GUI + keyring helper) are semantically separate; `git-credential-libsecret` ported from Aurora base for keyring-backed git auth (not in bazzite-dx).
+
 **Goal:** Trasformare `bazzite-mx` in una variante DX di Bazzite migliore di `bazzite-dx` ufficiale, adottando la struttura di build di Aurora DX (script numerati per dominio, repo isolati, test bloccanti, cleanup mirato) e includendo sia il superset di pacchetti DX di Aurora sia le chicche uniche di Bazzite DX, senza duplicare quanto già presente in Bazzite base.
 
 **Architecture (v2):** Su un `Containerfile` flat con `BASE_IMAGE` (bazzite/bazzite-nvidia/bazzite-nvidia-open) e `IMAGE_FLAVOR` (base/nvidia per gli hook HW), `build_files/shared/build.sh` orchestratore unico applica sempre l'overlay DX (`build-dx.sh` → `build_files/dx/*.sh` numerati). Split di `build_files/` in `shared/`, `dx/`, `tests/` (stile Aurora). Ogni dominio (container, virt, IDE, cockpit, CLI, branding) è uno script separato con commenti header e sezioni. Repo terzi sempre `enabled=0` con `--enablerepo=` puntuale; COPR via helper `copr_install_isolated()` portato da Aurora. Test `10-tests-dx.sh` bloccante (rpm-q + systemctl is-enabled). Cleanup mirato in stile `clean-stage.sh` Aurora; niente `rm -rf /var`. `bootc container lint` strict (no `|| true`). Validation pre-flight `validate-repos.sh`.
@@ -717,20 +745,40 @@ Decisione: importare la GPG key di Microsoft (`https://packages.microsoft.com/ke
 
 ---
 
-## Phase 5: Cockpit stack
+## Phase 5: Cockpit stack — SKIPPED
 
-**Files:**
-- Create: `bazzite-mx/build_files/dx/40-cockpit.sh`
-- Modify: `bazzite-mx/build_files/tests/10-tests-dx.sh`
+**Status: SKIPPED on 2026-05-02 after live investigation of Bazzite base.**
 
-**Pacchetti** (verificare in Phase 0 quali già in Bazzite base):
-- `cockpit-system`, `cockpit-storaged`, `cockpit-podman`, `cockpit-machines`, `cockpit-ostree`, `cockpit-selinux`, `cockpit-networkmanager`, `cockpit-bridge`
+**Why we skipped this phase**:
 
-**Servizi:** `cockpit.socket` (NON enabled di default; documentare con just recipe per attivarlo on-demand).
+Bazzite ships cockpit via a **podman quadlet** at `/usr/share/containers/systemd/cockpit-container.container`:
 
-**Test:** `rpm -q cockpit-*`.
+```
+[Container]
+Image=quay.io/cockpit/ws:latest
+ContainerName=cockpit-ws
+Volume=/:/host
+PodmanArgs=--privileged --pid=host --cgroups=split
+```
 
-- [ ] **Step 1-7: TDD pattern come Phase 2.**
+This means:
+1. Cockpit-ws runs as the **upstream Cockpit Project's official container** (`quay.io/cockpit/ws:latest`), maintained and updated independently of the OS image (auto-update via `Label=io.containers.autoupdate=registry`).
+2. The container mounts the entire host filesystem on `/host` and runs privileged, so it sees libvirt, podman, networkmanager, etc. through the bind mount.
+3. The 7 RPM cockpit modules already in Bazzite base (`cockpit-bridge`, `cockpit-system`, `cockpit-podman`, `cockpit-storaged`, `cockpit-selinux`, `cockpit-networkmanager`, `cockpit-files`) are there for **fallback non-containerized scenarios**; they do not feed the containerized cockpit-ws.
+4. `ujust cockpit enable` toggles `cockpit.service` (a one-line stub at `/usr/lib/systemd/system/cockpit.service` that requires `cockpit-container.service`, generated by `podman-systemd-generator` from the quadlet at boot).
+
+Adding host-side `cockpit-machines` / `cockpit-ostree` RPMs would:
+- **Not be loaded by the containerized cockpit-ws** (frontend HTML/JS lives inside `quay.io/cockpit/ws:latest`).
+- Duplicate disk usage of pages already present in the container image.
+- Create version drift between host RPM and container bundle.
+
+Bazzite's design is strictly better than what we'd produce by RPM-layering. We therefore **add no cockpit-related work**. If a future user really needs a host-side cockpit feature not in the upstream container bundle, they can layer the specific RPM via `rpm-ostree install <pkg>` post-deploy.
+
+**Files NOT created** (originally planned, scrapped):
+- ~~`build_files/dx/40-cockpit.sh`~~
+- ~~`system_files` cockpit unit overrides~~
+
+The `40-` numeric slot is therefore free for any future Phase that wants to land a 40-something domain script.
 
 ---
 
