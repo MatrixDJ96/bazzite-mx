@@ -40,5 +40,43 @@ for u in "${CONTAINER_UNITS[@]}"; do
     systemctl is-enabled "$u" >/dev/null || { echo "FAIL: $u not enabled"; exit 1; }
 done
 
+# --- Phase 3: Virtualization packages ---
+VIRT_RPMS=(
+    libvirt libvirt-nss
+    qemu qemu-img qemu-kvm qemu-system-x86-core
+    qemu-char-spice qemu-device-display-virtio-gpu
+    qemu-device-display-virtio-vga qemu-device-usb-redirect
+    qemu-user-binfmt qemu-user-static
+    virt-manager virt-viewer virt-install
+    edk2-ovmf
+    swtpm swtpm-tools
+    waypipe
+    guestfs-tools
+    ublue-os-libvirt-workarounds
+)
+for p in "${VIRT_RPMS[@]}"; do
+    rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
+done
+
+# --- Phase 3: Virtualization services ---
+# swtpm-workaround.service was historically shipped by an older
+# ublue-os-libvirt-workarounds COPR release; it has been consolidated
+# into ublue-os-libvirt-workarounds.service in v1.1+ and no longer
+# exists as a separate unit.
+VIRT_UNITS=(
+    ublue-os-libvirt-workarounds.service
+    bazzite-mx-groups.service
+)
+for u in "${VIRT_UNITS[@]}"; do
+    systemctl is-enabled "$u" >/dev/null || { echo "FAIL: $u not enabled"; exit 1; }
+done
+
+# --- Phase 3: bazzite-mx-groups script must be executable ---
+GROUPS_SCRIPT=/usr/libexec/bazzite-mx-groups
+if [ ! -x "$GROUPS_SCRIPT" ]; then
+    echo "FAIL: $GROUPS_SCRIPT missing or not executable"
+    exit 1
+fi
+
 echo "DX smoke tests OK."
 echo "::endgroup::"

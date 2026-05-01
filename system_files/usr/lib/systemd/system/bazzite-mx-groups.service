@@ -1,0 +1,11 @@
+[Unit]
+Description=bazzite-mx: append docker/libvirt groups and grant to wheel users
+After=systemd-sysusers.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/bazzite-mx-groups
+RemainAfterExit=yes
+
+[Install]
+WantedBy=default.target
