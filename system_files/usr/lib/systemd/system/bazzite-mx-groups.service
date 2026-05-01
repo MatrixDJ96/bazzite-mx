@@ -1,6 +1,6 @@
 [Unit]
 Description=bazzite-mx: append docker/libvirt groups and grant to wheel users
-After=systemd-sysusers.service
+After=systemd-sysusers.service local-fs.target
 
 [Service]
 Type=oneshot

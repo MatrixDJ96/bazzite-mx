@@ -35,9 +35,15 @@ for p in "${CONTAINER_RPMS[@]}"; do
 done
 
 # --- Phase 2: Container runtime services ---
+# `is-enabled` returns exit 0 also for static/linked/indirect/alias states,
+# which are not what we want. Compare the literal string instead.
 CONTAINER_UNITS=( docker.socket podman.socket )
 for u in "${CONTAINER_UNITS[@]}"; do
-    systemctl is-enabled "$u" >/dev/null || { echo "FAIL: $u not enabled"; exit 1; }
+    state=$(systemctl is-enabled "$u" 2>/dev/null || echo missing)
+    if [ "$state" != "enabled" ]; then
+        echo "FAIL: $u not enabled (state=$state)"
+        exit 1
+    fi
 done
 
 # --- Phase 3: Virtualization packages ---
@@ -68,7 +74,11 @@ VIRT_UNITS=(
     bazzite-mx-groups.service
 )
 for u in "${VIRT_UNITS[@]}"; do
-    systemctl is-enabled "$u" >/dev/null || { echo "FAIL: $u not enabled"; exit 1; }
+    state=$(systemctl is-enabled "$u" 2>/dev/null || echo missing)
+    if [ "$state" != "enabled" ]; then
+        echo "FAIL: $u not enabled (state=$state)"
+        exit 1
+    fi
 done
 
 # --- Phase 3: bazzite-mx-groups script must be executable ---
