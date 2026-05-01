@@ -16,20 +16,27 @@ Each variant is published with two stream tags: `:stable` and `:testing`.
 
 ```
 build_files/
-  shared/build.sh   # ran for every flavor
-  base/build.sh     # only for bazzite-mx (no NVIDIA)
-  nvidia/build.sh   # for both nvidia and nvidia-open
-system_files/
-  shared/           # files copied to / for every flavor
-  nvidia/           # files copied to / for NVIDIA flavors
-Containerfile       # parametrized via build args (BASE_IMAGE/BASE_TAG/IMAGE_FLAVOR/...)
+  shared/
+    build.sh           # top-level orchestrator (called from Containerfile)
+    build-dx.sh        # DX overlay: sysctl, branding, runs dx/*.sh
+    copr-helpers.sh    # copr_install_isolated() (port from Aurora)
+    clean-stage.sh     # selective /var cleanup (no rm -rf /var)
+    validate-repos.sh  # fail build if any third-party repo enabled=1
+  dx/                  # numbered scripts per DX domain (container, virt, IDE, ...)
+  tests/
+    10-tests-dx.sh     # smoke tests (rpm-q + systemctl is-enabled, bloccante)
+system_files/          # copied 1:1 to / by build.sh
+Containerfile          # parametrized via build args (BASE_IMAGE/BASE_TAG/...)
 .github/workflows/
   reusable-build.yml   # matrix build of the 3 variants for one stream
   build-stable.yml     # push:main + PR + dispatch -> reusable(stable)
   build-testing.yml    # push:main + PR + dispatch -> reusable(testing)
-  watch-upstream.yml   # cron hourly: detect new upstream releases and build only the changed stream
-cosign.pub          # public key used to verify signed images
+  watch-upstream.yml   # cron hourly: detect new upstream releases, rebuild only the changed stream
+cosign.pub             # public key used to verify signed images
+docs/superpowers/      # implementation plan + validation notes
 ```
+
+**Architecture:** `bazzite-mx` is a single-flavour distribution: MX = Bazzite + DX overlay (Aurora-DX-style: container runtime, virtualization, dev tools). The three GHCR variants differ only in `BASE_IMAGE`; the build pipeline is identical.
 
 ## Image signing
 

@@ -1,6 +1,6 @@
 #!/usr/bin/bash
-# DX smoke tests. Runs as the very last build step, after bootc lint.
-# Bloccante: ogni assertion fa exit 1 sulla build.
+# DX smoke tests. Runs after the build orchestrator, immediately before
+# bootc container lint. Bloccante: ogni assertion fa exit 1 sulla build.
 #
 # Phase 1 verifies only the DX overlay markers (sysctl + modules-load).
 # Branding (kcm-about Variant=Developer Experience) is best-effort because

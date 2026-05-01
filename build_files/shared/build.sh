@@ -2,9 +2,10 @@
 # Top-level build orchestrator for bazzite-mx.
 # Runs once per layer build (called from Containerfile).
 #
-# Style ported from ublue-os/aurora: copy system_files, run flavor-specific
-# build (legacy: base / nvidia), optionally overlay DX (IMAGE_TIER=dx),
-# then clean and validate repos.
+# bazzite-mx is single-flavour: MX = Bazzite + DX overlay. The three GHCR
+# variants (bazzite-mx, -nvidia, -nvidia-open) differ only in BASE_IMAGE.
+# Style ported from ublue-os/aurora: copy system_files, apply DX overlay,
+# clean stage, validate repos are all disabled.
 
 echo "::group:: ===$(basename "$0")==="
 
