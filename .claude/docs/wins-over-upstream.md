@@ -232,33 +232,44 @@ si troverebbe DUE Firefox sul sistema (rpm + flatpak), e l'icon launcher
 KDE potrebbe puntare al flatpak vecchio. Il pattern è generico: qualsiasi
 futura migrazione "flatpak → rpm" può riutilizzare lo stesso layout.
 
-## 14. RPM Fusion non-free vendoredato (key + 2 .repo)
+## 14. RPM Fusion + 1Password integrati senza maintenance debt
 
 **Upstream**:
-- Bazzite e Bazzite-DX **non vendorano** RPM Fusion del tutto.
+- Bazzite e Bazzite-DX **non integrano** RPM Fusion del tutto.
 - Aurora ha solo un loop *difensivo* (`build_files/dx/00-dx.sh:139`,
   `build_files/base/17-cleanup.sh:79`) che disabilita rpmfusion-* se
   per caso fossero abilitati, ma non vendora i `.repo` né installa
   pacchetti da Fusion.
-- AmyOS è l'unica del ublue ecosystem che vendora RPM Fusion attivamente,
-  ma solo per installare `audacious` + `audacity-freeworld` (codec
-  Free-restricted, non app proprietarie).
+- AmyOS è l'unica del ublue ecosystem che integra RPM Fusion
+  attivamente, ma il modo in cui acquisisce i `.repo` non è esplicito
+  in `install-apps.sh` (probabilmente eredità da base image), e per
+  istallare solo `audacious` + `audacity-freeworld`.
+- Per 1Password, nessuna distro ublue ha integrazione (la docs
+  ufficiale 1Password chiede sempre `rpm --import URL` + creazione
+  manuale di `.repo`).
 
-**Us**: vendoring completo (commit `12709cf`):
-- `system_files/etc/yum.repos.d/rpmfusion-nonfree.repo` + `-updates.repo`
-  (verbatim da `rpmfusion-nonfree-release-44.noarch.rpm`, modificati a
-  `enabled=0` su tutte le 3 sezioni di ciascun file).
-- `system_files/etc/pki/rpm-gpg/RPM-GPG-KEY-rpmfusion-nonfree-fedora-44`
-  (GPG key vendoredata, no fetch runtime).
-- Entrambi i `.repo` registrati in `OTHER_REPOS` di `validate-repos.sh`
-  per hard-fail check su `enabled=1` accidentale.
+**Us** (commit iniziale `12709cf`, refactor `8d9152f`): zero-debt
+maintenance approach per entrambi i repo:
+- `build_files/dx/47-rpmfusion-release.sh`: install
+  `rpmfusion-nonfree-release-$(rpm -E %fedora)` come pacchetto rpm
+  (5.9 KB). Il pacchetto shippa GPG keys per Fedora 2020/44/45/46/
+  latest/rawhide e i 3 `.repo` files (release/updates/updates-testing).
+  Sed disable di tutte le sezioni a baseline `enabled=0`.
+- `build_files/dx/48-1password-key.sh`: `curl -fsSL` della key
+  ufficiale `https://downloads.1password.com/linux/keys/1password.asc`
+  ad ogni build. PGP block sanity check fallisce build se 1Password
+  ritorna garbage.
+- `system_files/etc/yum.repos.d/1password.repo` rimane vendored
+  (è policy nostra, `enabled=0`, `repo_gpgcheck=1`).
 
-**Why it matters**: apre la porta a install opt-in di pacchetti
-proprietari (Discord, RAR, codec patentati) tramite ricette ujust
-(vedi #15). Pattern coerente col resto del progetto:
-`enabled=0` baseline + `--enablerepo` puntuale (per build) o sed
-(per ricette ujust). Saremmo gli unici nel ublue ecosystem con
-RPM Fusion completamente integrato lato build.
+**Why it matters**: zero responsabilità di key rotation lato nostro.
+Quando RPM Fusion ruota la key (raro, ma succede a major Fedora),
+il pacchetto release upstream la include automaticamente — `bootc
+upgrade` la prende. Quando 1Password ruota la key, la prossima
+rebuild hourly via watch-upstream la fetcha fresh. **Bazzite-DX e
+AmyOS hanno questa stessa scelta accessibile ma vendorano** —
+significa che il loro debt è latente, il nostro è strutturalmente
+zero. Future-proof per Fedora 45/46 senza alcun intervento manuale.
 
 ## 15. `ujust install-{discord,1password}` opt-in pattern + reusable `_pkg_layered` helper
 
