@@ -209,5 +209,52 @@ if [ ! -x "$FIREFOX_HOOK_USER" ]; then
     exit 1
 fi
 
+# --- Phase 8: Discord ujust + RPM Fusion non-free vendoring ---
+# Discord NON è installato di default (è una ricetta opt-in via ujust).
+# Verifichiamo solo che i file di support siano vendoredati e disabled,
+# e che il justfile mx esista con la ricetta install-discord.
+RPMFUSION_REPOS=(
+    /etc/yum.repos.d/rpmfusion-nonfree.repo
+    /etc/yum.repos.d/rpmfusion-nonfree-updates.repo
+)
+for r in "${RPMFUSION_REPOS[@]}"; do
+    [ -f "$r" ] || { echo "FAIL: $r missing"; exit 1; }
+    if grep -q "^enabled=1" "$r"; then
+        echo "FAIL: $r should ship enabled=0 (build-time invariant)"
+        exit 1
+    fi
+done
+
+# La GPG key di RPM Fusion non-free deve essere presente, altrimenti
+# il primo `rpm-ostree install` interattivo via ujust fallirebbe per
+# missing key import.
+RPMFUSION_GPGKEY=/etc/pki/rpm-gpg/RPM-GPG-KEY-rpmfusion-nonfree-fedora-44
+if [ ! -s "$RPMFUSION_GPGKEY" ]; then
+    echo "FAIL: $RPMFUSION_GPGKEY missing or empty"
+    exit 1
+fi
+# Sanity check sul contenuto: deve essere un PGP block valido — un
+# file vuoto o corrotto passerebbe il -s ma farebbe fallire il primo
+# `rpm-ostree install` a runtime utente.
+grep -q '^-----BEGIN PGP PUBLIC KEY BLOCK-----$' "$RPMFUSION_GPGKEY" || {
+    echo "FAIL: $RPMFUSION_GPGKEY non sembra un PGP key block"
+    exit 1
+}
+
+# 95-bazzite-mx.just deve esistere con la ricetta install-discord.
+MX_JUSTFILE=/usr/share/ublue-os/just/95-bazzite-mx.just
+if [ ! -f "$MX_JUSTFILE" ]; then
+    echo "FAIL: $MX_JUSTFILE missing"
+    exit 1
+fi
+grep -q '^install-discord:' "$MX_JUSTFILE" || {
+    echo "FAIL: install-discord recipe not found in $MX_JUSTFILE"
+    exit 1
+}
+grep -q '^_pkg_layered ' "$MX_JUSTFILE" || {
+    echo "FAIL: _pkg_layered private helper not found in $MX_JUSTFILE"
+    exit 1
+}
+
 echo "DX smoke tests OK."
 echo "::endgroup::"

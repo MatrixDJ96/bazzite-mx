@@ -69,6 +69,8 @@ OTHER_REPOS=(
     "docker-ce.repo"
     "gh-cli.repo"
     "mozilla.repo"
+    "rpmfusion-nonfree.repo"
+    "rpmfusion-nonfree-updates.repo"
     "fedora-cisco-openh264.repo"
     "fedora-coreos-pool.repo"
     "terra.repo"
