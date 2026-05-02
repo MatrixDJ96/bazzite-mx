@@ -260,35 +260,46 @@ proprietari (Discord, RAR, codec patentati) tramite ricette ujust
 (per ricette ujust). Saremmo gli unici nel ublue ecosystem con
 RPM Fusion completamente integrato lato build.
 
-## 15. `ujust install-discord` opt-in pattern
+## 15. `ujust install-{discord,1password}` opt-in pattern + reusable `_pkg_layered` helper
 
 **Upstream**: il file `82-bazzite-apps.just` di Bazzite ha
 ricette `install-coolercontrol`, `install-displaylink`,
-`install-jetbrains-toolbox` ecc., ma **nessuna `install-discord`**.
-bazzite-dx non aggiunge `install-*` recipes (il loro
-`95-bazzite-dx.just` ha solo `dx-group`, `install-fonts`,
-`toggle-gamemode`). Aurora-DX e AmyOS non shippano un justfile
-custom.
+`install-jetbrains-toolbox` ecc., ma **né `install-discord` né
+`install-1password`**, e ogni ricetta ridefinisce inline la sua
+funzione bash `layered()` (duplicazione). bazzite-dx non aggiunge
+`install-*` recipes (il loro `95-bazzite-dx.just` ha solo
+`dx-group`, `install-fonts`, `toggle-gamemode`). Aurora-DX e
+AmyOS non shippano un justfile custom.
 
-**Us**: primo justfile MX (commit `12709cf`):
+**Us**: primo justfile MX con due ricette opt-in distinte:
 - `system_files/usr/share/ublue-os/just/95-bazzite-mx.just`
-- `[private] _pkg_layered pkg` — helper riutilizzabile che usa
+- `[private] _pkg_layered pkg` — helper **riutilizzabile** che usa
   `rpm-ostree status --json | jq` per check del booted deployment.
   Hardened con `// []` fallback (safe quando deployment ha 0
   pacchetti layered o non c'è un booted deployment, es. CI).
-- `[group("apps")] install-discord` — pattern Bazzite-style ma con
-  `sed '0,/^enabled=0/{...}'` (solo main section, non debuginfo+source)
-  e `sudo rpm-ostree install` esplicito (consistency col `sudo sed`
-  precedente).
+  A differenza del pattern Bazzite (function inline ridefinita
+  per ricetta), il nostro è DRY: ogni nuova `install-*` recipe
+  fa `if just _pkg_layered <pkg>; then ...; fi`.
+- `[group("apps")] install-discord` (commit `12709cf`) — RPM Fusion
+  non-free, `sed '0,/^enabled=0/{...}'` (solo main section, non
+  debuginfo+source) e `sudo rpm-ostree install` esplicito.
+- `[group("apps")] install-1password` (commit `ec1acf0`) — repo
+  ufficiale 1Password (`downloads.1password.com`), file
+  single-section quindi `sed 's/^enabled=0/enabled=1/'` semplice.
+  GPG key vendoredata (fingerprint `3FEF9748469ADBE15DA7CA80AC2D6
+  2742012EA22`) per supportare `repo_gpgcheck=1` senza
+  `rpm --import` runtime.
 
 **Why it matters**: Discord ha update settimanali e nag intrusivo
-"Update Available" che su atomic distro l'utente non può ignorare via
-`dnf update`. Il modello opt-in via ujust significa che chi non usa
-Discord non ha la repo Fusion abilitata → niente metadata extra in
-`bootc upgrade`. Chi installa beneficia di update automatici via
-`ujust update` senza intervento manuale (la repo resta `enabled=1`
-post-install per design Bazzite). Saremmo i primi del ublue ecosystem
-con questa ricetta.
+"Update Available" che su atomic distro l'utente non può ignorare
+via `dnf update`. 1Password ha integrazione native messaging che
+su flatpak è bloccata dal sandbox. Il modello opt-in via ujust
+significa che chi non usa l'app non ha la repo abilitata → niente
+metadata extra in `bootc upgrade`. Chi installa beneficia di
+update automatici via `ujust update` senza intervento manuale
+(la repo resta `enabled=1` post-install). Saremmo i primi del
+ublue ecosystem con queste ricette **e** con un helper `_pkg_layered`
+riutilizzabile (gli upstream duplicano la logica).
 
 ## How to extend this list
 
