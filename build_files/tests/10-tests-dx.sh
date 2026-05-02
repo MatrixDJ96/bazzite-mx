@@ -160,5 +160,22 @@ if [ ! -f /usr/lib/ublue/setup-services/libsetup.sh ]; then
     exit 1
 fi
 
+# --- Phase 8: Firefox da repo RPM ufficiale Mozilla ---
+# La build sostituisce il flatpak Flathub di Bazzite con il rpm Mozilla
+# (45-firefox-rpm.sh). Asserzioni:
+#  - firefox + firefox-l10n-it installati
+#  - VENDOR = "Mozilla" (guardia contro regressione al rpm Fedora se in
+#    futuro venisse aggiunto al base Bazzite)
+FIREFOX_RPMS=( firefox firefox-l10n-it )
+for p in "${FIREFOX_RPMS[@]}"; do
+    rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
+done
+
+FIREFOX_VENDOR=$(rpm -q firefox --qf '%{VENDOR}')
+if [ "$FIREFOX_VENDOR" != "Mozilla" ]; then
+    echo "FAIL: firefox vendor is '$FIREFOX_VENDOR', expected 'Mozilla'"
+    exit 1
+fi
+
 echo "DX smoke tests OK."
 echo "::endgroup::"

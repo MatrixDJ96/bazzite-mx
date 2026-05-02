@@ -68,6 +68,7 @@ OTHER_REPOS=(
     "vscode.repo"
     "docker-ce.repo"
     "gh-cli.repo"
+    "mozilla.repo"
     "fedora-cisco-openh264.repo"
     "fedora-coreos-pool.repo"
     "terra.repo"

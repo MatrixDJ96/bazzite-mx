@@ -1,0 +1,8 @@
+[mozilla]
+name=Mozilla
+baseurl=https://packages.mozilla.org/rpm/firefox
+enabled=0
+gpgcheck=1
+repo_gpgcheck=0
+gpgkey=https://packages.mozilla.org/rpm/firefox/signing-key.gpg
+priority=10
