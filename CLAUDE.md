@@ -35,7 +35,7 @@ MX = Bazzite + DX overlay (always-on). Three GHCR images differ only in
 | 3 — Virtualization | ✅ Done | libvirt + qemu + virt-manager + swtpm + waypipe + groups service |
 | 4 — IDE | ✅ Done | vscode + gitkraken + git-credential-libsecret + minimal vscode settings |
 | **5 — Cockpit** | ❌ **SKIPPED** | Bazzite ships cockpit as a podman quadlet (`quay.io/cockpit/ws:latest`) — host-side RPMs would duplicate. See [`.claude/docs/architecture.md`](.claude/docs/architecture.md) § Cockpit pattern |
-| 6 — Dev/sysadmin CLI | ⏳ Todo | android-tools, bcc, bpftrace, bpftop, sysprof, iotop, nicstat, numactl, trace-cmd, kcli, **+ flatpak-builder** (relocated from Phase 4) |
+| 6 — Dev/sysadmin CLI | ✅ Done | android-tools + bcc + **bcc-tools** + bpftrace + bpftop + sysprof + iotop-c + nicstat + numactl + trace-cmd + flatpak-builder + gh (upstream vendored repo). cosign already in Bazzite base. claude-code/kcli deferred. |
 | 7 — Bazzite-DX gems | ⏳ Todo | python3-ramalama, ccache, restic, rclone, zsh, usbmuxd, tiptop, git-subtree, ublue-setup-services |
 | 8 — Justfile + hooks | ⏳ Todo | 95-bazzite-mx.just, privileged-setup hooks, vscode-extensions hook |
 | 9 — Final hardening | ⏳ Todo | image-info.json, README dev section, cosign verification |

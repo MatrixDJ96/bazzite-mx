@@ -129,6 +129,42 @@ no theme, no formatter opinion (commit `5a0dd78`).
 fix is mandatory (VSCode's self-updater fights a read-only /usr); the
 rest is the user's choice. Minimalism is a feature.
 
+## 9. `bcc-tools` shipped alongside `bcc`
+
+**Upstream**: both Aurora-DX (`build_files/dx/00-dx.sh:20`) and
+bazzite-dx (`build_files/20-install-apps.sh:6`) install only `bcc`,
+which is the BPF Compiler Collection **library** + Python bindings.
+The actual command-line tracing utilities (`execsnoop`, `opensnoop`,
+`tcpconnect`, `biotop`, `runqlat`, etc.) live in `bcc-tools`, a
+separate ~2 MiB package that neither distro installs.
+
+**Us**: `build_files/dx/40-dev-cli.sh` installs both `bcc` and
+`bcc-tools` (commit `d7dc9c2`). The tools land under
+`/usr/share/bcc/tools/<name>`.
+
+**Why it matters**: a user typing `dnf install bcc` and then asking
+"where's `execsnoop`?" gets answered out of the box on bazzite-mx.
+On Aurora-DX or bazzite-dx, they have to layer `bcc-tools`
+post-install. The 2 MiB cost is negligible for the UX gain.
+
+## 10. `gh` from upstream vendored repo
+
+**Upstream**: bazzite-dx does not install gh at all. Aurora's CLI list
+(if it includes gh, which it doesn't appear to) would use Fedora's
+package, currently at `gh-2.87.3-1.fc44`.
+
+**Us**: vendored `system_files/etc/yum.repos.d/gh-cli.repo` pointing
+at GitHub's official `https://cli.github.com/packages/rpm` with
+`enabled=0`, `gpgcheck=1` against the upstream
+`githubcli-archive-keyring.asc` (commit `d7dc9c2`). At install time
+we use `dnf5 -y --enablerepo=gh-cli install gh`. The repo gives us
+`gh-2.92.0` (released 2026-04-28) — multiple minor versions ahead
+of the Fedora repo.
+
+**Why it matters**: `gh` evolves quickly (new commands, GitHub API
+features). Lagging by 5+ versions on a "DX" distro is a poor signal.
+The vendoring pattern matches what we did for docker-ce.
+
 ## How to extend this list
 
 When adding a new Phase, deliberately ask: **does this give us an edge
