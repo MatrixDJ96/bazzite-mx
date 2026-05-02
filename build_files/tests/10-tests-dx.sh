@@ -277,5 +277,30 @@ grep -q '^install-1password:' "$MX_JUSTFILE" || {
     exit 1
 }
 
+# --- Phase 8: justfile import nel master Bazzite ---
+# Senza questo, ujust non vede 95-bazzite-mx.just (Bazzite ujust ha
+# import espliciti, no glob).
+MASTER_JUSTFILE=/usr/share/ublue-os/justfile
+grep -qxF 'import "/usr/share/ublue-os/just/95-bazzite-mx.just"' "$MASTER_JUSTFILE" || {
+    echo "FAIL: 95-bazzite-mx.just non è imported nel master $MASTER_JUSTFILE"
+    exit 1
+}
+
+# Smoke test definitivo: ujust deve listare entrambe le ricette MX.
+# Se uno dei due nomi manca, l'import è broken.
+UJUST_LIST=$(ujust --list 2>&1)
+echo "$UJUST_LIST" | grep -q 'install-discord' || {
+    echo "FAIL: ujust --list non mostra install-discord"
+    echo "--- output ---"
+    echo "$UJUST_LIST"
+    exit 1
+}
+echo "$UJUST_LIST" | grep -q 'install-1password' || {
+    echo "FAIL: ujust --list non mostra install-1password"
+    echo "--- output ---"
+    echo "$UJUST_LIST"
+    exit 1
+}
+
 echo "DX smoke tests OK."
 echo "::endgroup::"
