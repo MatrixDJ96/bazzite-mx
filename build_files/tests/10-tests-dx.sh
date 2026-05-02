@@ -256,5 +256,26 @@ grep -q '^_pkg_layered ' "$MX_JUSTFILE" || {
     exit 1
 }
 
+# --- Phase 8: 1Password ujust (single-section repo + key vendored) ---
+ONEPW_REPO=/etc/yum.repos.d/1password.repo
+ONEPW_GPGKEY=/etc/pki/rpm-gpg/1password.asc
+[ -f "$ONEPW_REPO" ] || { echo "FAIL: $ONEPW_REPO missing"; exit 1; }
+if grep -q "^enabled=1" "$ONEPW_REPO"; then
+    echo "FAIL: $ONEPW_REPO should ship enabled=0 (build-time invariant)"
+    exit 1
+fi
+if [ ! -s "$ONEPW_GPGKEY" ]; then
+    echo "FAIL: $ONEPW_GPGKEY missing or empty"
+    exit 1
+fi
+grep -q '^-----BEGIN PGP PUBLIC KEY BLOCK-----$' "$ONEPW_GPGKEY" || {
+    echo "FAIL: $ONEPW_GPGKEY non sembra un PGP key block"
+    exit 1
+}
+grep -q '^install-1password:' "$MX_JUSTFILE" || {
+    echo "FAIL: install-1password recipe not found in $MX_JUSTFILE"
+    exit 1
+}
+
 echo "DX smoke tests OK."
 echo "::endgroup::"

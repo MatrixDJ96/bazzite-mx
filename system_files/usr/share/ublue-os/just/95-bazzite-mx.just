@@ -55,3 +55,33 @@ install-discord:
     echo "Installing discord (rpm-ostree layer)..."
     sudo rpm-ostree install -y discord
     echo "Complete. Reboot to apply: systemctl reboot"
+
+# Install 1Password from the official 1Password rpm repo (rpm-ostree layer)
+[group("apps")]
+install-1password:
+    #!/usr/bin/env bash
+    set -eo pipefail
+
+    cat <<'EOF'
+    {{ YELLOW }}This recipe will proceed to {{ BOLD }}layer{{ NORMAL }} {{ YELLOW }}1Password{{ NORMAL }} from downloads.1password.com.
+    {{ YELLOW }}If future updates start to fail, run "{{ BOLD }}rpm-ostree reset{{ NORMAL }}{{ YELLOW }}" to drop the layer.{{ NORMAL }}
+    {{ YELLOW }}See https://docs.bazzite.gg/Installing_and_Managing_Software/rpm-ostree/#major-caveats-using-rpm-ostree{{ NORMAL }}
+    EOF
+
+    if just _pkg_layered 1password; then
+        echo "1Password is already layered, skipping."
+        exit 0
+    fi
+
+    repo_path="/etc/yum.repos.d/1password.repo"
+    if grep -q "^enabled=1" "$repo_path"; then
+        echo "1Password repository is already enabled, skipping enable step."
+    else
+        echo "Enabling 1Password repository."
+        # Single-section file — sed semplice, niente range pattern necessario.
+        sudo sed -i 's/^enabled=0/enabled=1/' "$repo_path"
+    fi
+
+    echo "Installing 1password (rpm-ostree layer)..."
+    sudo rpm-ostree install -y 1password
+    echo "Complete. Reboot to apply: systemctl reboot"
