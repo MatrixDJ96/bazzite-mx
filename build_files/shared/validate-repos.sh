@@ -71,6 +71,7 @@ OTHER_REPOS=(
     "mozilla.repo"
     "rpmfusion-nonfree.repo"
     "rpmfusion-nonfree-updates.repo"
+    "rpmfusion-nonfree-updates-testing.repo"
     "1password.repo"
     "fedora-cisco-openh264.repo"
     "fedora-coreos-pool.repo"

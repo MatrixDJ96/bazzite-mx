@@ -209,33 +209,37 @@ if [ ! -x "$FIREFOX_HOOK_USER" ]; then
     exit 1
 fi
 
-# --- Phase 8: Discord ujust + RPM Fusion non-free vendoring ---
+# --- Phase 8: Discord ujust + RPM Fusion non-free (rpmfusion-nonfree-release pkg) ---
 # Discord NON è installato di default (è una ricetta opt-in via ujust).
-# Verifichiamo solo che i file di support siano vendoredati e disabled,
-# e che il justfile mx esista con la ricetta install-discord.
+# I .repo + GPG keys arrivano dal pacchetto rpmfusion-nonfree-release
+# (47-rpmfusion-release.sh) — niente vendoring statico, future-proof.
+rpm -q rpmfusion-nonfree-release >/dev/null || {
+    echo "FAIL: rpmfusion-nonfree-release pkg missing (47-rpmfusion-release.sh broken?)"
+    exit 1
+}
+
 RPMFUSION_REPOS=(
     /etc/yum.repos.d/rpmfusion-nonfree.repo
     /etc/yum.repos.d/rpmfusion-nonfree-updates.repo
+    /etc/yum.repos.d/rpmfusion-nonfree-updates-testing.repo
 )
 for r in "${RPMFUSION_REPOS[@]}"; do
     [ -f "$r" ] || { echo "FAIL: $r missing"; exit 1; }
     if grep -q "^enabled=1" "$r"; then
-        echo "FAIL: $r should ship enabled=0 (build-time invariant)"
+        echo "FAIL: $r should be enabled=0 after 47-rpmfusion-release.sh sed"
         exit 1
     fi
 done
 
-# La GPG key di RPM Fusion non-free deve essere presente, altrimenti
-# il primo `rpm-ostree install` interattivo via ujust fallirebbe per
-# missing key import.
+# La GPG key arriva dal pacchetto rpmfusion-nonfree-release (insieme a
+# le key per Fedora 45/46/rawhide). Verifichiamo che almeno la key
+# corrente per F44 sia al posto: senza di essa, il primo
+# `rpm-ostree install discord` via ujust prompt l'utente.
 RPMFUSION_GPGKEY=/etc/pki/rpm-gpg/RPM-GPG-KEY-rpmfusion-nonfree-fedora-44
 if [ ! -s "$RPMFUSION_GPGKEY" ]; then
     echo "FAIL: $RPMFUSION_GPGKEY missing or empty"
     exit 1
 fi
-# Sanity check sul contenuto: deve essere un PGP block valido — un
-# file vuoto o corrotto passerebbe il -s ma farebbe fallire il primo
-# `rpm-ostree install` a runtime utente.
 grep -q '^-----BEGIN PGP PUBLIC KEY BLOCK-----$' "$RPMFUSION_GPGKEY" || {
     echo "FAIL: $RPMFUSION_GPGKEY non sembra un PGP key block"
     exit 1
