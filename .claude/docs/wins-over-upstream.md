@@ -165,6 +165,31 @@ of the Fedora repo.
 features). Lagging by 5+ versions on a "DX" distro is a poor signal.
 The vendoring pattern matches what we did for docker-ce.
 
+## 11. More complete `ublue-setup-services` adoption
+
+**Upstream**: bazzite-dx is the only adopter of `ublue-setup-services`
+across the wider ublue ecosystem (Aurora, Aurora-DX, AmyOS, Bazzite
+base do not use it as of 2026-05-02). And even bazzite-dx uses the
+framework only partially:
+- VSCode extensions hook (`/usr/share/ublue-os/user-setup.hooks.d/11-vscode-extensions.sh`) — uses `libsetup.sh` ✓
+- Privileged-setup hook (`/usr/share/ublue-os/privileged-setup.hooks.d/20-dx.sh`) — uses `libsetup.sh` ✓
+- `bazzite-dx-groups` — **does NOT use libsetup.sh**, keeps a custom
+  versioning file at `/etc/ublue/dx-groups`.
+
+**Us**: every setup-time script in bazzite-mx uses the framework
+(commit `40611b1`). `bazzite-mx-groups` was migrated from a
+custom systemd service + custom version file to a system-setup hook
+at `/usr/share/ublue-os/system-setup.hooks.d/10-bazzite-mx-groups.sh`,
+sourcing `libsetup.sh` and calling `version-script bazzite-mx-groups
+system 1`. All versioning state is now centralized in one JSON file
+(`/var/roothome/.local/share/ublue/setup_versioning.json`).
+
+**Why it matters**: Phase 8 will add more setup hooks (vscode
+extensions, tailscale init, etc.). Mixing two versioning patterns
+(custom file + JSON) would be confusing and harder to debug. Going
+all-in on the framework now means every future hook follows the same
+pattern.
+
 ## How to extend this list
 
 When adding a new Phase, deliberately ask: **does this give us an edge

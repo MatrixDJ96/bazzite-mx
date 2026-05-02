@@ -22,7 +22,7 @@
 | 4 — IDE | ✅ Done | `5e88c35`, `5a0dd78` | vscode + gitkraken; cleanup splits 30-ide / 35-git-tools, adds vscode atomic settings, git-credential-libsecret |
 | **5 — Cockpit** | ❌ **SKIPPED** | — | **Bazzite already ships cockpit as a podman quadlet (`quay.io/cockpit/ws:latest`) with full module bundle. Adding host-side cockpit-machines/cockpit-ostree RPMs would duplicate what the container already serves and waste image space. See updated Phase 5 section below.** |
 | 6 — Dev/sysadmin CLI | ✅ Done | `d7dc9c2` | 11 packages: android-tools, bcc + **bcc-tools** (win over upstream), bpftrace, bpftop, sysprof, iotop-c (Fedora rename), nicstat, numactl, trace-cmd, flatpak-builder, gh (vendored upstream gh-cli.repo for latest version). cosign already in base. kcli deferred. claude-code skipped (npm overhead). |
-| 7 — Bazzite-DX gems | ⏳ Todo | — | python3-ramalama, ccache, restic, rclone, zsh, usbmuxd, tiptop, git-subtree, ublue-setup-services. NB: waypipe + guestfs-tools already in Phase 3. |
+| 7 — Bazzite-DX gems | ✅ Done | `40611b1` | Curated subset: **ccache** (compiler cache for akmod recompiles, gcc is in Bazzite base) + **ublue-setup-services** (COPR, hooks framework). **Migration**: `bazzite-mx-groups` moved from custom service+versioning to system-setup hook using `libsetup.sh`'s `version-script`. Skipped per scope review (no concrete use case): python3-ramalama, restic, rclone, zsh, tiptop, git-subtree. usbmuxd already in Bazzite base; waypipe + guestfs-tools already in Phase 3. |
 | 8 — Justfile + hooks | ⏳ Todo | — | 95-bazzite-mx.just, privileged-setup hooks, user-setup hooks (incl. vscode extensions hook now possible since Phase 7 ublue-setup-services lands `libsetup.sh`) |
 | 9 — Final hardening | ⏳ Todo | — | image-info.json, README dev section, cosign verification |
 
@@ -36,6 +36,7 @@
 7. Phase 4 split: `30-ide.sh` (editor) and `35-git-tools.sh` (Git GUI + keyring helper) are semantically separate; `git-credential-libsecret` ported from Aurora base for keyring-backed git auth (not in bazzite-dx).
 8. **`bcc-tools` installed alongside `bcc`** (Phase 6) — both Aurora-DX and Bazzite-DX install only the library; we add the actual CLI utilities (`execsnoop`, `opensnoop`, `tcpconnect`, `runqlat`, `biotop`, …) at +2 MiB cost.
 9. **`gh` from upstream vendored repo** (Phase 6) — Fedora's `gh-2.87.3` lags by several releases; upstream repo gives `gh-2.92.0` (2026-04-28). Pattern matches our Aurora-better-than-Bazzite-DX approach.
+10. **More complete ublue-setup-services adoption** (Phase 7) — Bazzite-DX uses the framework only for VSCode extensions and a privileged-setup hook, but keeps `bazzite-dx-groups` as a custom service with custom versioning. We migrated `bazzite-mx-groups` to a system-setup hook under the framework, so all our setup logic uses one consistent versioning store (`/var/roothome/.local/share/ublue/setup_versioning.json`).
 
 **Goal:** Trasformare `bazzite-mx` in una variante DX di Bazzite migliore di `bazzite-dx` ufficiale, adottando la struttura di build di Aurora DX (script numerati per dominio, repo isolati, test bloccanti, cleanup mirato) e includendo sia il superset di pacchetti DX di Aurora sia le chicche uniche di Bazzite DX, senza duplicare quanto già presente in Bazzite base.
 
