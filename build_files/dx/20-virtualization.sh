@@ -63,12 +63,13 @@ copr_install_isolated "ublue-os/packages" "ublue-os-libvirt-workarounds"
 # package preset; the explicit enable below is defense-in-depth so
 # the smoke test catches any future preset behaviour change.
 #
-# `bazzite-mx-groups.service` (shipped via system_files) appends
-# docker + libvirt groups to /etc/group on first boot and adds wheel
-# users to them. Without this, Phase 2's docker.socket and Phase 3's
-# libvirt would only be usable via sudo.
+# Note: docker + libvirt group setup for wheel users used to live in a
+# custom `bazzite-mx-groups.service` enabled here. Phase 7 migrated it
+# to a system-setup hook (system_files/usr/share/ublue-os/system-setup
+# .hooks.d/10-bazzite-mx-groups.sh) under the ublue-setup-services
+# framework. The hook now runs from `ublue-system-setup.service` which
+# Phase 7 enables.
 systemctl enable ublue-os-libvirt-workarounds.service
-systemctl enable bazzite-mx-groups.service
 
 # Note: libvirtd / virtqemud sockets are pre-enabled by the libvirt
 # package's systemd-preset, so no explicit enable here.

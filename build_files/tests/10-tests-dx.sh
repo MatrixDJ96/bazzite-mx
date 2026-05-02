@@ -71,7 +71,6 @@ done
 # exists as a separate unit.
 VIRT_UNITS=(
     ublue-os-libvirt-workarounds.service
-    bazzite-mx-groups.service
 )
 for u in "${VIRT_UNITS[@]}"; do
     state=$(systemctl is-enabled "$u" 2>/dev/null || echo missing)
@@ -80,13 +79,6 @@ for u in "${VIRT_UNITS[@]}"; do
         exit 1
     fi
 done
-
-# --- Phase 3: bazzite-mx-groups script must be executable ---
-GROUPS_SCRIPT=/usr/libexec/bazzite-mx-groups
-if [ ! -x "$GROUPS_SCRIPT" ]; then
-    echo "FAIL: $GROUPS_SCRIPT missing or not executable"
-    exit 1
-fi
 
 # --- Phase 4: IDE packages ---
 IDE_RPMS=( code )
@@ -129,6 +121,44 @@ DEV_CLI_RPMS=(
 for p in "${DEV_CLI_RPMS[@]}"; do
     rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
 done
+
+# --- Phase 7: Bazzite-DX gems (curated subset) ---
+EXTRAS_RPMS=( ccache ublue-setup-services )
+for p in "${EXTRAS_RPMS[@]}"; do
+    rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
+done
+
+# --- Phase 7: ublue setup-services framework wiring ---
+# system-setup runs at boot (root); user-setup runs at first login (user).
+EXTRAS_UNITS=( ublue-system-setup.service )
+for u in "${EXTRAS_UNITS[@]}"; do
+    state=$(systemctl is-enabled "$u" 2>/dev/null || echo missing)
+    if [ "$state" != "enabled" ]; then
+        echo "FAIL: $u not enabled (state=$state)"
+        exit 1
+    fi
+done
+
+# user service is enabled --global; in container check, is-enabled
+# may return "static" depending on user-preset, so we just assert the
+# unit file exists in /usr/lib/systemd/user/.
+if [ ! -f /usr/lib/systemd/user/ublue-user-setup.service ]; then
+    echo "FAIL: ublue-user-setup.service unit file missing"
+    exit 1
+fi
+
+# bazzite-mx-groups system-setup hook (replaces the old custom service)
+GROUPS_HOOK=/usr/share/ublue-os/system-setup.hooks.d/10-bazzite-mx-groups.sh
+if [ ! -x "$GROUPS_HOOK" ]; then
+    echo "FAIL: $GROUPS_HOOK missing or not executable"
+    exit 1
+fi
+
+# libsetup.sh must be present (the hook sources it).
+if [ ! -f /usr/lib/ublue/setup-services/libsetup.sh ]; then
+    echo "FAIL: /usr/lib/ublue/setup-services/libsetup.sh missing"
+    exit 1
+fi
 
 echo "DX smoke tests OK."
 echo "::endgroup::"
