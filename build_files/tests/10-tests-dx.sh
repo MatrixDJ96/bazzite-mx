@@ -177,5 +177,33 @@ if [ "$FIREFOX_VENDOR" != "Mozilla" ]; then
     exit 1
 fi
 
+# --- Phase 8: esclusione flatpak Firefox ---
+# 46-firefox-flatpak-exclude.sh patcha la default-install list di
+# Bazzite e estende il blocklist Flathub. Verifichiamo che entrambi
+# gli interventi siano effettivi.
+FIREFOX_INSTALL_LIST=/usr/share/ublue-os/bazzite/flatpak/install
+if grep -q '^org\.mozilla\.firefox$' "$FIREFOX_INSTALL_LIST"; then
+    echo "FAIL: org.mozilla.firefox ancora presente in $FIREFOX_INSTALL_LIST"
+    exit 1
+fi
+
+FIREFOX_BLOCKLIST=/usr/share/ublue-os/flatpak-blocklist
+if ! grep -q '^deny org\.mozilla\.firefox/\*$' "$FIREFOX_BLOCKLIST"; then
+    echo "FAIL: deny org.mozilla.firefox/* non trovato in $FIREFOX_BLOCKLIST"
+    exit 1
+fi
+
+# --- Phase 8: cleanup hooks (system + user) ---
+FIREFOX_HOOK_SYSTEM=/usr/share/ublue-os/system-setup.hooks.d/15-cleanup-firefox-flatpak.sh
+FIREFOX_HOOK_USER=/usr/share/ublue-os/user-setup.hooks.d/15-cleanup-firefox-flatpak.sh
+if [ ! -x "$FIREFOX_HOOK_SYSTEM" ]; then
+    echo "FAIL: $FIREFOX_HOOK_SYSTEM missing or not executable"
+    exit 1
+fi
+if [ ! -x "$FIREFOX_HOOK_USER" ]; then
+    echo "FAIL: $FIREFOX_HOOK_USER missing or not executable"
+    exit 1
+fi
+
 echo "DX smoke tests OK."
 echo "::endgroup::"
