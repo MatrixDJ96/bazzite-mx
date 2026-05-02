@@ -2,7 +2,7 @@
 
 bazzite-mx is a personal fork that aims to be **strictly better** than
 `ublue-os/bazzite-dx` upstream by adopting Aurora-DX's build patterns and
-fixing concrete issues. Cumulative wins as of 2026-05-02:
+fixing concrete issues. Cumulative wins as of 2026-05-02: **15 wins**.
 
 ## 1. Strict repo isolation via `validate-repos.sh`
 
@@ -189,6 +189,106 @@ extensions, tailscale init, etc.). Mixing two versioning patterns
 (custom file + JSON) would be confusing and harder to debug. Going
 all-in on the framework now means every future hook follows the same
 pattern.
+
+## 12. Firefox dal repo RPM ufficiale Mozilla
+
+**Upstream**: bazzite-dx, Bazzite base e tutto il ublue ecosystem
+(Aurora, Aurora-DX, AmyOS) shippano Firefox solo come flatpak
+Flathub `org.mozilla.firefox` (lista default-install di Bazzite).
+
+**Us**: `system_files/etc/yum.repos.d/mozilla.repo` vendoredato
+(`enabled=0`, `priority=10`, `gpgcheck=1`, `repo_gpgcheck=0` per Mozilla
+docs). `build_files/dx/45-firefox-rpm.sh` rimuove eventuale `firefox`
+del repo Fedora se presente (gate via `rpm -q`) e installa
+`firefox` + `firefox-l10n-it` da repo Mozilla (commit `5d17d01`,
+fix-forward review in `b71b0e1`). Smoke test asserisce
+`VENDOR=Mozilla` come guard contro regressione al pacchetto Fedora.
+
+**Why it matters**: 1Password native messaging socket (browser autofill)
+è bloccato dal sandbox del flatpak. La rpm Mozilla risolve out-of-the-box.
+Bonus: niente flatpak-runtime drift dalle system libs (glibc/mesa/...).
+
+## 13. Migration cleanup hooks per flatpak preesistente
+
+**Upstream**: nessuna distro ublue gestisce migration di stato
+flatpak utente preesistente quando la distro cambia provider per
+un'app (es. da flatpak a rpm).
+
+**Us**: due hook complementari (commit `550c4f1`):
+- `system-setup.hooks.d/15-cleanup-firefox-flatpak.sh` (root, oneshot
+  via `ublue-system-setup.service`) — `flatpak uninstall --system
+  org.mozilla.firefox`.
+- `user-setup.hooks.d/15-cleanup-firefox-flatpak.sh` (per-utente, via
+  `ublue-user-setup.service --user`) — `flatpak uninstall --user
+  org.mozilla.firefox`.
+
+Entrambi versionati con `version-script cleanup-firefox-flatpak
+{system,user} 1` di `libsetup.sh`. Bump del numero versione → l'hook
+rigira automaticamente al prossimo boot/login, senza intervento utente.
+
+**Why it matters**: chi aggiorna da una bazzite-mx pre-Phase-8 ha
+ancora la flatpak Firefox installata localmente. Senza cleanup hook,
+si troverebbe DUE Firefox sul sistema (rpm + flatpak), e l'icon launcher
+KDE potrebbe puntare al flatpak vecchio. Il pattern è generico: qualsiasi
+futura migrazione "flatpak → rpm" può riutilizzare lo stesso layout.
+
+## 14. RPM Fusion non-free vendoredato (key + 2 .repo)
+
+**Upstream**:
+- Bazzite e Bazzite-DX **non vendorano** RPM Fusion del tutto.
+- Aurora ha solo un loop *difensivo* (`build_files/dx/00-dx.sh:139`,
+  `build_files/base/17-cleanup.sh:79`) che disabilita rpmfusion-* se
+  per caso fossero abilitati, ma non vendora i `.repo` né installa
+  pacchetti da Fusion.
+- AmyOS è l'unica del ublue ecosystem che vendora RPM Fusion attivamente,
+  ma solo per installare `audacious` + `audacity-freeworld` (codec
+  Free-restricted, non app proprietarie).
+
+**Us**: vendoring completo (commit `12709cf`):
+- `system_files/etc/yum.repos.d/rpmfusion-nonfree.repo` + `-updates.repo`
+  (verbatim da `rpmfusion-nonfree-release-44.noarch.rpm`, modificati a
+  `enabled=0` su tutte le 3 sezioni di ciascun file).
+- `system_files/etc/pki/rpm-gpg/RPM-GPG-KEY-rpmfusion-nonfree-fedora-44`
+  (GPG key vendoredata, no fetch runtime).
+- Entrambi i `.repo` registrati in `OTHER_REPOS` di `validate-repos.sh`
+  per hard-fail check su `enabled=1` accidentale.
+
+**Why it matters**: apre la porta a install opt-in di pacchetti
+proprietari (Discord, RAR, codec patentati) tramite ricette ujust
+(vedi #15). Pattern coerente col resto del progetto:
+`enabled=0` baseline + `--enablerepo` puntuale (per build) o sed
+(per ricette ujust). Saremmo gli unici nel ublue ecosystem con
+RPM Fusion completamente integrato lato build.
+
+## 15. `ujust install-discord` opt-in pattern
+
+**Upstream**: il file `82-bazzite-apps.just` di Bazzite ha
+ricette `install-coolercontrol`, `install-displaylink`,
+`install-jetbrains-toolbox` ecc., ma **nessuna `install-discord`**.
+bazzite-dx non aggiunge `install-*` recipes (il loro
+`95-bazzite-dx.just` ha solo `dx-group`, `install-fonts`,
+`toggle-gamemode`). Aurora-DX e AmyOS non shippano un justfile
+custom.
+
+**Us**: primo justfile MX (commit `12709cf`):
+- `system_files/usr/share/ublue-os/just/95-bazzite-mx.just`
+- `[private] _pkg_layered pkg` — helper riutilizzabile che usa
+  `rpm-ostree status --json | jq` per check del booted deployment.
+  Hardened con `// []` fallback (safe quando deployment ha 0
+  pacchetti layered o non c'è un booted deployment, es. CI).
+- `[group("apps")] install-discord` — pattern Bazzite-style ma con
+  `sed '0,/^enabled=0/{...}'` (solo main section, non debuginfo+source)
+  e `sudo rpm-ostree install` esplicito (consistency col `sudo sed`
+  precedente).
+
+**Why it matters**: Discord ha update settimanali e nag intrusivo
+"Update Available" che su atomic distro l'utente non può ignorare via
+`dnf update`. Il modello opt-in via ujust significa che chi non usa
+Discord non ha la repo Fusion abilitata → niente metadata extra in
+`bootc upgrade`. Chi installa beneficia di update automatici via
+`ujust update` senza intervento manuale (la repo resta `enabled=1`
+post-install per design Bazzite). Saremmo i primi del ublue ecosystem
+con questa ricetta.
 
 ## How to extend this list
 

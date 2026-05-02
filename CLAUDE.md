@@ -37,7 +37,7 @@ MX = Bazzite + DX overlay (always-on). Three GHCR images differ only in
 | **5 — Cockpit** | ❌ **SKIPPED** | Bazzite ships cockpit as a podman quadlet (`quay.io/cockpit/ws:latest`) — host-side RPMs would duplicate. See [`.claude/docs/architecture.md`](.claude/docs/architecture.md) § Cockpit pattern |
 | 6 — Dev/sysadmin CLI | ✅ Done | android-tools + bcc + **bcc-tools** + bpftrace + bpftop + sysprof + iotop-c + nicstat + numactl + trace-cmd + flatpak-builder + gh (upstream vendored repo). cosign already in Bazzite base. claude-code/kcli deferred. |
 | 7 — Bazzite-DX gems | ✅ Done | Curated subset: only **ccache** + **ublue-setup-services** (COPR). Migrated `bazzite-mx-groups` from custom service+versioning to a system-setup hook under `/usr/share/ublue-os/system-setup.hooks.d/` using `libsetup.sh`. Skipped: ramalama/restic/rclone/zsh/tiptop/git-subtree (per use-case review); usbmuxd already in base. |
-| 8 — Justfile + hooks | ⏳ Todo | 95-bazzite-mx.just, privileged-setup hooks, vscode-extensions hook |
+| 8 — Justfile + hooks | 🚧 Partial | **Done**: Firefox via Mozilla RPM (`5d17d01`) + flatpak exclusion / cleanup hooks (`550c4f1`, `b71b0e1`); `95-bazzite-mx.just` shipped with `[private] _pkg_layered` helper + `install-discord` opt-in via RPM Fusion non-free (`12709cf`). **Todo**: `install-1password` recipe, vscode-extensions user-setup hook. |
 | 9 — Final hardening | ⏳ Todo | image-info.json, README dev section, cosign verification |
 
 Long-form plan with checkboxes:
@@ -45,7 +45,7 @@ Long-form plan with checkboxes:
 
 Cumulative wins over upstream `bazzite-dx`: see
 [`.claude/docs/wins-over-upstream.md`](.claude/docs/wins-over-upstream.md)
-(8 wins as of 2026-05-02).
+(15 wins as of 2026-05-02).
 
 ---
 
