@@ -33,10 +33,14 @@ set -euxo pipefail
 # domani cambia scelta — o se uno dei due pacchetti è presente e
 # l'altro no — questo loop cattura comunque il rpm Fedora prima che il
 # nostro install Mozilla risolva al provider sbagliato.
-# Loop per pacchetto singolo: `dnf5 remove a b` rifiuta l'intera
-# operazione se uno dei due non è installato.
+# Pattern: gate il remove su `rpm -q` invece di `|| true`. Così il
+# caso "non installato" è uno skip esplicito, mentre un fail di
+# `dnf5 remove` per ragioni reali (db corruption, dep deadlock) non
+# viene mascherato e fa fallire la build via `set -euxo pipefail`.
 for pkg in firefox firefox-langpacks; do
-    dnf5 -y remove "$pkg" 2>/dev/null || true
+    if rpm -q "$pkg" &>/dev/null; then
+        dnf5 -y remove "$pkg"
+    fi
 done
 
 ### Section 2: install Firefox + langpack italiano dal repo Mozilla ###

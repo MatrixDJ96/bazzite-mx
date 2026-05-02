@@ -171,7 +171,11 @@ for p in "${FIREFOX_RPMS[@]}"; do
     rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
 done
 
-FIREFOX_VENDOR=$(rpm -q firefox --qf '%{VENDOR}')
+# La VENDOR field "Mozilla" è la stringa esatta dal pacchetto Mozilla
+# RPM (verificata 2026-05-02 su firefox-150.0.1-1; il pacchetto Fedora
+# userebbe "Fedora Project"). head -1 difensivo per il caso (improbabile
+# in build pulita) di NEVR multipli installati post-failed-reinstall.
+FIREFOX_VENDOR=$(rpm -q firefox --qf '%{VENDOR}\n' | head -1)
 if [ "$FIREFOX_VENDOR" != "Mozilla" ]; then
     echo "FAIL: firefox vendor is '$FIREFOX_VENDOR', expected 'Mozilla'"
     exit 1
