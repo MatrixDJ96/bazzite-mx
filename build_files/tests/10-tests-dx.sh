@@ -114,5 +114,21 @@ for p in "${GIT_TOOLS_RPMS[@]}"; do
     rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
 done
 
+# --- Phase 6: Dev/sysadmin CLI tools ---
+# 10 Fedora packages + gh from vendored upstream repo. cosign is
+# expected to be in Bazzite base (3.0.6+); we assert it for
+# defensive depth so a future upstream removal would surface here.
+DEV_CLI_RPMS=(
+    android-tools
+    bcc bcc-tools bpftrace bpftop
+    sysprof iotop-c nicstat numactl trace-cmd
+    flatpak-builder
+    gh
+    cosign
+)
+for p in "${DEV_CLI_RPMS[@]}"; do
+    rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
+done
+
 echo "DX smoke tests OK."
 echo "::endgroup::"

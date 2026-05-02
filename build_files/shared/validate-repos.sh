@@ -67,6 +67,7 @@ OTHER_REPOS=(
     "tailscale.repo"
     "vscode.repo"
     "docker-ce.repo"
+    "gh-cli.repo"
     "fedora-cisco-openh264.repo"
     "fedora-coreos-pool.repo"
     "terra.repo"
