@@ -9,9 +9,10 @@ superset of DX packages and Bazzite-DX's unique gems.
 
 ## Single-flavour design
 
-MX is a DX-tier distribution **by definition**. There is no `bazzite-mx` (non-DX)
-variant and no `bazzite-mx-dx` separate variant; the DX overlay is always-on. The
-three GHCR images differ **only** in `BASE_IMAGE`:
+bazzite-mx is single-flavour **by definition**. There is no `IMAGE_TIER` toggle,
+no `-dx` suffix variant, and no separate "lite" image — every build step in
+`build_files/mx/` runs unconditionally on every image. The three GHCR images
+differ **only** in `BASE_IMAGE`:
 
 | Image | BASE_IMAGE | Use case |
 |---|---|---|
@@ -28,10 +29,10 @@ the session — see commit `98dcba3 refactor(dx): collapse to single MX flavour
 The Containerfile has 3 `RUN` steps after the `FROM` directive:
 
 1. **`/ctx/build_files/shared/build.sh`** — orchestrator that (a) rsyncs
-   `system_files/` into `/`, (b) calls `build-dx.sh`, (c) runs `clean-stage.sh`,
+   `system_files/` into `/`, (b) calls `build-mx.sh`, (c) runs `clean-stage.sh`,
    (d) runs `validate-repos.sh`. Mounts a build context bind, plus `/var/cache`
    and `/var/log` as caches and `/tmp` as tmpfs.
-2. **`/ctx/build_files/tests/10-tests-dx.sh`** — smoke test (rpm-q +
+2. **`/ctx/build_files/tests/10-tests-mx.sh`** — smoke test (rpm-q +
    systemctl is-enabled + file-existence assertions). Bind-mount of `/ctx`
    preserved so the test can read the build context if needed.
 3. **`bootc container lint`** — strict (no `|| true`). The image cannot ship
@@ -47,10 +48,10 @@ rsync system_files/ → /
   └─ /etc/skel/.config/Code/User/settings.json
   └─ /usr/lib/systemd/system/bazzite-mx-groups.service
   └─ /usr/libexec/bazzite-mx-groups
-build-dx.sh
-  ├─ writes /etc/sysctl.d/90-bazzite-mx-dx-forwarding.conf
-  ├─ writes /etc/modules-load.d/90-bazzite-mx-dx.conf
-  └─ enumerate build_files/dx/[0-9]*-*.sh in version order
+build-mx.sh
+  ├─ writes /etc/sysctl.d/90-bazzite-mx-forwarding.conf
+  ├─ writes /etc/modules-load.d/90-bazzite-mx.conf
+  └─ enumerate build_files/mx/[0-9]*-*.sh in version order
        (mapfile -t < <(find … | sort -V))
        │
        ├─ 10-container-runtime.sh   (Phase 2)
@@ -78,10 +79,10 @@ bazzite-mx/
 ├── Containerfile                # 3-stage: ctx + base + final
 ├── build_files/
 │   ├── shared/                  # Orchestrator + helpers (build.sh,
-│   │                              build-dx.sh, copr-helpers.sh,
+│   │                              build-mx.sh, copr-helpers.sh,
 │   │                              clean-stage.sh, validate-repos.sh)
-│   ├── dx/                      # Numbered domain scripts (10-, 20-, 30-, 35-)
-│   └── tests/                   # 10-tests-dx.sh (smoke)
+│   ├── mx/                      # Numbered domain scripts (00-, 10-, 20-, 30-, 35-, …)
+│   └── tests/                   # 10-tests-mx.sh (smoke)
 ├── system_files/                # Rsync'd into / by build.sh
 │   ├── etc/yum.repos.d/         # Vendored .repo files (enabled=0)
 │   ├── etc/skel/                # Per-user defaults (.config/Code/...)

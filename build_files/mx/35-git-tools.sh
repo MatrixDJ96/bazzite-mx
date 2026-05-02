@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# DX block 35: Git tools (GUI + system helpers).
+# MX block 35: Git tools (GUI + system helpers).
 # Separate from the IDE block because GitKraken is a Git GUI client,
 # not an IDE, and `git-credential-libsecret` is a system git helper used
 # by every git client (CLI, IDE, GUI) when paired with a Linux keyring.

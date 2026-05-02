@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# DX block 30: IDE.
+# MX block 30: IDE.
 # Adds Visual Studio Code from the vendored Microsoft RPM repo.
 #
 # Default user settings for VSCode are shipped via system_files/etc/skel/

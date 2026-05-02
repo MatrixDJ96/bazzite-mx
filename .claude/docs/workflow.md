@@ -6,10 +6,11 @@
    AmyOS) for the packages/files in scope. Verify what's already in the
    Bazzite base image (`podman run --rm ghcr.io/ublue-os/bazzite:<TAG> rpm -q
    …`). Skip what's already handled well by upstream.
-2. **Implement**: edit/add files for the new domain. One numbered DX script
-   per domain (`<NN>-<domain>.sh`), plus any `system_files/` content.
+2. **Implement**: edit/add files for the new domain. One numbered MX script
+   per domain (`<NN>-<domain>.sh`) under `build_files/mx/`, plus any
+   `system_files/` content.
 3. **Extend smoke tests**: add `<DOMAIN>_RPMS` / `<DOMAIN>_UNITS` arrays to
-   `build_files/tests/10-tests-dx.sh`. Tests are part of the build, not a
+   `build_files/tests/10-tests-mx.sh`. Tests are part of the build, not a
    separate harness.
 4. **Pre-flight locally**: run a `podman build` for the `bazzite` flavour
    (no NVIDIA — the riskiest single shot covers ~95% of failure modes).

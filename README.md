@@ -18,15 +18,15 @@ Each variant is published with two stream tags: `:stable` and `:testing`.
 build_files/
   shared/
     build.sh           # top-level orchestrator (called from Containerfile)
-    build-dx.sh        # DX overlay: sysctl, branding, runs dx/*.sh
+    build-mx.sh        # runs sysctl + iptable_nat module + numbered mx/*.sh
     copr-helpers.sh    # copr_install_isolated() (port from Aurora)
     clean-stage.sh     # selective /var cleanup (no rm -rf /var)
     validate-repos.sh  # fail build if any third-party repo enabled=1
-  dx/                  # numbered scripts per DX domain (container, virt, IDE, ...)
+  mx/                  # numbered scripts per build domain (image-info, container, virt, IDE, …)
   tests/
-    10-tests-dx.sh     # smoke tests (rpm-q + systemctl is-enabled, bloccante)
+    10-tests-mx.sh     # smoke tests (rpm-q + systemctl is-enabled, bloccante)
 system_files/          # copied 1:1 to / by build.sh
-Containerfile          # parametrized via build args (BASE_IMAGE/BASE_TAG/...)
+Containerfile          # parametrized via build args (BASE_IMAGE/BASE_TAG/IMAGE_NAME/IMAGE_VENDOR)
 .github/workflows/
   reusable-build.yml   # matrix build of the 3 variants for one stream
   build-stable.yml     # push:main + PR + dispatch -> reusable(stable)
@@ -36,7 +36,7 @@ cosign.pub             # public key used to verify signed images
 docs/superpowers/      # implementation plan + validation notes
 ```
 
-**Architecture:** `bazzite-mx` is a single-flavour distribution: MX = Bazzite + DX overlay (Aurora-DX-style: container runtime, virtualization, dev tools). The three GHCR variants differ only in `BASE_IMAGE`; the build pipeline is identical.
+**Architecture:** `bazzite-mx` is a single-flavour distribution. The numbered `build_files/mx/*.sh` scripts (Aurora-DX-style: image-info branding, container runtime, virtualization, dev tools, ujust install-* recipes) all run unconditionally. The three GHCR variants differ only in `BASE_IMAGE`.
 
 ## Image signing
 

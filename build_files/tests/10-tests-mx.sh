@@ -1,28 +1,56 @@
 #!/usr/bin/bash
-# DX smoke tests. Runs after the build orchestrator, immediately before
+# MX smoke tests. Runs after the build orchestrator, immediately before
 # bootc container lint. Bloccante: ogni assertion fa exit 1 sulla build.
 #
-# Phase 1 verifies only the DX overlay markers (sysctl + modules-load).
-# Branding (kcm-about Variant=Developer Experience) is best-effort because
-# Bazzite's KCM path differs from Aurora and will be wired in a later phase.
-# Phase 2-9 will extend this file with rpm-q + systemctl is-enabled
-# assertions for each new domain (container, virt, IDE, cockpit, CLI, extras).
+# Phase 1 verifies the MX build markers (sysctl + modules-load) and
+# branding (image-info.json image-name, os-release VARIANT_ID,
+# kcm-about-distrorc Variant). Phase 2-9 extend this file with rpm-q +
+# systemctl is-enabled assertions for each new domain (container, virt,
+# IDE, CLI, extras, firefox, ujust install-* recipes).
 
 echo "::group:: ===$(basename "$0")==="
 
 set -euxo pipefail
 
 # --- IP forwarding sysctl marker ---
-if [ ! -f /etc/sysctl.d/90-bazzite-mx-dx-forwarding.conf ]; then
-    echo "FAIL: missing /etc/sysctl.d/90-bazzite-mx-dx-forwarding.conf"
+if [ ! -f /etc/sysctl.d/90-bazzite-mx-forwarding.conf ]; then
+    echo "FAIL: missing /etc/sysctl.d/90-bazzite-mx-forwarding.conf"
     exit 1
 fi
 
 # --- iptable_nat modules-load marker ---
-if [ ! -f /etc/modules-load.d/90-bazzite-mx-dx.conf ]; then
-    echo "FAIL: missing /etc/modules-load.d/90-bazzite-mx-dx.conf"
+if [ ! -f /etc/modules-load.d/90-bazzite-mx.conf ]; then
+    echo "FAIL: missing /etc/modules-load.d/90-bazzite-mx.conf"
     exit 1
 fi
+
+# --- Image identity + KDE about-page branding (00-image-info.sh) ---
+# image-info.json image-name deve riflettere il fork.
+grep -qE '"image-name":[[:space:]]*"bazzite-mx(-nvidia(-open)?)?"' /usr/share/ublue-os/image-info.json || {
+    echo "FAIL: /usr/share/ublue-os/image-info.json image-name not rewritten"
+    cat /usr/share/ublue-os/image-info.json
+    exit 1
+}
+# os-release VARIANT_ID idem.
+grep -qE '^VARIANT_ID=bazzite-mx(-nvidia(-open)?)?$' /usr/lib/os-release || {
+    echo "FAIL: /usr/lib/os-release VARIANT_ID not rewritten"
+    grep ^VARIANT_ID= /usr/lib/os-release || true
+    exit 1
+}
+# KDE about page (Variant + Website).
+# Regex anchored on both ends: matcha solo le 3 stringhe valide
+# ('Bazzite-MX', 'Bazzite-MX (NVIDIA)', 'Bazzite-MX (NVIDIA Open)') e
+# rifiuta valori malformati tipo 'Bazzite-MX-BROKEN' o 'Bazzite-MXfoo'.
+grep -qE '^Variant=Bazzite-MX( \(NVIDIA( Open)?\))?$' /etc/xdg/kcm-about-distrorc || {
+    echo "FAIL: /etc/xdg/kcm-about-distrorc Variant not rewritten or malformed"
+    grep ^Variant= /etc/xdg/kcm-about-distrorc || true
+    exit 1
+}
+grep -q '^Website=https://github.com/MatrixDJ96/bazzite-mx$' /etc/xdg/kcm-about-distrorc || {
+    echo "FAIL: /etc/xdg/kcm-about-distrorc Website not rewritten"
+    grep ^Website= /etc/xdg/kcm-about-distrorc || true
+    exit 1
+}
 
 # --- Phase 2: Container runtime packages ---
 CONTAINER_RPMS=(
@@ -306,5 +334,5 @@ echo "$UJUST_LIST" | grep -q 'install-1password' || {
     exit 1
 }
 
-echo "DX smoke tests OK."
+echo "MX smoke tests OK."
 echo "::endgroup::"

@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# DX block 40: Dev / sysadmin CLI tools.
+# MX block 40: Dev / sysadmin CLI tools.
 # Observability stack (BPF + profiling + I/O + network monitoring),
 # Android debug bridge, NUMA tooling, Ftrace front-end, build/packaging
 # (flatpak-builder), and GitHub CLI from upstream's vendored repo.

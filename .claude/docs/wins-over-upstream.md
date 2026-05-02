@@ -41,7 +41,7 @@ diffing against external state.
 install` for the virt block. This skips `swtpm` because it's only
 recommended (not required) by libvirt.
 
-**Us**: explicit `swtpm swtpm-tools` in `build_files/dx/20-virtualization.sh`
+**Us**: explicit `swtpm swtpm-tools` in `build_files/mx/20-virtualization.sh`
 (commit `906abd7`).
 
 **Why it matters**: Windows 11 VMs require a TPM 2.0 to install. Without
@@ -138,7 +138,7 @@ The actual command-line tracing utilities (`execsnoop`, `opensnoop`,
 `tcpconnect`, `biotop`, `runqlat`, etc.) live in `bcc-tools`, a
 separate ~2 MiB package that neither distro installs.
 
-**Us**: `build_files/dx/40-dev-cli.sh` installs both `bcc` and
+**Us**: `build_files/mx/40-dev-cli.sh` installs both `bcc` and
 `bcc-tools` (commit `d7dc9c2`). The tools land under
 `/usr/share/bcc/tools/<name>`.
 
@@ -198,7 +198,7 @@ Flathub `org.mozilla.firefox` (lista default-install di Bazzite).
 
 **Us**: `system_files/etc/yum.repos.d/mozilla.repo` vendoredato
 (`enabled=0`, `priority=10`, `gpgcheck=1`, `repo_gpgcheck=0` per Mozilla
-docs). `build_files/dx/45-firefox-rpm.sh` rimuove eventuale `firefox`
+docs). `build_files/mx/45-firefox-rpm.sh` rimuove eventuale `firefox`
 del repo Fedora se presente (gate via `rpm -q`) e installa
 `firefox` + `firefox-l10n-it` da repo Mozilla (commit `5d17d01`,
 fix-forward review in `b71b0e1`). Smoke test asserisce
@@ -250,12 +250,12 @@ futura migrazione "flatpak → rpm" può riutilizzare lo stesso layout.
 
 **Us** (commit iniziale `12709cf`, refactor `8d9152f`): zero-debt
 maintenance approach per entrambi i repo:
-- `build_files/dx/47-rpmfusion-release.sh`: install
+- `build_files/mx/47-rpmfusion-release.sh`: install
   `rpmfusion-nonfree-release-$(rpm -E %fedora)` come pacchetto rpm
   (5.9 KB). Il pacchetto shippa GPG keys per Fedora 2020/44/45/46/
   latest/rawhide e i 3 `.repo` files (release/updates/updates-testing).
   Sed disable di tutte le sezioni a baseline `enabled=0`.
-- `build_files/dx/48-1password-key.sh`: `curl -fsSL` della key
+- `build_files/mx/48-1password-key.sh`: `curl -fsSL` della key
   ufficiale `https://downloads.1password.com/linux/keys/1password.asc`
   ad ogni build. PGP block sanity check fallisce build se 1Password
   ritorna garbage.

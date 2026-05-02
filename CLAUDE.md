@@ -12,7 +12,8 @@ comes up.
 `bazzite-mx` is a personal **bootc atomic distribution** built on top of
 Bazzite, mirroring Aurora-DX's build style and adding both Aurora-DX's
 package superset and Bazzite-DX's gems. **Single-flavour by design**:
-MX = Bazzite + DX overlay (always-on). Three GHCR images differ only in
+no `IMAGE_TIER` toggle, no `-dx` suffix variants. The build pipeline is
+unconditional and applied always. Three GHCR images differ only in
 `BASE_IMAGE`:
 
 | Image | BASE_IMAGE | Use case |
@@ -30,7 +31,7 @@ MX = Bazzite + DX overlay (always-on). Three GHCR images differ only in
 
 | Phase | Status | Notes |
 |---|---|---|
-| 1 — Scaffold | ✅ Done | build_files {shared,dx,tests}, helpers, validate-repos |
+| 1 — Scaffold | ✅ Done | build_files {shared,mx,tests}, helpers, validate-repos |
 | 2 — Container runtime | ✅ Done | Docker CE + podman extras + podman-bootc + sockets |
 | 3 — Virtualization | ✅ Done | libvirt + qemu + virt-manager + swtpm + waypipe + groups service |
 | 4 — IDE | ✅ Done | vscode + gitkraken + git-credential-libsecret + minimal vscode settings |
@@ -113,8 +114,8 @@ forward policy, Watch Upstream Releases), see
 ## Repository layout (one-line summary)
 
 ```
-Containerfile               # 3 RUN steps: build.sh → 10-tests-dx.sh → bootc lint
-build_files/{shared,dx,tests}/
+Containerfile               # 3 RUN steps: build.sh → 10-tests-mx.sh → bootc lint
+build_files/{shared,mx,tests}/
 system_files/{etc,usr}/
 .github/workflows/          # build-stable, build-testing, reusable-build, watch-upstream
 docs/superpowers/           # plans/ + notes/

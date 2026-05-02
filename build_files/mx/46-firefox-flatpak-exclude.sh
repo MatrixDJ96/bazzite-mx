@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# DX block 46: esclude la flatpak Firefox dal default-install Bazzite e
+# MX block 46: esclude la flatpak Firefox dal default-install Bazzite e
 # la nasconde da Discover/Bazaar.
 #
 # Companion di 45-firefox-rpm.sh: dato che Firefox ora arriva dal repo

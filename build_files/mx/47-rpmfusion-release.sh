@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# DX block 47: install rpmfusion-nonfree-release per shippare le GPG
+# MX block 47: install rpmfusion-nonfree-release per shippare le GPG
 # keys + i .repo files di RPM Fusion non-free senza vendoring statico.
 #
 # Approccio scelto invece di vendoreare i `.repo` e la key in

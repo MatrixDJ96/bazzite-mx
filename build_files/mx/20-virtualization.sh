@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# DX block 20: Virtualization stack.
+# MX block 20: Virtualization stack.
 # Adds libvirt + QEMU full stack, virt-manager/virt-viewer GUIs,
 # swtpm (Windows 11 / TPM-aware Linux), waypipe (Wayland-native
 # remote display), and the ublue-os-libvirt-workarounds COPR which

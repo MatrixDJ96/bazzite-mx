@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# DX block 45: Firefox dal repo RPM ufficiale di Mozilla.
+# MX block 45: Firefox dal repo RPM ufficiale di Mozilla.
 #
 # Bazzite di default installa Firefox come flatpak Flathub
 # (org.mozilla.firefox). Lo sostituiamo con la build RPM ufficiale di

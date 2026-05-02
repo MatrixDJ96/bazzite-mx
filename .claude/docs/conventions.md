@@ -3,9 +3,10 @@
 ## Bash scripts (everything under `build_files/`)
 
 - **Shebang**: `#!/usr/bin/bash` (Bazzite ships bash here).
-- **Strict mode**: `set -euxo pipefail` for orchestration scripts and DX
-  install scripts. The `-x` is intentional — we want every command echoed in
-  CI logs so a failure can be located precisely.
+- **Strict mode**: `set -euxo pipefail` for orchestration scripts and the
+  numbered `build_files/mx/*.sh` install scripts. The `-x` is intentional —
+  we want every command echoed in CI logs so a failure can be located
+  precisely.
   - **Exception**: `validate-repos.sh` uses `set -eou pipefail` (no `-x`)
     because its own `echo` output is the report and `-x` would garble it.
     This deviation is Aurora upstream's choice; we kept it for parity.
@@ -43,11 +44,16 @@
 ### Commit messages
 
 - **Conventional Commits**: `<type>(<scope>): <subject>`.
-  - `feat(dx): …` — new functionality (a phase landing)
-  - `refactor(dx): …` — restructuring without behaviour change (hardening,
+  - `feat(mx): …` — new functionality (a phase landing)
+  - `refactor(mx): …` — restructuring without behaviour change (hardening,
     splits, vendoring)
+  - `fix(mx): …` — bug fix in the build pipeline / smoke test / ricetta
   - `docs(plan): …` / `docs(repo): …` — documentation only
-  - `ci(...)`, `fix(...)`, `chore(...)`
+  - `ci(...)`, `chore(...)`
+  - **Legacy note**: pre-Phase 8 commits used scope `(dx)` from when the
+    project still had an `IMAGE_TIER=base|dx` axis. The history is left
+    intact; new commits use `(mx)` for consistency with the single-flavour
+    naming.
 - Subject ≤ 70 chars, imperative mood.
 - Body explains the WHY, not the WHAT. Reference upstream comparisons,
   measurement results, and discoveries (e.g., "verified on Bazzite
@@ -104,7 +110,7 @@ When adding a new third-party repo:
 1. Vendor the .repo file in `system_files/etc/yum.repos.d/<name>.repo` with
    `enabled=0`.
 2. Add `<name>.repo` to `OTHER_REPOS` in `validate-repos.sh`.
-3. Use `dnf5 -y --enablerepo=<section> install <pkg>` in the dx script.
+3. Use `dnf5 -y --enablerepo=<section> install <pkg>` in the mx script.
 
 The catch-all sweep at the bottom of `validate-repos.sh` is **informational
 only** — it lists every other `.repo` file's enabled state but does not
@@ -131,7 +137,7 @@ For `*-release` style RPMs (e.g., a hypothetical `tailscale-release` that
 drops a .repo file via post-install scriptlet), use `thirdparty_repo_install`
 which sed's the resulting file rather than calling setopt.
 
-## Smoke tests (`build_files/tests/10-tests-dx.sh`)
+## Smoke tests (`build_files/tests/10-tests-mx.sh`)
 
 - **One numbered file**, extended in-place per phase.
 - Per-phase pattern:
@@ -177,7 +183,7 @@ which sed's the resulting file rather than calling setopt.
 
 ## File permissions
 
-- Scripts under `build_files/dx/`, `build_files/shared/`, `build_files/tests/`
+- Scripts under `build_files/mx/`, `build_files/shared/`, `build_files/tests/`
   → **mode 755** (`chmod +x`). systemd unit files → **mode 644**.
 - Verify before commit: `git ls-files --stage | grep '^100755'`. If a script
   was created mode 644 by accident, fix with

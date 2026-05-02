@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# DX block 48: fetch della GPG key 1Password ad ogni build.
+# MX block 48: fetch della GPG key 1Password ad ogni build.
 #
 # Approccio scelto invece del vendoring statico in
 # `system_files/etc/pki/rpm-gpg/1password.asc`:

@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# DX block 55: registra il justfile MX nel master ujust di Bazzite.
+# MX block 55: registra il justfile MX nel master ujust di Bazzite.
 #
 # Bazzite ujust è un wrapper di `just` che usa il master file
 # `/usr/share/ublue-os/justfile` con `import` espliciti per ciascun

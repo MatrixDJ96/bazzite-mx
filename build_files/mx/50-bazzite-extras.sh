@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# DX block 50: Bazzite-DX gems (curated subset).
+# MX block 50: Bazzite-DX gems (curated subset).
 # We import only the bits that match concrete bazzite-mx use cases:
 #
 #   * `ccache` — compiler cache. Bazzite base ships gcc/gcc-c++/make

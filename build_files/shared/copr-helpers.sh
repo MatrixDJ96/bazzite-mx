@@ -43,7 +43,7 @@ thirdparty_repo_install() {
     # Why sed and not `dnf5 config-manager setopt`: setopt is a silent
     # no-op on .repo files written by --repofrompath / --from-repofile=URL
     # (verified on dnf5 5.x, Bazzite 44.20260501). Same workaround as in
-    # build_files/dx/10-container-runtime.sh — sed is the consistent
+    # build_files/mx/10-container-runtime.sh — sed is the consistent
     # pattern across every third-party repo touch in this codebase.
     local repo_name="$1"
     local repo_frompath="$2"

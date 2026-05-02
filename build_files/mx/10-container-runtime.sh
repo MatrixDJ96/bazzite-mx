@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# DX block 10: Container runtime.
+# MX block 10: Container runtime.
 # Adds Docker CE (Microsoft repo, enabled=0 + --enablerepo= scope),
 # Podman extras (Fedora), and podman-bootc (COPR isolated).
 # Style: ported from ublue-os/aurora build_files/dx/00-dx.sh sections.
