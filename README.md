@@ -38,6 +38,25 @@ docs/superpowers/      # implementation plan + validation notes
 
 **Architecture:** `bazzite-mx` is a single-flavour distribution. The numbered `build_files/mx/*.sh` scripts (Aurora-DX-style: image-info branding, container runtime, virtualization, dev tools, ujust install-* recipes) all run unconditionally. The three GHCR variants differ only in `BASE_IMAGE`.
 
+## Building locally
+
+Pre-flight a single flavour before pushing to CI (~5 min on a recent laptop, vs ~15 min for the full 6-job CI matrix):
+
+```bash
+podman build --file Containerfile \
+  --build-arg BASE_IMAGE=bazzite \
+  --build-arg BASE_TAG=$(skopeo inspect --no-tags \
+      docker://ghcr.io/ublue-os/bazzite:stable \
+      | jq -r '.Labels["org.opencontainers.image.version"]') \
+  --build-arg IMAGE_NAME=bazzite-mx \
+  --build-arg IMAGE_VENDOR=matrixdj96 \
+  --tag localhost/bazzite-mx:preflight .
+```
+
+Swap `BASE_IMAGE` to `bazzite-nvidia` or `bazzite-nvidia-open` and `IMAGE_NAME` to the matching `bazzite-mx-{nvidia,nvidia-open}` to pre-flight the other variants.
+
+Smoke tests (`build_files/tests/10-tests-mx.sh`) run as a blocking step inside the build — a failed assertion fails the build. Authoritative conventions, gotchas, and the per-phase build-domain layout live under [`.claude/docs/`](.claude/docs/).
+
 ## Image signing
 
 All published images are signed with `cosign` using the keypair stored in this repo (`cosign.pub`) and in the `SIGNING_SECRET` repository secret.

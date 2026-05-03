@@ -32,6 +32,10 @@ IMAGE_REF="ostree-image-signed:docker://ghcr.io/${IMAGE_VENDOR}/${IMAGE_NAME}"
 [ -f "$IMAGE_INFO" ] || { echo "FAIL: $IMAGE_INFO not found"; exit 1; }
 sed -i 's|"image-name": [^,]*|"image-name": "'"$IMAGE_NAME"'"|' "$IMAGE_INFO"
 sed -i 's|"image-ref": [^,]*|"image-ref": "'"$IMAGE_REF"'"|' "$IMAGE_INFO"
+# image-vendor restava "ublue-os" (eredità Bazzite base): inconsistente
+# con il fatto che pubblichiamo a ghcr.io/$IMAGE_VENDOR. Allineamento
+# branding di chiusura Phase 9.
+sed -i 's|"image-vendor": [^,]*|"image-vendor": "'"$IMAGE_VENDOR"'"|' "$IMAGE_INFO"
 
 # os-release VARIANT_ID per coerenza col fork.
 [ -f /usr/lib/os-release ] || { echo "FAIL: /usr/lib/os-release not found"; exit 1; }

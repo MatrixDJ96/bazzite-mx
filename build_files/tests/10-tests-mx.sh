@@ -31,6 +31,13 @@ grep -qE '"image-name":[[:space:]]*"bazzite-mx(-nvidia(-open)?)?"' /usr/share/ub
     cat /usr/share/ublue-os/image-info.json
     exit 1
 }
+# image-vendor deve riflettere chi pubblica davvero (matrixdj96), non
+# l'eredità "ublue-os" del Bazzite base (Phase 9 closing).
+grep -qE '"image-vendor":[[:space:]]*"matrixdj96"' /usr/share/ublue-os/image-info.json || {
+    echo "FAIL: /usr/share/ublue-os/image-info.json image-vendor not rewritten to matrixdj96"
+    grep image-vendor /usr/share/ublue-os/image-info.json || true
+    exit 1
+}
 # os-release VARIANT_ID idem.
 grep -qE '^VARIANT_ID=bazzite-mx(-nvidia(-open)?)?$' /usr/lib/os-release || {
     echo "FAIL: /usr/lib/os-release VARIANT_ID not rewritten"
