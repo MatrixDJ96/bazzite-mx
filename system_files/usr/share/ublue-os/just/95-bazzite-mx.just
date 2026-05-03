@@ -13,16 +13,20 @@
 #    the rpm-ostree overlay layer of the booted deployment).
 
 # Check if a package is already layered on the booted rpm-ostree
-# deployment. Exits 0 if layered, 1 if not. Reusable across install-*
-# recipes. Usage: `if just _pkg_layered <name>; then ... ; fi`
+# deployment. Outputs `yes`/`no` on stdout; always exits 0.
+# Usage: `if [ "$(just _pkg_layered <pkg>)" = "yes" ]; then ... ; fi`
+#
+# Stdout-as-boolean invece dell'exit code: just logga sempre
+# `error: Recipe ... failed on line N with exit code 1` quando una
+# sub-recipe esce ≠ 0, anche dentro un `if` del caller. Lo stdout
+# tiene puliti gli output di install-* (UX bug scoperto 2026-05-03).
 #
 # `// []` rende la query safe quando `.packages` è null (deployment senza
-# layered packages) o quando non c'è un booted deployment (es. CI
-# container senza ostree). In quei casi il check ritorna safely "not
-# layered" → la ricetta procede all'install.
+# layered packages) o senza booted deployment (es. CI container senza
+# ostree) — entrambi risolvono a "no" → install procede.
 [private]
 _pkg_layered pkg:
-    @rpm-ostree status --json | jq -e --arg p "{{ pkg }}" '.deployments[] | select(.booted == true) | (.packages // []) | index($p)' > /dev/null
+    @if rpm-ostree status --json | jq -e --arg p "{{ pkg }}" '.deployments[] | select(.booted == true) | (.packages // []) | index($p)' > /dev/null; then echo yes; else echo no; fi
 
 # Install Discord from RPM Fusion non-free (rpm-ostree layer)
 [group("apps")]
@@ -36,7 +40,7 @@ install-discord:
     {{ YELLOW }}See https://docs.bazzite.gg/Installing_and_Managing_Software/rpm-ostree/#major-caveats-using-rpm-ostree{{ NORMAL }}
     EOF
 
-    if just _pkg_layered discord; then
+    if [ "$(just _pkg_layered discord)" = "yes" ]; then
         echo "Discord is already layered, skipping."
         exit 0
     fi
@@ -68,7 +72,7 @@ install-1password:
     {{ YELLOW }}See https://docs.bazzite.gg/Installing_and_Managing_Software/rpm-ostree/#major-caveats-using-rpm-ostree{{ NORMAL }}
     EOF
 
-    if just _pkg_layered 1password; then
+    if [ "$(just _pkg_layered 1password)" = "yes" ]; then
         echo "1Password is already layered, skipping."
         exit 0
     fi
