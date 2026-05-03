@@ -54,6 +54,11 @@ install-discord:
         # file: the main section. The `-debuginfo` and `-source`
         # sections stay enabled=0 (we don't want them auto-enabled).
         sudo sed -i '0,/^enabled=0/{s/^enabled=0/enabled=1/}' "$repo_path"
+        # `rpm-ostreed` caches its view of /etc/yum.repos.d/ at daemon
+        # start; without an explicit reload, our `sed` edit stays
+        # invisible and `rpm-ostree install` reports
+        # "Packages not found: discord" (UX bug found 2026-05-03).
+        sudo rpm-ostree reload
     fi
 
     echo "Installing discord (rpm-ostree layer)..."
@@ -84,6 +89,11 @@ install-1password:
         echo "Enabling 1Password repository."
         # Single-section file — simple sed, no range pattern needed.
         sudo sed -i 's/^enabled=0/enabled=1/' "$repo_path"
+        # `rpm-ostreed` caches its view of /etc/yum.repos.d/ at daemon
+        # start; without an explicit reload, our `sed` edit stays
+        # invisible and `rpm-ostree install` reports
+        # "Packages not found: 1password" (same family as install-discord).
+        sudo rpm-ostree reload
     fi
 
     echo "Installing 1password (rpm-ostree layer)..."
