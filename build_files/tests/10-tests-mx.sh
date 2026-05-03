@@ -334,5 +334,30 @@ echo "$UJUST_LIST" | grep -q 'install-1password' || {
     exit 1
 }
 
+# --- Phase 8: vscode-extensions user-setup hook ---
+# Hook al primo login utente che pre-installa le 3 extension Microsoft
+# container/remote (lista convergente Aurora-DX + Bazzite-DX, verificato
+# 2026-05-03). Versioned via libsetup.sh::version-script. Il hook viene
+# eseguito sul deployment finale, non in build — qui controlliamo solo
+# che il file sia presente, eseguibile, e che non manchi nessuna delle
+# 3 extension attese (regression catch).
+VSCODE_HOOK=/usr/share/ublue-os/user-setup.hooks.d/11-vscode-extensions.sh
+if [ ! -x "$VSCODE_HOOK" ]; then
+    echo "FAIL: $VSCODE_HOOK missing or not executable"
+    exit 1
+fi
+
+VSCODE_EXTENSIONS=(
+    ms-vscode-remote.remote-containers
+    ms-vscode-remote.remote-ssh
+    ms-azuretools.vscode-containers
+)
+for ext in "${VSCODE_EXTENSIONS[@]}"; do
+    grep -qF "code --install-extension $ext" "$VSCODE_HOOK" || {
+        echo "FAIL: $VSCODE_HOOK non installa $ext (regression?)"
+        exit 1
+    }
+done
+
 echo "MX smoke tests OK."
 echo "::endgroup::"
