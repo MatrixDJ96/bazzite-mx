@@ -2,7 +2,7 @@
 
 bazzite-mx is a personal fork that aims to be **strictly better** than
 `ublue-os/bazzite-dx` upstream by adopting Aurora-DX's build patterns and
-fixing concrete issues. Cumulative wins as of 2026-05-03: **18 wins**.
+fixing concrete issues. Cumulative wins as of 2026-05-04: **19 wins**.
 
 ## 1. Strict repo isolation via `validate-repos.sh`
 
@@ -429,6 +429,62 @@ flatpak; Bazzite has the most complete recipe; **none** ship a
 working-on-first-boot stack while also providing a working recipe for
 VFIO advanced users. Our single image gives both. Net effect: opening
 virt-manager.app from the launcher post-install just works.
+
+## 19. Sunshine reintegrated as system RPM (vs. Bazzite's brew migration)
+
+**Upstream**: Bazzite shipped Sunshine as a system RPM from the
+`lizardbyte/beta` COPR until commit `079fa8ad` (2026-03-26), then
+removed it citing "numerous ignored issues about their stable repo
+not supporting Fedora 43 these last 6 months." Their replacement is
+a Homebrew-based `setup-sunshine` recipe (commit `aa6ec9da`) that
+requires the user to install Homebrew first, then `brew install
+sunshine`, which downloads and *compiles* a 30+ MiB binary on every
+machine. Bazzite-DX inherits this and provides no alternative.
+
+**Us**: `build_files/mx/65-sunshine.sh` re-integrates Sunshine as
+a system RPM via the same COPR Aurora has used continuously without
+abandoning. By 2026-04-28 the COPR resumed Fedora 44 builds (verified
+2026-05-04: `Sunshine 2026.428.130031-1.fc44` available, post-install
+scriptlet rpm-ostree-aware). Three pieces:
+1. **`copr_install_isolated "lizardbyte/beta" "sunshine"`**: same
+   isolated-COPR pattern we use for `ublue-os-libvirt-workarounds`.
+   `validate-repos.sh` enforces `enabled=0` at build end.
+2. **`setcap cap_sys_admin+p`** on `/usr/bin/sunshine` for KMS-based
+   capture. The COPR package does NOT ship the cap; Bazzite's
+   pre-removal Containerfile applied it manually with the same line.
+   Without it Sunshine falls back to a slower PipeWire portal path.
+3. **`systemctl --global disable app-dev.lizardbyte.app.Sunshine.service`**:
+   defense-in-depth (Aurora pattern,
+   `aurora/build_files/base/17-cleanup.sh:32`). The user-service is
+   already `disabled` by default (no preset ships); the explicit
+   `--global disable` makes the intent self-documenting and protects
+   against a future preset change upstream.
+
+**Recipe override** (`system_files/usr/share/ublue-os/just/82-bazzite-
+sunshine.just`): replaces Bazzite's brew-flavored recipe with our
+RPM-flavored version. Drops `enable-beta` (COPR is rolling-latest),
+`update` (handled by `bootc upgrade`), `uninstall` (the package is
+part of the base image — we tell users `rpm-ostree override remove
+Sunshine` in `help` if they really want it gone). Manages
+`app-dev.lizardbyte.app.Sunshine.service` (the COPR-shipped user unit)
+via `systemctl --user enable --now`.
+
+**Nag suppression**: `/usr/share/ublue-os/announcements/sunshine-
+brew.msg.json` shows users a "Sunshine will soon be removed from the
+base Bazzite image, and you will need to reinstall it in Bazzite
+Portal" notification whenever they have a Sunshine config. With our
+RPM integration the nag is permanently misleading; we `rm` it at
+build time.
+
+**Why it matters**: Sunshine is the canonical Linux self-hosted
+streaming server (Moonlight backend), used by every
+gaming-on-the-couch / remote-play setup. Brew-on-ostree adds
+~30 minutes of first-run install time (compile from source on a
+mid-tier laptop), an unsupported package manager dependency, and a
+slower update path (`brew upgrade` is per-user, manual). RPM
+integration brings Sunshine back to first-class status: same speed
+of install (zero — already there), `bootc upgrade` updates, no brew
+prerequisite, and works on a fresh deployment without any user setup.
 
 ## How to extend this list
 

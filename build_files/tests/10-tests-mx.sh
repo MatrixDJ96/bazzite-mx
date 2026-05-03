@@ -452,5 +452,80 @@ for ext in "${VSCODE_EXTENSIONS[@]}"; do
     }
 done
 
+# --- Phase 9: Sunshine reintegration (build-time RPM, opt-in user service) ---
+# Bazzite removed Sunshine from base (commit 079fa8ad, 2026-03-26)
+# citing 6 months of stale F43 builds in the lizardbyte/beta COPR. By
+# 2026-04-28 the COPR resumed F44 builds; we re-integrate via Aurora's
+# pattern (build-time `copr_install_isolated` + `--global disable`
+# user service + setcap for KMS capture). See 65-sunshine.sh.
+#
+# Note: the rpm name is capitalized (`Sunshine`); `rpm -q` is
+# case-sensitive even though `dnf install` is not.
+rpm -q Sunshine >/dev/null || {
+    echo "FAIL: Sunshine rpm missing (65-sunshine.sh broken? COPR offline?)"
+    exit 1
+}
+
+# `setcap cap_sys_admin+p` is required for Sunshine's KMS-based
+# capture path (Wayland/X11, /dev/dri/card*). The COPR package does
+# NOT apply it; 65-sunshine.sh adds it manually after install. Without
+# it Sunshine works but falls back to a slower PipeWire portal path.
+SUNSHINE_BIN=$(readlink -f /usr/bin/sunshine)
+SUNSHINE_CAPS=$(getcap "$SUNSHINE_BIN" 2>/dev/null || true)
+case "$SUNSHINE_CAPS" in
+    *cap_sys_admin*)
+        ;;
+    *)
+        echo "FAIL: $SUNSHINE_BIN missing cap_sys_admin (getcap output: '$SUNSHINE_CAPS')"
+        exit 1
+        ;;
+esac
+
+# User-service must be disabled by default. `is-enabled` exits 1 even
+# when the printed state is "disabled", so we can't use the
+# `|| echo missing` fallback idiom from earlier sections (it would
+# concatenate two lines and break the equality check). Use `|| true`
+# to make the inner pipeline exit 0; the stdout is captured untouched.
+# Empty stdout means the unit does not exist on the image.
+SUNSHINE_UNIT=app-dev.lizardbyte.app.Sunshine.service
+sun_state=$(systemctl --global is-enabled "$SUNSHINE_UNIT" 2>/dev/null || true)
+if [ -z "$sun_state" ]; then
+    echo "FAIL: $SUNSHINE_UNIT does not exist (Sunshine package broken?)"
+    exit 1
+fi
+if [ "$sun_state" != "disabled" ]; then
+    echo "FAIL: $SUNSHINE_UNIT --global state is '$sun_state' (expected 'disabled')"
+    exit 1
+fi
+
+# Override of Bazzite's brew-flavored 82-bazzite-sunshine.just must be
+# in place (we ship our own RPM-flavored version). Marker: the header
+# comment mentions "OVERRIDE". Defensive: no `homebrew.` references in
+# our version (a regression here would re-introduce the brew dependency
+# we explicitly broke away from).
+SUNSHINE_JUSTFILE=/usr/share/ublue-os/just/82-bazzite-sunshine.just
+if [ ! -f "$SUNSHINE_JUSTFILE" ]; then
+    echo "FAIL: $SUNSHINE_JUSTFILE missing"
+    exit 1
+fi
+grep -q 'bazzite-mx OVERRIDE of Bazzite' "$SUNSHINE_JUSTFILE" || {
+    echo "FAIL: $SUNSHINE_JUSTFILE is the upstream brew-flavored version (override not applied)"
+    exit 1
+}
+if grep -qE '^[[:space:]]*[^#].*homebrew\.sunshine' "$SUNSHINE_JUSTFILE"; then
+    echo "FAIL: $SUNSHINE_JUSTFILE contains a residual 'homebrew.sunshine' reference outside comments"
+    exit 1
+fi
+
+# Bazzite's "switch-to-brew" announcement nag (sunshine-brew.msg.json)
+# nags users to migrate Sunshine to brew whenever they have a sunshine
+# config. With our RPM integration the message is permanently wrong;
+# 65-sunshine.sh removes the file at build time.
+SUNSHINE_NAG=/usr/share/ublue-os/announcements/sunshine-brew.msg.json
+if [ -f "$SUNSHINE_NAG" ]; then
+    echo "FAIL: $SUNSHINE_NAG should have been removed by 65-sunshine.sh"
+    exit 1
+fi
+
 echo "MX smoke tests OK."
 echo "::endgroup::"
