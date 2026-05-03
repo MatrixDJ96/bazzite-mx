@@ -22,15 +22,25 @@ version-script vscode-extensions user 1 || exit 0
 
 # Se l'utente non ha ancora un settings.json di VSCode, ci copia il
 # nostro default da /etc/skel (Bazzite-DX-style fallback).
-if [ ! -e "$HOME/.config/Code/User/settings.json" ]; then
+# Guard anche sulla source path: senza, una rimozione futura del file
+# in /etc/skel farebbe abortire il hook (set -e) PRIMA delle install,
+# e libsetup.sh ha già scritto lo state → niente retry mai più.
+if [ ! -e "$HOME/.config/Code/User/settings.json" ] && \
+   [ -e /etc/skel/.config/Code/User/settings.json ]; then
     mkdir -p "$HOME/.config/Code/User"
     cp -f /etc/skel/.config/Code/User/settings.json "$HOME/.config/Code/User/settings.json"
 fi
 
 # 3 extension Microsoft container/remote workflow.
 # Lista convergente Aurora-DX + Bazzite-DX (verificato 2026-05-03).
-code --install-extension ms-vscode-remote.remote-containers
-code --install-extension ms-vscode-remote.remote-ssh
-code --install-extension ms-azuretools.vscode-containers
+#
+# `|| true`: il marketplace VSCode può essere transientemente unreachable
+# (rete metered, downtime Microsoft). Senza, set -e aborta il hook ma
+# libsetup.sh ha già scritto lo state file PRIMA del body — quindi una
+# install fallita diventerebbe permanente. Failure di rete è benigna
+# (eccezione legittima alla regola "no || true" di conventions.md).
+code --install-extension ms-vscode-remote.remote-containers || true
+code --install-extension ms-vscode-remote.remote-ssh || true
+code --install-extension ms-azuretools.vscode-containers || true
 
 echo "user vscode-extensions hook complete."

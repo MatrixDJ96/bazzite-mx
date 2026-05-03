@@ -352,8 +352,12 @@ VSCODE_EXTENSIONS=(
     ms-vscode-remote.remote-ssh
     ms-azuretools.vscode-containers
 )
+# Greppiamo solo l'ID extension, non `code --install-extension <id>`:
+# se domani il hook venisse refactorato a array-loop la sintassi
+# cambia ma l'ID resta — il test deve catturare la regression
+# semantica ("manca un'extension"), non quella sintattica.
 for ext in "${VSCODE_EXTENSIONS[@]}"; do
-    grep -qF "code --install-extension $ext" "$VSCODE_HOOK" || {
+    grep -qF "$ext" "$VSCODE_HOOK" || {
         echo "FAIL: $VSCODE_HOOK non installa $ext (regression?)"
         exit 1
     }
