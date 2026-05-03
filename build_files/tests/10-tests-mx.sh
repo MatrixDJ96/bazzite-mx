@@ -334,6 +334,17 @@ echo "$UJUST_LIST" | grep -q 'install-1password' || {
     exit 1
 }
 
+# --- Phase 8: desktop GUI apps (gparted, ptyxis) ---
+# 60-desktop-apps.sh installa gparted (rimpiazza kde-partitionmanager
+# rimosso da Bazzite) + ptyxis (bare install, no shim/sed integration).
+DESKTOP_APPS_RPMS=( gparted ptyxis )
+for p in "${DESKTOP_APPS_RPMS[@]}"; do
+    rpm -q "$p" >/dev/null || {
+        echo "FAIL: rpm $p missing (60-desktop-apps.sh broken?)"
+        exit 1
+    }
+done
+
 # --- Phase 8: vscode-extensions user-setup hook ---
 # Hook al primo login utente che pre-installa le 3 extension Microsoft
 # container/remote (lista convergente Aurora-DX + Bazzite-DX, verificato
