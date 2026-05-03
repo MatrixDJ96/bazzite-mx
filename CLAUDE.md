@@ -38,15 +38,15 @@ unconditional and applied always. Three GHCR images differ only in
 | **5 — Cockpit** | ❌ **SKIPPED** | Bazzite ships cockpit as a podman quadlet (`quay.io/cockpit/ws:latest`) — host-side RPMs would duplicate. See [`.claude/docs/architecture.md`](.claude/docs/architecture.md) § Cockpit pattern |
 | 6 — Dev/sysadmin CLI | ✅ Done | android-tools + bcc + **bcc-tools** + bpftrace + bpftop + sysprof + iotop-c + nicstat + numactl + trace-cmd + flatpak-builder + gh (upstream vendored repo). cosign already in Bazzite base. claude-code/kcli deferred. |
 | 7 — Bazzite-DX gems | ✅ Done | Curated subset: only **ccache** + **ublue-setup-services** (COPR). Migrated `bazzite-mx-groups` from custom service+versioning to a system-setup hook under `/usr/share/ublue-os/system-setup.hooks.d/` using `libsetup.sh`. Skipped: ramalama/restic/rclone/zsh/tiptop/git-subtree (per use-case review); usbmuxd already in base. |
-| 8 — Justfile + hooks | 🚧 Partial | **Done**: Firefox via Mozilla RPM (`5d17d01`) + flatpak exclusion / cleanup hooks (`550c4f1`, `b71b0e1`); `95-bazzite-mx.just` shipped with `[private] _pkg_layered` helper + `install-discord` opt-in via RPM Fusion non-free (`12709cf`); `install-1password` opt-in via the official 1Password rpm repo, reusing `_pkg_layered` (`ec1acf0`); justfile import fix (`7d5ab26`); refactor third-party keys to zero-maintenance — `rpmfusion-nonfree-release` package install + 1Password key build-time fetch (`8d9152f`). **Todo**: vscode-extensions user-setup hook. |
-| 9 — Final hardening | ⏳ Todo | image-info.json, README dev section, cosign verification |
+| 8 — Justfile + hooks | ✅ Done | Firefox via Mozilla RPM repo + flatpak exclusion/cleanup hooks; `95-bazzite-mx.just` with `[private] _pkg_layered` helper (hardened: outputs `yes`/`no` on stdout to avoid `just` "Recipe failed" noise); ujust opt-in `install-discord` (RPM Fusion non-free) + `install-1password` (vendored repo); zero-maintenance third-party keys (`rpmfusion-nonfree-release` pkg install + 1Password key build-time fetch); idempotent justfile import in master; vscode-extensions user-setup hook (Aurora+Bazzite-DX convergent 3 ext, hardened against libsetup.sh state-before-body race); gparted + ptyxis desktop apps. |
+| 9 — Final hardening | ✅ Done | Full Bazzite-DX-style branding (image-name + image-vendor + image-ref + VARIANT_ID + KCM Variant + Website all aligned); README "Building locally" section (pre-flight command + link to `.claude/docs/`); cosign verification documented (manual `cosign verify --key cosign.pub …` — ujust recipe deliberately deferred to avoid namespace clash with Bazzite's `verify-image`). |
 
 Long-form plan with checkboxes:
 [`docs/superpowers/plans/2026-05-01-aurora-dx-style-porting.md`](docs/superpowers/plans/2026-05-01-aurora-dx-style-porting.md).
 
 Cumulative wins over upstream `bazzite-dx`: see
 [`.claude/docs/wins-over-upstream.md`](.claude/docs/wins-over-upstream.md)
-(15 wins as of 2026-05-02).
+(17 wins as of 2026-05-03).
 
 ---
 

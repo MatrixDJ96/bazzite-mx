@@ -54,10 +54,19 @@ build-mx.sh
   └─ enumerate build_files/mx/[0-9]*-*.sh in version order
        (mapfile -t < <(find … | sort -V))
        │
-       ├─ 10-container-runtime.sh   (Phase 2)
-       ├─ 20-virtualization.sh      (Phase 3)
-       ├─ 30-ide.sh                 (Phase 4)
-       └─ 35-git-tools.sh           (Phase 4)
+       ├─ 00-image-info.sh             (Phase 1 — image identity, KCM branding)
+       ├─ 10-container-runtime.sh      (Phase 2 — Docker CE + podman extras)
+       ├─ 20-virtualization.sh         (Phase 3 — libvirt + qemu + virt-manager)
+       ├─ 30-ide.sh                    (Phase 4 — VSCode)
+       ├─ 35-git-tools.sh              (Phase 4 — GitKraken + git-credential-libsecret)
+       ├─ 40-dev-cli.sh                (Phase 6 — observability + dev CLI)
+       ├─ 45-firefox-rpm.sh            (Phase 8 — Firefox via Mozilla RPM)
+       ├─ 46-firefox-flatpak-exclude.sh (Phase 8 — exclude flatpak Firefox)
+       ├─ 47-rpmfusion-release.sh      (Phase 8 — RPM Fusion non-free release pkg)
+       ├─ 48-1password-key.sh          (Phase 8 — fetch 1Password GPG key)
+       ├─ 50-bazzite-extras.sh         (Phase 7 — ccache + ublue-setup-services)
+       ├─ 55-justfile-import.sh        (Phase 8 — register 95-bazzite-mx.just in master)
+       └─ 60-desktop-apps.sh           (Phase 8 — gparted + ptyxis)
 clean-stage.sh
   ├─ dnf5 config-manager setopt keepcache=0
   ├─ dnf5 versionlock clear
@@ -86,8 +95,12 @@ bazzite-mx/
 ├── system_files/                # Rsync'd into / by build.sh
 │   ├── etc/yum.repos.d/         # Vendored .repo files (enabled=0)
 │   ├── etc/skel/                # Per-user defaults (.config/Code/...)
-│   └── usr/lib/systemd/system/  # bazzite-mx-* units
-│       └── /usr/libexec/        # bazzite-mx-* helper scripts
+│   ├── usr/share/ublue-os/
+│   │   ├── just/                # 95-bazzite-mx.just (ujust install-* recipes)
+│   │   ├── system-setup.hooks.d/  # boot-time hooks (groups, flatpak cleanup)
+│   │   └── user-setup.hooks.d/    # first-login hooks (vscode-extensions, flatpak)
+│   ├── usr/lib/systemd/system/  # bazzite-mx-* units (legacy + new)
+│   └── usr/libexec/             # bazzite-mx-* helper scripts
 ├── .github/workflows/
 │   ├── build-stable.yml         # push → 3-job matrix on stable Bazzite
 │   ├── build-testing.yml        # push → 3-job matrix on testing Bazzite

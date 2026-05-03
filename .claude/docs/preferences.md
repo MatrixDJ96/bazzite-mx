@@ -54,7 +54,7 @@ statements. Update as new preferences emerge.
 - **Niente bypass di safety**: mai `|| true` per nascondere errori, mai
   `--no-verify`, mai `--force`, mai `rm -rf /var`. Se un step fallisce è
   perché c'è un bug — debug, non workaround.
-- **Better than upstream when possible**: bazzite-mx ha ora 8 vantaggi
+- **Better than upstream when possible**: bazzite-mx ha ora 17 vantaggi
   documentati su bazzite-dx (vedi
   [`wins-over-upstream.md`](wins-over-upstream.md)). Aspirazione: ogni
   Phase aggiunge ≥1 vantaggio reale.

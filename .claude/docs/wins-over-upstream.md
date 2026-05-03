@@ -2,7 +2,7 @@
 
 bazzite-mx is a personal fork that aims to be **strictly better** than
 `ublue-os/bazzite-dx` upstream by adopting Aurora-DX's build patterns and
-fixing concrete issues. Cumulative wins as of 2026-05-02: **15 wins**.
+fixing concrete issues. Cumulative wins as of 2026-05-03: **17 wins**.
 
 ## 1. Strict repo isolation via `validate-repos.sh`
 
@@ -288,9 +288,15 @@ AmyOS non shippano un justfile custom.
   `rpm-ostree status --json | jq` per check del booted deployment.
   Hardened con `// []` fallback (safe quando deployment ha 0
   pacchetti layered o non c'è un booted deployment, es. CI).
-  A differenza del pattern Bazzite (function inline ridefinita
-  per ricetta), il nostro è DRY: ogni nuova `install-*` recipe
-  fa `if just _pkg_layered <pkg>; then ...; fi`.
+  Output `yes`/`no` su stdout (exit sempre 0) invece di usare
+  l'exit code di `jq -e` come segnale booleano: `just` logga
+  spuriamente `error: Recipe '_pkg_layered' failed on line N
+  with exit code 1` per ogni sub-recipe non-zero anche dentro
+  un `if` del caller, polluendo l'output di ogni `install-*`
+  (commit `a1cbdab`). A differenza del pattern Bazzite (function
+  inline ridefinita per ricetta), il nostro è DRY: ogni nuova
+  `install-*` recipe fa `if [ "$(just _pkg_layered <pkg>)" = "yes" ];
+  then ...; fi`.
 - `[group("apps")] install-discord` (commit `12709cf`) — RPM Fusion
   non-free, `sed '0,/^enabled=0/{...}'` (solo main section, non
   debuginfo+source) e `sudo rpm-ostree install` esplicito.
@@ -311,6 +317,66 @@ update automatici via `ujust update` senza intervento manuale
 (la repo resta `enabled=1` post-install). Saremmo i primi del
 ublue ecosystem con queste ricette **e** con un helper `_pkg_layered`
 riutilizzabile (gli upstream duplicano la logica).
+
+## 16. VSCode extensions user-setup hook hardened against libsetup state-before-body race
+
+**Upstream**: Bazzite-DX shipped (`11-vscode-extensions.sh`) and
+Aurora-DX (`/usr/libexec/aurora-dx-user-vscode`) both pre-install the
+same 3 Microsoft container/remote extensions at first user login.
+Bazzite-DX uses `libsetup.sh::version-script` (state-first), Aurora-DX
+uses a hand-rolled state file written at the END of the script.
+**Bazzite-DX has a silent race**: `version-script` writes the state
+file BEFORE the hook body runs. Under `set -e`, a single failed
+`code --install-extension` (transient marketplace timeout) aborts the
+hook AFTER state has been committed → next login skips → silent
+permanent disable. Aurora-DX dodges the race by writing state at end.
+
+**Us**: `system_files/usr/share/ublue-os/user-setup.hooks.d/11-vscode-extensions.sh`
+adopts the Bazzite-DX libsetup.sh pattern (DRY, no custom state-file
+plumbing) but **closes the race in 3 ways** identified by formal code
+review (commit `46da707`):
+1. `\|\| true` after each `code --install-extension` — marketplace-down
+   is benign (no state corruption, no dependency failure); failed
+   extensions just don't install, the next 2 still try, hook exits
+   green and state is correctly "I tried." Documented exception to
+   the conventions.md "no `\|\| true`" rule, justified inline.
+2. Source-path guard on the `cp /etc/skel/.../settings.json` — a
+   future skel-file removal would otherwise abort the hook before
+   the install lines run, triggering the same trap.
+3. Smoke test asserts the 3 extension IDs by ID alone (not the
+   exact `code --install-extension X` syntax), so a future hook
+   refactor doesn't break the test for the wrong reason.
+
+**Why it matters**: a transient WiFi or Microsoft Marketplace outage
+on a user's first login would otherwise silently disable the feature
+forever. Strictly safer than Bazzite-DX. Provenance peer-reviewed
+against Aurora-DX (which has the safer end-write pattern but not via
+a shared `libsetup.sh` framework).
+
+## 17. `gparted` ships to fill the gap Bazzite leaves
+
+**Upstream**: Bazzite **removes** `kde-partitionmanager` from their
+KDE base (commit `378e524a`, `Containerfile:421` of their repo) as
+part of the Plasma 6.4 cleanup. They do NOT replace it with anything
+else. The bootc deployment image therefore ships **with no GUI
+partition tool** — `kde-partitionmanager` is gone, gparted is not
+included, only CLI tools like `parted`, `fdisk` survive. Bazzite's
+own ISO installer hook (`titanoboa_hook_postrootfs.sh:313`) installs
+gparted but only into the live ISO environment, not into the
+deployed system.
+
+**Us**: `build_files/mx/60-desktop-apps.sh` ships `gparted` (~9 MiB)
+as a universal partition manager for daily disk operations (USB
+stick prep, dual-boot resizes, external-drive formatting). Provenance
+also reinforced by AmyOS, which ships gparted in their DX-style
+list (`install-apps.sh:22`).
+
+**Why it matters**: a daily-driver workstation needs a GUI partition
+tool. Discovering only at the moment of need that `kde-partitionmanager`
+is gone (and the live-ISO gparted is not on the deployed system)
+would mean dropping to terminal `parted` or rebooting from USB. We
+restore the functionality Bazzite removed without justification. Pure
+1-line build addition; zero maintenance.
 
 ## How to extend this list
 

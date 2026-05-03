@@ -1,5 +1,17 @@
 # bazzite-mx: Aurora-DX Style Porting Implementation Plan
 
+> **STATUS — 2026-05-03: HISTORICAL ARCHIVE.** All 9 phases of this plan
+> are complete (Phase 5 deliberately skipped — see CLAUDE.md and
+> `.claude/docs/architecture.md` § Cockpit pattern for rationale).
+> Many of the file paths and naming conventions below are obsolete
+> after the post-Phase-8 refactor (`c8a38ab`) that dropped residual
+> `-dx` suffixes (`build_files/dx/` → `build_files/mx/`,
+> `build-dx.sh` → `build-mx.sh`, `bazzite-mx-dx-*` → `bazzite-mx-*`).
+> This document is preserved for historical reference and as evidence
+> of the porting reasoning. **Do not use it as workflow guidance.**
+> For the current state of the project read CLAUDE.md +
+> `.claude/docs/`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 > **ARCHITECTURE UPDATE — 2026-05-01 v2 (post Phase 1 push):**

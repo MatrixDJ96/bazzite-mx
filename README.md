@@ -1,42 +1,109 @@
 # bazzite-mx
 
-Personal [Bazzite](https://github.com/ublue-os/bazzite) customization by **matrixdj96**, built on top of the official Universal Blue Bazzite images.
+> Personal **Bazzite-based bootc atomic distribution**. KDE Plasma + container-first dev/sysadmin workstation, with curated DX tooling, hardened repo isolation, and zero-maintenance third-party integrations.
+
+## What is bazzite-mx?
+
+bazzite-mx is a personal fork of [Universal Blue Bazzite](https://github.com/ublue-os/bazzite) that layers a **developer-experience (DX) toolkit** on top of Bazzite Kinoite, modeled on [Aurora-DX](https://github.com/get-aurora-dev/aurora)'s build patterns.
+
+It is a **single-maintainer project**, not a community distribution. It exists because:
+
+- Maintaining hand-rolled `rpm-ostree` package layers manually is fragile (see Bazzite's own [docs warning](https://docs.bazzite.gg/Installing_and_Managing_Software/rpm-ostree/#major-caveats-using-rpm-ostree)). An immutable image refresh hourly is cleaner than `rpm-ostree install` after every reboot.
+- The official `ublue-os/bazzite-dx` images cover **gaming-on-the-Steam-Deck DX**, not full container/VM workstation DX, and ship with several documented compromises (silent state-write race in their VSCode hook, stale `vscode.repo gpgcheck=0` workaround, non-idempotent justfile imports — see [`wins-over-upstream.md`](.claude/docs/wins-over-upstream.md) for the full list).
+- Aurora-DX is GNOME-focused; KDE users have no equivalent first-party DX image with Bazzite's gaming/desktop polish.
+
+bazzite-mx fills that gap: a **single, opinionated, immutable image** for a Bazzite KDE user who happens to develop, administer servers, and run VMs.
+
+## Who is bazzite-mx for?
+
+The target persona is **the maintainer (MatrixDJ96)**, and incidentally any user with a similar profile:
+
+- Daily driver on Bazzite Kinoite (KDE Plasma)
+- Workflow heavy with Docker / Podman / Distrobox containers
+- libvirt / QEMU for occasional VMs (Windows compat, lab work)
+- Code in VSCode + GitKraken
+- Sysadmin / dev sensitive to image reproducibility, supply-chain auditability, and the "don't fight the atomic distro" philosophy
+
+Internal docs and commit messages mix English and Italian. The README, code, and external-facing docs stay in English.
+
+If you don't fit this profile, bazzite-mx might still be useful — fork freely. But it is not designed to scale into a community distribution.
+
+## Design principles
+
+1. **Single-flavour image.** No `IMAGE_TIER` axis. Every build domain runs unconditionally on every variant. The three variants differ **only** in `BASE_IMAGE` (NVIDIA driver style).
+2. **Bazzite-derived, not Bazzite-divergent.** Never override Bazzite choices we agree with (Konsole stays default terminal, ujust framework reused, no theme overrides). Only add or replace where there's clear rationale, documented in [`wins-over-upstream.md`](.claude/docs/wins-over-upstream.md).
+3. **Strict repo isolation.** Every third-party `.repo` ships `enabled=0`, hard-validated at build time by `validate-repos.sh`. A leftover `enabled=1` would silently update from a third-party host on every `bootc upgrade` — breaking the reproducibility promise.
+4. **Zero-maintenance third-party keys.** GPG keys for RPM Fusion (via `rpmfusion-nonfree-release` package) and 1Password (via `curl -fsSL` at build time) are not statically vendored. Static keys rot when upstream rotates them.
+5. **Strictly better than Bazzite-DX upstream.** 17 documented wins as of 2026-05-03 (see [`wins-over-upstream.md`](.claude/docs/wins-over-upstream.md)). The fork exists because it can be measurably better, not for parity-of-vanity.
+6. **No opinionated stylistics.** No fonts, themes, formatters, or shell preferences imposed at distro level. The user picks. (Bazzite-DX ships JetBrains Mono + Cascadia Code; AmyOS ships zsh + Ghostty + nerd fonts; we ship none of those.)
 
 ## Variants
 
-| Image | Base |
-|-------|------|
-| `ghcr.io/matrixdj96/bazzite-mx` | `ghcr.io/ublue-os/bazzite` |
-| `ghcr.io/matrixdj96/bazzite-mx-nvidia` | `ghcr.io/ublue-os/bazzite-nvidia` |
-| `ghcr.io/matrixdj96/bazzite-mx-nvidia-open` | `ghcr.io/ublue-os/bazzite-nvidia-open` |
+| Image | Base | Use case |
+|-------|------|----------|
+| `ghcr.io/matrixdj96/bazzite-mx` | `ghcr.io/ublue-os/bazzite` | non-NVIDIA hardware |
+| `ghcr.io/matrixdj96/bazzite-mx-nvidia` | `ghcr.io/ublue-os/bazzite-nvidia` | NVIDIA proprietary driver |
+| `ghcr.io/matrixdj96/bazzite-mx-nvidia-open` | `ghcr.io/ublue-os/bazzite-nvidia-open` | NVIDIA open kernel modules |
 
 Each variant is published with two stream tags: `:stable` and `:testing`.
+
+## What's added on top of Bazzite
+
+| Domain | What | Why |
+|---|---|---|
+| **Container runtime** | Docker CE + extras (compose, machine, tui, bootc) + sockets | full Docker workflow alongside Bazzite's existing Podman; isolated upstream Docker repo |
+| **Virtualization** | libvirt, qemu, virt-manager, swtpm, waypipe + first-boot groups hook | Windows 11 VM compat (TPM 2.0 via swtpm) + remote-display Wayland forwarding + auto-add user to `libvirt`/`kvm` groups |
+| **IDE / Dev** | VSCode (`update.mode=none` + 3 Microsoft container/remote extensions auto-installed at first user login) + GitKraken + git-credential-libsecret | atomic-correct settings (auto-update fights `/usr` read-only); same 3 extensions Aurora-DX and Bazzite-DX both converged on |
+| **Dev / Sysadmin CLI** | `bcc-tools` + `bpftrace` + `bpftop` + `sysprof` + `iotop-c` + `nicstat` + `numactl` + `trace-cmd` + `flatpak-builder` + `gh` (upstream repo) + `cosign` (already in Bazzite base) | observability + container build + GitHub workflow |
+| **Web / browsers** | Firefox via Mozilla RPM repo (replaces Flatpak Firefox) + Bazzite's flatpak default-install adjusted to skip Firefox | RPM Firefox supports system fonts, system policies, native messaging; Flatpak doesn't |
+| **Desktop apps** | gparted (restores Bazzite-removed `kde-partitionmanager` functionality) + ptyxis (2nd container-aware terminal) | GUI partition tool back; Ptyxis as opt-in alongside Konsole, no replacement of the default |
+| **ujust opt-in recipes** | `ujust install-discord` (RPM Fusion non-free) + `ujust install-1password` (vendored official repo) + `_pkg_layered` reusable helper | rpm-ostree layered installs with idempotency check; opt-in keeps metadata footprint small for users who don't want them |
+| **System integration** | first-boot system-setup hooks (groups, flatpak Firefox cleanup) + first-login user-setup hooks (vscode-extensions, flatpak Firefox cleanup) — all versioned via `libsetup.sh` | bridges the `/etc/skel` doesn't-reach-existing-users gotcha; same hooks framework as Bazzite-DX, hardened against silent-disable race |
+| **Branding** | image-info.json (image-name, image-vendor, image-ref) + os-release VARIANT_ID + KCM About page (Variant + Website) | clean fork identity; KDE System Settings → About correctly reflects bazzite-mx and links back to the GitHub repo |
+
+The build is fully reproducible from the upstream Bazzite tag pin: see [Upstream watcher](#upstream-watcher) below.
+
+## What's intentionally NOT included
+
+| Excluded | Why |
+|---|---|
+| **Cockpit stack (Phase 5)** | Bazzite ships Cockpit as a podman quadlet (`quay.io/cockpit/ws:latest` with `Label=io.containers.autoupdate=registry`). Layering host-side `cockpit-*` RPMs would duplicate; `ujust cockpit enable` works as designed. |
+| **Custom fonts / themes / formatters** | Stylistic choices belong to the user. Upstream Bazzite-DX ships JetBrains Mono via Brewfile + Cascadia Code as VSCode default; we don't. |
+| **Zsh / Ghostty / Homebrew brewfile imports** | Opinionated developer-shell preferences. AmyOS imposes them; we keep bash + Konsole + Ptyxis as user choices. |
+| **VFIO / Looking Glass / GPU passthrough** | Niche gaming/research workflow. Bazzite-DX has it; we treat it as out of scope for a daily-driver workstation. |
+| **`ujust verify-image-signature` recipe** | Bazzite already ships `ujust verify-image` (different semantics: rebases to upstream-signed). Adding our own would clutter the recipe namespace. The manual `cosign verify --key cosign.pub …` documented below is sufficient. |
+| **ROCm AMD GPU compute (rocm-hip / rocm-opencl / rocm-smi)** | Aurora-DX has it conditionally. We don't ship per-GPU-vendor variants — would require splitting the matrix or an `IMAGE_TIER`-style axis. Deferred until concrete need. |
 
 ## Repository layout
 
 ```
-build_files/
-  shared/
-    build.sh           # top-level orchestrator (called from Containerfile)
-    build-mx.sh        # runs sysctl + iptable_nat module + numbered mx/*.sh
-    copr-helpers.sh    # copr_install_isolated() (port from Aurora)
-    clean-stage.sh     # selective /var cleanup (no rm -rf /var)
-    validate-repos.sh  # fail build if any third-party repo enabled=1
-  mx/                  # numbered scripts per build domain (image-info, container, virt, IDE, …)
-  tests/
-    10-tests-mx.sh     # smoke tests (rpm-q + systemctl is-enabled, bloccante)
-system_files/          # copied 1:1 to / by build.sh
-Containerfile          # parametrized via build args (BASE_IMAGE/BASE_TAG/IMAGE_NAME/IMAGE_VENDOR)
-.github/workflows/
-  reusable-build.yml   # matrix build of the 3 variants for one stream
-  build-stable.yml     # push:main + PR + dispatch -> reusable(stable)
-  build-testing.yml    # push:main + PR + dispatch -> reusable(testing)
-  watch-upstream.yml   # cron hourly: detect new upstream releases, rebuild only the changed stream
-cosign.pub             # public key used to verify signed images
-docs/superpowers/      # implementation plan + validation notes
+bazzite-mx/
+├── Containerfile                # 3 RUN steps: build.sh → 10-tests-mx.sh → bootc lint
+├── build_files/
+│   ├── shared/                  # orchestrator (build.sh, build-mx.sh, copr-helpers.sh,
+│   │                              clean-stage.sh, validate-repos.sh)
+│   ├── mx/                      # numbered domain scripts (00-, 10-, 20-, …, 60-)
+│   └── tests/
+│       └── 10-tests-mx.sh       # smoke tests (blocking, rpm-q + systemctl is-enabled + content asserts)
+├── system_files/                # rsync'd into / by build.sh
+│   ├── etc/yum.repos.d/         # vendored .repo files (enabled=0, hard-validated)
+│   ├── etc/skel/                # per-user defaults (.config/Code/...)
+│   └── usr/share/ublue-os/
+│       ├── just/                # 95-bazzite-mx.just (ujust install-* recipes)
+│       ├── system-setup.hooks.d/  # boot-time hooks
+│       └── user-setup.hooks.d/    # first-login hooks
+├── .github/workflows/
+│   ├── reusable-build.yml       # 3-job matrix builder (called by both stable + testing)
+│   ├── build-stable.yml         # push:main + PR + dispatch → reusable(stable)
+│   ├── build-testing.yml        # push:main + PR + dispatch → reusable(testing)
+│   └── watch-upstream-releases.yml  # cron hourly: detect new upstream Bazzite tags
+├── cosign.pub                   # public key for verifying signed images (.key gitignored)
+├── CLAUDE.md                    # auto-loaded project guide for Claude Code
+└── .claude/docs/                # supplementary docs (architecture, conventions,
+                                   gotchas, workflow, preferences, wins-over-upstream)
 ```
 
-**Architecture:** `bazzite-mx` is a single-flavour distribution. The numbered `build_files/mx/*.sh` scripts (Aurora-DX-style: image-info branding, container runtime, virtualization, dev tools, ujust install-* recipes) all run unconditionally. The three GHCR variants differ only in `BASE_IMAGE`.
+Full architecture deep-dive: [`.claude/docs/architecture.md`](.claude/docs/architecture.md).
 
 ## Building locally
 
@@ -59,17 +126,19 @@ Smoke tests (`build_files/tests/10-tests-mx.sh`) run as a blocking step inside t
 
 ## Image signing
 
-All published images are signed with `cosign` using the keypair stored in this repo (`cosign.pub`) and in the `SIGNING_SECRET` repository secret.
+All published images are signed with `cosign` using the keypair stored in this repo (`cosign.pub`) and in the `SIGNING_SECRET` repository secret. Each successful CI build job signs the pushed image **by digest**.
 
-To verify an image:
+To verify a deployed image (run from a clone of this repo, where `cosign.pub` lives):
 
 ```bash
 cosign verify --key cosign.pub ghcr.io/matrixdj96/bazzite-mx:stable
 ```
 
+The local `cosign.key` is gitignored — only present on the maintainer's machine and in GitHub repository secrets.
+
 ## Upstream watcher
 
-`watch-upstream.yml` runs every hour and:
+`.github/workflows/watch-upstream-releases.yml` runs every hour and:
 
 1. Fetches the latest GitHub Releases from `ublue-os/bazzite`:
    - the latest `Latest` release (stable)
@@ -77,7 +146,7 @@ cosign verify --key cosign.pub ghcr.io/matrixdj96/bazzite-mx:stable
 2. Reads the `org.opencontainers.image.base.name` label from the currently published `bazzite-mx:{stable,testing}` images on GHCR.
 3. For each stream where the upstream tag differs from the published label, dispatches `reusable-build.yml` pinned to the immutable upstream tag.
 
-This makes builds reproducible (always pinned to a specific upstream release) and avoids unnecessary rebuilds.
+This keeps the published image within ≤1 hour of the upstream Bazzite release while keeping every build pinned to a specific upstream tag (reproducible, auditable).
 
 ## License
 
