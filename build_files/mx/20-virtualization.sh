@@ -71,7 +71,14 @@ copr_install_isolated "ublue-os/packages" "ublue-os-libvirt-workarounds"
 # Phase 7 enables.
 systemctl enable ublue-os-libvirt-workarounds.service
 
-# Note: libvirtd / virtqemud sockets are pre-enabled by the libvirt
-# package's systemd-preset, so no explicit enable here.
+# `libvirtd.service` is shipped DISABLED by libvirt's preset on Bazzite
+# (verified 2026-05-03 against ghcr.io/ublue-os/bazzite:stable: the
+# unit is `disabled` even though `virtqemud.socket` is pre-enabled).
+# Upstream's `ujust setup-virtualization virt-on` recipe would enable
+# it at runtime, but that recipe is gated on `! rpm -q virt-manager`,
+# which is FALSE on our image (we ship virt-manager as RPM in section
+# 1) — so the user gets a silently broken stack. Enable it here at
+# build time, matching AmyOS's pattern (`install-apps.sh:104`).
+systemctl enable libvirtd.service
 
 echo "::endgroup::"

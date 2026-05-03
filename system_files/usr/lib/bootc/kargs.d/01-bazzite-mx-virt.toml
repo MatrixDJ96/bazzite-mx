@@ -1,0 +1,26 @@
+# Kernel args for KVM nested-MSR tolerance — needed by Windows 11
+# guests under libvirt + QEMU on consumer Intel/AMD CPUs that expose
+# unimplemented MSRs Windows attempts to read.
+#
+# Without these:
+#   - Windows 11 guest panics ("CRITICAL_PROCESS_DIED" or sudden reboot
+#     loops) because KVM's default behaviour is to inject #GP on
+#     unsupported MSR accesses, which Windows treats as fatal.
+#   - Linux dmesg gets flooded with "ignored rdmsr" warnings.
+#
+# `kvm.ignore_msrs=1`         → KVM returns 0 instead of #GP for
+#                                unsupported MSRs (Windows-friendly).
+# `kvm.report_ignored_msrs=0` → Suppress dmesg spam from `ignore_msrs`.
+#
+# Source pattern: Bazzite's `setup-virtualization` ujust recipe applies
+# the same kargs at runtime. We bake them in at build time because
+# our recipe (overridden in 84-bazzite-virt.just) starts from a state
+# where virt-manager is already RPM-installed, and we want the stack
+# to "just work" on first boot without requiring any ujust invocation.
+#
+# Format: bootc reads /usr/lib/bootc/kargs.d/*.toml at deploy time and
+# applies the listed kargs to the booted deployment.
+kargs = [
+    "kvm.ignore_msrs=1",
+    "kvm.report_ignored_msrs=0",
+]

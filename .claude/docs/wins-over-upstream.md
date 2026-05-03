@@ -2,7 +2,7 @@
 
 bazzite-mx is a personal fork that aims to be **strictly better** than
 `ublue-os/bazzite-dx` upstream by adopting Aurora-DX's build patterns and
-fixing concrete issues. Cumulative wins as of 2026-05-03: **17 wins**.
+fixing concrete issues. Cumulative wins as of 2026-05-03: **18 wins**.
 
 ## 1. Strict repo isolation via `validate-repos.sh`
 
@@ -380,6 +380,55 @@ is gone (and the live-ISO gparted is not on the deployed system)
 would mean dropping to terminal `parted` or rebooting from USB. We
 restore the functionality Bazzite removed without justification. Pure
 1-line build addition; zero maintenance.
+
+## 18. Working virt stack out-of-the-box (vs. silently broken upstream recipe)
+
+**Upstream**: Bazzite (and Bazzite-DX) ship `setup-virtualization` as a
+ujust recipe gated on `if ! rpm -q virt-manager | grep -P "^virt-manager-"`
+(`84-bazzite-virt.just:51`). On a stock Bazzite image where virt-manager
+is NOT pre-installed, the recipe runs the full `flatpak install …virt-
+manager` + `rpm-ostree kargs` + swtpm dir + libvirtd-enable path. Fine.
+But on **Bazzite-DX**, where the user is expected to layer virt-manager
+themselves, the gate is also FALSE (no RPM), so the flatpak path runs —
+duplicating the eventual RPM install if the user later layers it. Neither
+upstream image enables `libvirtd.service` at build, so a fresh boot has
+the full virt stack but disabled — clicking virt-manager fails until the
+user runs the recipe.
+
+**Us**: Three-layer fix delivered together (commit pending 2026-05-03):
+1. **Build-time enable** (`build_files/mx/20-virtualization.sh`):
+   `systemctl enable libvirtd.service` runs at image build, so the
+   service is `enabled` on first boot. Pattern lifted from AmyOS
+   (`install-apps.sh:104`), the only one of the three reference distros
+   that gets this right out-of-the-box.
+2. **Build-time kargs** (`system_files/usr/lib/bootc/kargs.d/01-bazzite-mx-virt.toml`):
+   ships `kvm.ignore_msrs=1` + `kvm.report_ignored_msrs=0` so Windows
+   11 guests don't panic on unimplemented-MSR reads. Bootc applies
+   these at deploy time. The user no longer has to invoke a recipe to
+   make Windows 11 boot in QEMU.
+3. **Recipe override** (`system_files/usr/share/ublue-os/just/84-bazzite-virt.just`):
+   replaces Bazzite's `setup-virtualization` with our own version. We
+   drop the `! rpm -q virt-manager` gate (always-broken on bazzite-mx
+   since we ship the RPM), drop the `flatpak install …virt-manager`
+   line (would duplicate the RPM), drop the redundant kargs/libvirtd
+   bits (already done at build time). Kept verbatim: VFIO / kvmfr /
+   USB-hot-plug / libvirt-group blocks, which handle hardware-passthrough
+   scenarios orthogonal to the basic stack.
+
+**Defense-in-depth**: `build_files/mx/48-virt-manager-flatpak-exclude.sh`
+adds `deny org.virt_manager.virt-manager/*` to `/usr/share/ublue-os/
+flatpak-blocklist` so Discover/Bazaar hide the flatpak from search
+results. Two cleanup hooks (`system-setup.hooks.d/16-cleanup-virt-
+manager-flatpak.sh` + same under `user-setup.hooks.d/`) `flatpak
+uninstall` any pre-existing namespace via `libsetup.sh version-script`.
+
+**Why it matters**: a virt stack that's installed but disabled is a
+surprise-failure on first VM creation. The 3 reference distros each
+get part of this right — AmyOS enables libvirtd; Aurora-DX adds the
+flatpak; Bazzite has the most complete recipe; **none** ship a
+working-on-first-boot stack while also providing a working recipe for
+VFIO advanced users. Our single image gives both. Net effect: opening
+virt-manager.app from the launcher post-install just works.
 
 ## How to extend this list
 

@@ -106,6 +106,7 @@ done
 # exists as a separate unit.
 VIRT_UNITS=(
     ublue-os-libvirt-workarounds.service
+    libvirtd.service
 )
 for u in "${VIRT_UNITS[@]}"; do
     state=$(systemctl is-enabled "$u" 2>/dev/null || echo missing)
@@ -114,6 +115,77 @@ for u in "${VIRT_UNITS[@]}"; do
         exit 1
     fi
 done
+
+# --- Phase 3: KVM kargs (kvm.ignore_msrs / kvm.report_ignored_msrs) ---
+# Shipped via /usr/lib/bootc/kargs.d/01-bazzite-mx-virt.toml so they
+# land on first boot without `ujust setup-virtualization`. Without
+# these, Windows 11 guests panic on unimplemented MSR reads. We only
+# verify the file content here — actual karg application is bootc's
+# job and happens at deploy time on the user's host.
+VIRT_KARGS_FILE=/usr/lib/bootc/kargs.d/01-bazzite-mx-virt.toml
+if [ ! -f "$VIRT_KARGS_FILE" ]; then
+    echo "FAIL: $VIRT_KARGS_FILE missing"
+    exit 1
+fi
+for k in 'kvm.ignore_msrs=1' 'kvm.report_ignored_msrs=0'; do
+    grep -qF "$k" "$VIRT_KARGS_FILE" || {
+        echo "FAIL: $VIRT_KARGS_FILE missing karg '$k'"
+        exit 1
+    }
+done
+
+# --- Phase 3: setup-virtualization recipe override ---
+# We ship our own /usr/share/ublue-os/just/84-bazzite-virt.just that
+# replaces Bazzite's. The upstream recipe gates everything on `! rpm
+# -q virt-manager`, which is FALSE on bazzite-mx (we ship RPM virt-
+# manager) — so the recipe becomes a silent no-op. Our override drops
+# the gate AND the flatpak install path. We grep for our distinctive
+# header comment to assert the override is in place.
+VIRT_JUSTFILE=/usr/share/ublue-os/just/84-bazzite-virt.just
+if [ ! -f "$VIRT_JUSTFILE" ]; then
+    echo "FAIL: $VIRT_JUSTFILE missing"
+    exit 1
+fi
+grep -q 'bazzite-mx OVERRIDE of Bazzite' "$VIRT_JUSTFILE" || {
+    echo "FAIL: $VIRT_JUSTFILE is the upstream version (override not applied)"
+    exit 1
+}
+# Defensive: the recipe must NOT contain the flatpak install line as
+# executable code (a regression here would make the recipe re-introduce
+# the conflict with our RPM virt-manager). We anchor on whitespace +
+# `flatpak install` so just-recipe header documentation comments
+# (`# … flatpak install …virt-manager` describing what we removed)
+# don't trigger a false positive.
+if grep -qE '^[[:space:]]*flatpak install.*org\.virt_manager\.virt-manager' "$VIRT_JUSTFILE"; then
+    echo "FAIL: $VIRT_JUSTFILE contains a residual 'flatpak install' line for virt-manager"
+    exit 1
+fi
+
+# --- Phase 3: virt-manager flatpak blocklist (48-virt-manager-flatpak-exclude.sh) ---
+# Defense-in-depth: hide the flatpak from Discover/Bazaar so users
+# don't end up with a duplicate (and partially-broken) install
+# alongside the RPM. virt-manager is NOT in Bazzite's default-install
+# list (verified 2026-05-03), so we only patch the blocklist.
+FLATPAK_BLOCKLIST=/usr/share/ublue-os/flatpak-blocklist
+grep -q '^deny org\.virt_manager\.virt-manager/\*$' "$FLATPAK_BLOCKLIST" || {
+    echo "FAIL: $FLATPAK_BLOCKLIST missing virt-manager deny line"
+    exit 1
+}
+
+# --- Phase 3: virt-manager flatpak cleanup hooks ---
+# Two hooks (system + user) under setup.hooks.d/16-* run once per
+# bumped version (libsetup.sh `version-script`) and uninstall any
+# pre-existing flatpak namespace of org.virt_manager.virt-manager.
+VIRT_HOOK_SYSTEM=/usr/share/ublue-os/system-setup.hooks.d/16-cleanup-virt-manager-flatpak.sh
+VIRT_HOOK_USER=/usr/share/ublue-os/user-setup.hooks.d/16-cleanup-virt-manager-flatpak.sh
+if [ ! -x "$VIRT_HOOK_SYSTEM" ]; then
+    echo "FAIL: $VIRT_HOOK_SYSTEM missing or not executable"
+    exit 1
+fi
+if [ ! -x "$VIRT_HOOK_USER" ]; then
+    echo "FAIL: $VIRT_HOOK_USER missing or not executable"
+    exit 1
+fi
 
 # --- Phase 4: IDE packages ---
 IDE_RPMS=( code )
