@@ -1,6 +1,6 @@
 # vim: set ft=make :
 #
-# 95-bazzite-mx.just — ricette ujust custom di bazzite-mx.
+# 95-bazzite-mx.just — bazzite-mx custom ujust recipes.
 #
 # Convention:
 #  - Private helper recipes prefixed with `_`.
@@ -16,14 +16,14 @@
 # deployment. Outputs `yes`/`no` on stdout; always exits 0.
 # Usage: `if [ "$(just _pkg_layered <pkg>)" = "yes" ]; then ... ; fi`
 #
-# Stdout-as-boolean invece dell'exit code: just logga sempre
-# `error: Recipe ... failed on line N with exit code 1` quando una
-# sub-recipe esce ≠ 0, anche dentro un `if` del caller. Lo stdout
-# tiene puliti gli output di install-* (UX bug scoperto 2026-05-03).
+# Stdout-as-boolean instead of exit code: `just` always logs
+# `error: Recipe ... failed on line N with exit code 1` when a
+# sub-recipe exits ≠ 0, even when wrapped in the caller's `if`. The
+# stdout channel keeps install-* output clean (UX bug found 2026-05-03).
 #
-# `// []` rende la query safe quando `.packages` è null (deployment senza
-# layered packages) o senza booted deployment (es. CI container senza
-# ostree) — entrambi risolvono a "no" → install procede.
+# `// []` keeps the jq query safe when `.packages` is null (deployment
+# with no layered packages) or no booted deployment (e.g. CI container
+# without ostree) — both resolve to "no" → install proceeds.
 [private]
 _pkg_layered pkg:
     @if rpm-ostree status --json | jq -e --arg p "{{ pkg }}" '.deployments[] | select(.booted == true) | (.packages // []) | index($p)' > /dev/null; then echo yes; else echo no; fi
@@ -50,9 +50,9 @@ install-discord:
         echo "RPM Fusion non-free updates is already enabled, skipping enable step."
     else
         echo "Enabling RPM Fusion non-free updates main section."
-        # `0,/^enabled=0/` limita la modifica alla PRIMA occorrenza nel
-        # file: la main section. Le sezioni `-debuginfo` e `-source`
-        # restano enabled=0 (non vogliamo abilitarle automaticamente).
+        # `0,/^enabled=0/` limits the edit to the FIRST match in the
+        # file: the main section. The `-debuginfo` and `-source`
+        # sections stay enabled=0 (we don't want them auto-enabled).
         sudo sed -i '0,/^enabled=0/{s/^enabled=0/enabled=1/}' "$repo_path"
     fi
 
@@ -82,7 +82,7 @@ install-1password:
         echo "1Password repository is already enabled, skipping enable step."
     else
         echo "Enabling 1Password repository."
-        # Single-section file — sed semplice, niente range pattern necessario.
+        # Single-section file — simple sed, no range pattern needed.
         sudo sed -i 's/^enabled=0/enabled=1/' "$repo_path"
     fi
 

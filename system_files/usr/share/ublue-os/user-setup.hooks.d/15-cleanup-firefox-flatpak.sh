@@ -1,11 +1,11 @@
 #!/usr/bin/bash
-# user-setup hook: rimuove la flatpak Firefox installata per-utente
-# (--user) da chi l'ha aggiunta manualmente con `flatpak install --user`.
+# user-setup hook: remove the per-user Firefox flatpak (--user) for
+# users who added it manually with `flatpak install --user`.
 #
-# Complementare al hook system-setup omonimo: due namespace flatpak
-# distinti (system vs user), entrambi vanno coperti.
+# Complementary to the same-named system-setup hook: two distinct
+# flatpak namespaces (system vs user), both need to be covered.
 #
-# Versioned: bump del numero qui sotto rigira l'hook al login successivo.
+# Versioned: bumping the number below re-runs the hook on next login.
 
 set -euo pipefail
 

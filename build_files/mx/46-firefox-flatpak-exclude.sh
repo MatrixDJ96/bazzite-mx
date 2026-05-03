@@ -1,20 +1,20 @@
 #!/usr/bin/bash
-# MX block 46: esclude la flatpak Firefox dal default-install Bazzite e
-# la nasconde da Discover/Bazaar.
+# MX block 46: exclude the Firefox flatpak from Bazzite's default-install
+# and hide it from Discover/Bazaar.
 #
-# Companion di 45-firefox-rpm.sh: dato che Firefox ora arriva dal repo
-# Mozilla come rpm, vogliamo evitare che bazzite-flatpak-manager
-# installi anche la versione flatpak al primo boot, e che Discover/
-# Bazaar suggeriscano la flatpak come "alternativa" all'utente.
+# Companion to 45-firefox-rpm.sh: now that Firefox comes from the
+# Mozilla repo as rpm, we need to prevent bazzite-flatpak-manager from
+# also installing the flatpak version on first boot, and we want
+# Discover/Bazaar to stop suggesting the flatpak as an "alternative".
 #
-# Strategia drift-tolerant: invece di overrideare i file Bazzite con
-# nostre versioni statiche (che sarebbero out-of-date al primo upgrade
-# upstream), patchiamo i file in-place a build-time:
-#  - sed: rimuove la riga org.mozilla.firefox dalla install list
-#  - grep || echo: aggiunge deny org.mozilla.firefox/* al blocklist
-#    se non già presente (idempotente)
+# Drift-tolerant strategy: instead of overriding the Bazzite files with
+# our own static versions (which would be out-of-date at the first
+# upstream upgrade), we patch the files in place at build time:
+#  - sed: removes the org.mozilla.firefox line from the install list
+#  - grep || echo: appends `deny org.mozilla.firefox/*` to the
+#    blocklist only if not already present (idempotent)
 #
-# I file Bazzite di riferimento:
+# Reference Bazzite files:
 #  /usr/share/ublue-os/bazzite/flatpak/install   (default-install list)
 #  /usr/share/ublue-os/flatpak-blocklist         (Flathub remote filter)
 
@@ -25,21 +25,21 @@ set -euxo pipefail
 INSTALL_LIST=/usr/share/ublue-os/bazzite/flatpak/install
 BLOCKLIST=/usr/share/ublue-os/flatpak-blocklist
 
-### Section 1: rimuovi org.mozilla.firefox dalla default-install list ###
-# Sanity check sul file: deve esistere (se Bazzite cambia path in
-# futuro fail-fast invece di no-op silenzioso).
+### Section 1: remove org.mozilla.firefox from the default-install list ###
+# File sanity check: must exist (fail-fast if Bazzite renames the path
+# in the future instead of silent no-op).
 if [ ! -f "$INSTALL_LIST" ]; then
-    echo "FAIL: $INSTALL_LIST non trovato (Bazzite ha cambiato struttura?)"
+    echo "FAIL: $INSTALL_LIST not found (did Bazzite change layout?)"
     exit 1
 fi
 sed -i '/^org\.mozilla\.firefox$/d' "$INSTALL_LIST"
 
-### Section 2: estendi flatpak-blocklist con Firefox ###
-# Idempotente: append solo se la riga non c'è già. Estendiamo invece
-# che sostituire per non perdere le entries upstream (Steam, Lutris,
-# eventuali aggiunte future).
+### Section 2: extend flatpak-blocklist with Firefox ###
+# Idempotent: append only if the line isn't already there. We extend
+# instead of replacing so we don't drop upstream entries (Steam,
+# Lutris, future additions).
 if [ ! -f "$BLOCKLIST" ]; then
-    echo "FAIL: $BLOCKLIST non trovato (Bazzite ha cambiato struttura?)"
+    echo "FAIL: $BLOCKLIST not found (did Bazzite change layout?)"
     exit 1
 fi
 grep -q '^deny org\.mozilla\.firefox/\*$' "$BLOCKLIST" \

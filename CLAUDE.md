@@ -89,8 +89,12 @@ Cumulative wins over upstream `bazzite-dx`: see
    <noreply@anthropic.com>` trailer. SSH for `origin` remote. Never
    `--force`, `--no-verify`, `--amend` without explicit ask.
 
-6. **Italian primary language**, with diacritics (`però`, `città`). Code
-   identifiers stay in English.
+6. **Language policy**: chat with the user is in Italian (with diacritics:
+   `però`, `città`); all committed content (code, comments, doc files,
+   commit messages) is in English for the global audience. Code
+   identifiers always English. Full policy in
+   [`.claude/docs/preferences.md`](.claude/docs/preferences.md) §Language
+   policy.
 
 7. **Provenance citations always**: when proposing a package or pattern,
    cite the source ("from Aurora-DX line X", "lifted from bazzite-dx",

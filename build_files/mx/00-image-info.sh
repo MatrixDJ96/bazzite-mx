@@ -1,18 +1,18 @@
 #!/usr/bin/bash
 # MX block 00: image identity + KDE about-page branding.
 #
-# Adattato dal pattern Bazzite-DX `00-image-info.sh`:
-#  - Aggiorna /usr/share/ublue-os/image-info.json con image-name e
-#    image-ref nostri (al posto del 'bazzite' baseline ereditato).
-#  - Aggiorna /usr/lib/os-release VARIANT_ID.
-#  - Aggiorna /etc/xdg/kcm-about-distrorc (KDE System Settings → About)
-#    con Website e Variant. Il Variant differenzia esplicitamente
-#    NVIDIA proprietary e NVIDIA-open dal flavor base.
+# Adapted from the Bazzite-DX `00-image-info.sh` pattern:
+#  - Updates /usr/share/ublue-os/image-info.json with our image-name and
+#    image-ref (replacing the inherited 'bazzite' baseline).
+#  - Updates /usr/lib/os-release VARIANT_ID.
+#  - Updates /etc/xdg/kcm-about-distrorc (KDE System Settings → About)
+#    with Website and Variant. Variant explicitly distinguishes NVIDIA
+#    proprietary vs NVIDIA-open from the base flavour.
 #
-# Niente branche gnome: bazzite-mx è KDE-only (Bazzite base = Kinoite).
+# No GNOME branch: bazzite-mx is KDE-only (Bazzite base = Kinoite).
 #
-# Le variabili IMAGE_NAME e IMAGE_VENDOR sono passate dal Containerfile
-# come ARG + ENV per essere visibili a questo script in un RUN.
+# IMAGE_NAME and IMAGE_VENDOR are passed by the Containerfile as ARG +
+# ENV so they're visible to this script inside a RUN step.
 
 echo "::group:: ===$(basename "$0")==="
 
@@ -24,25 +24,25 @@ set -euxo pipefail
 IMAGE_INFO=/usr/share/ublue-os/image-info.json
 IMAGE_REF="ostree-image-signed:docker://ghcr.io/${IMAGE_VENDOR}/${IMAGE_NAME}"
 
-# image-info.json: image-name + image-ref vanno allineati al fork.
-# Guard fail-fast: GNU `sed -i` ritorna 0 anche se il file non esiste
-# (silent no-op). Senza guard, una rimozione upstream del file ci
-# lascerebbe build green con branding mancante — exactly il bug
-# Phase 1 di kcm-about che il refactor sta sistemando.
+# image-info.json: image-name + image-ref must align with the fork.
+# Fail-fast guard: GNU `sed -i` returns 0 even when the file doesn't
+# exist (silent no-op). Without the guard, an upstream removal of the
+# file would leave us with a green build and missing branding —
+# exactly the Phase 1 kcm-about bug this refactor closes.
 [ -f "$IMAGE_INFO" ] || { echo "FAIL: $IMAGE_INFO not found"; exit 1; }
 sed -i 's|"image-name": [^,]*|"image-name": "'"$IMAGE_NAME"'"|' "$IMAGE_INFO"
 sed -i 's|"image-ref": [^,]*|"image-ref": "'"$IMAGE_REF"'"|' "$IMAGE_INFO"
-# image-vendor restava "ublue-os" (eredità Bazzite base): inconsistente
-# con il fatto che pubblichiamo a ghcr.io/$IMAGE_VENDOR. Allineamento
-# branding di chiusura Phase 9.
+# image-vendor was still "ublue-os" (inherited from Bazzite base) —
+# inconsistent with publishing to ghcr.io/$IMAGE_VENDOR. Phase 9
+# closing-branding alignment.
 sed -i 's|"image-vendor": [^,]*|"image-vendor": "'"$IMAGE_VENDOR"'"|' "$IMAGE_INFO"
 
-# os-release VARIANT_ID per coerenza col fork.
+# os-release VARIANT_ID for fork consistency.
 [ -f /usr/lib/os-release ] || { echo "FAIL: /usr/lib/os-release not found"; exit 1; }
 sed -i "s/^VARIANT_ID=.*/VARIANT_ID=$IMAGE_NAME/" /usr/lib/os-release
 
-# KDE about-page (path: /etc/xdg/kcm-about-distrorc, esiste su
-# Bazzite base — verificato 2026-05-02). Pattern Bazzite-DX-style.
+# KDE about-page (path: /etc/xdg/kcm-about-distrorc, present on
+# Bazzite base — verified 2026-05-02). Bazzite-DX-style pattern.
 KCM=/etc/xdg/kcm-about-distrorc
 [ -f "$KCM" ] || { echo "FAIL: $KCM not found (Bazzite KDE layout changed?)"; exit 1; }
 case "$IMAGE_NAME" in

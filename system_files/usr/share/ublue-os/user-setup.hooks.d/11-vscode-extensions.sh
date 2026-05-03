@@ -1,17 +1,17 @@
 #!/usr/bin/bash
-# user-setup hook: pre-installa le 3 VSCode extension Microsoft per
+# user-setup hook: pre-install the 3 Microsoft VSCode extensions for
 # container/remote workflow (Distrobox, Docker, SSH).
 #
-# Lista identica a Bazzite-DX (`11-vscode-extensions.sh`) e Aurora-DX
-# (`/usr/libexec/aurora-dx-user-vscode`) — i due upstream hanno
-# convergito indipendentemente sulle stesse 3 estensioni first-party
-# Microsoft. Zero bias di linguaggio (no Prettier/ESLint/GitLens).
+# Same list as Bazzite-DX (`11-vscode-extensions.sh`) and Aurora-DX
+# (`/usr/libexec/aurora-dx-user-vscode`) — both upstreams independently
+# converged on the same 3 first-party Microsoft extensions. Zero
+# language bias (no Prettier/ESLint/GitLens).
 #
-# Copy del settings.json default da /etc/skel se l'utente non ne ha uno:
-# copre il gotcha #4 (skel non raggiunge utenti già esistenti — il hook
-# lo forza al primo login post-install della distro).
+# Copy the default settings.json from /etc/skel if the user doesn't
+# have one: covers gotcha #4 (skel doesn't reach existing accounts —
+# the hook forces it on first login after the distro change).
 #
-# Versioned: bump del numero qui sotto rigira l'hook al login successivo.
+# Versioned: bumping the number below re-runs the hook on next login.
 
 set -euo pipefail
 
@@ -20,25 +20,26 @@ source /usr/lib/ublue/setup-services/libsetup.sh
 
 version-script vscode-extensions user 1 || exit 0
 
-# Se l'utente non ha ancora un settings.json di VSCode, ci copia il
-# nostro default da /etc/skel (Bazzite-DX-style fallback).
-# Guard anche sulla source path: senza, una rimozione futura del file
-# in /etc/skel farebbe abortire il hook (set -e) PRIMA delle install,
-# e libsetup.sh ha già scritto lo state → niente retry mai più.
+# If the user has no VSCode settings.json yet, copy our default from
+# /etc/skel (Bazzite-DX-style fallback). Guard the source path too:
+# without it, a future removal of the skel file would abort the hook
+# (set -e) BEFORE the install lines, and libsetup.sh has already
+# written state → no retry, ever.
 if [ ! -e "$HOME/.config/Code/User/settings.json" ] && \
    [ -e /etc/skel/.config/Code/User/settings.json ]; then
     mkdir -p "$HOME/.config/Code/User"
     cp -f /etc/skel/.config/Code/User/settings.json "$HOME/.config/Code/User/settings.json"
 fi
 
-# 3 extension Microsoft container/remote workflow.
-# Lista convergente Aurora-DX + Bazzite-DX (verificato 2026-05-03).
+# 3 Microsoft container/remote workflow extensions.
+# Convergent list across Aurora-DX + Bazzite-DX (verified 2026-05-03).
 #
-# `|| true`: il marketplace VSCode può essere transientemente unreachable
-# (rete metered, downtime Microsoft). Senza, set -e aborta il hook ma
-# libsetup.sh ha già scritto lo state file PRIMA del body — quindi una
-# install fallita diventerebbe permanente. Failure di rete è benigna
-# (eccezione legittima alla regola "no || true" di conventions.md).
+# `|| true`: the VSCode marketplace can be transiently unreachable
+# (metered network, Microsoft downtime). Without it, set -e would
+# abort the hook but libsetup.sh has already written the state file
+# BEFORE the body — so a failed install would become permanent.
+# Network failure is benign (legitimate exception to conventions.md's
+# "no || true" rule).
 code --install-extension ms-vscode-remote.remote-containers || true
 code --install-extension ms-vscode-remote.remote-ssh || true
 code --install-extension ms-azuretools.vscode-containers || true

@@ -1,11 +1,11 @@
 #!/usr/bin/bash
-# system-setup hook: rimuove la flatpak Firefox system-wide
-# pre-esistente per chi aggiorna da una bazzite-mx pre-Mozilla-RPM.
+# system-setup hook: remove the system-wide pre-existing Firefox flatpak
+# for users upgrading from a pre-Mozilla-RPM bazzite-mx.
 #
-# Eseguito una sola volta per versione (versioning via libsetup.sh).
-# Per riapplicare in futuro (es. se cambiamo logica): bump del numero
-# di versione qui sotto e l'hook rigira automaticamente al boot
-# successivo, anche su sistemi già configurati.
+# Runs once per version (versioning via libsetup.sh). To re-apply in
+# the future (e.g. if we change the logic): bump the version number
+# below and the hook re-runs automatically on the next boot, even on
+# already-configured systems.
 
 set -euo pipefail
 

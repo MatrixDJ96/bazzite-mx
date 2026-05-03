@@ -4,15 +4,14 @@
 
 ## What is bazzite-mx?
 
-bazzite-mx is a personal fork of [Universal Blue Bazzite](https://github.com/ublue-os/bazzite) that layers a **developer-experience (DX) toolkit** on top of Bazzite Kinoite, modeled on [Aurora-DX](https://github.com/get-aurora-dev/aurora)'s build patterns.
+bazzite-mx is a personal fork of [Universal Blue Bazzite](https://github.com/ublue-os/bazzite) that layers a curated **developer-experience (DX) toolkit** on top of Bazzite Kinoite, taking inspiration from the build patterns of [Aurora-DX](https://github.com/ublue-os/aurora) and [Bazzite-DX](https://github.com/ublue-os/bazzite-dx) upstream.
 
-It is a **single-maintainer project**, not a community distribution. It exists because:
+It is a **single-maintainer project**, not a community distribution. The first-party DX images from Universal Blue (`bazzite-dx`, `aurora`/`-dx`, `bluefin`/`-dx`) are excellent and cover the same problem space; bazzite-mx exists for two narrow reasons:
 
-- Maintaining hand-rolled `rpm-ostree` package layers manually is fragile (see Bazzite's own [docs warning](https://docs.bazzite.gg/Installing_and_Managing_Software/rpm-ostree/#major-caveats-using-rpm-ostree)). An immutable image refresh hourly is cleaner than `rpm-ostree install` after every reboot.
-- The official `ublue-os/bazzite-dx` images cover **gaming-on-the-Steam-Deck DX**, not full container/VM workstation DX, and ship with several documented compromises (silent state-write race in their VSCode hook, stale `vscode.repo gpgcheck=0` workaround, non-idempotent justfile imports — see [`wins-over-upstream.md`](.claude/docs/wins-over-upstream.md) for the full list).
-- Aurora-DX is GNOME-focused; KDE users have no equivalent first-party DX image with Bazzite's gaming/desktop polish.
+- **Hardening of documented compromises.** First-party DX images ship a few patterns this fork tightens up — silent state-write race in the Bazzite-DX VSCode hook, stale `vscode.repo gpgcheck=0` workaround, non-idempotent justfile imports (see [`wins-over-upstream.md`](.claude/docs/wins-over-upstream.md) for the full list of 17 wins).
+- **Opinionated personal curation.** Mozilla-RPM Firefox over Flatpak; gparted to fill the gap left by Bazzite removing `kde-partitionmanager`; no imposed fonts/themes/formatters; ujust opt-in `install-discord` / `install-1password`. None of these justify a community-scale fork; all of them justify the maintainer's own image.
 
-bazzite-mx fills that gap: a **single, opinionated, immutable image** for a Bazzite KDE user who happens to develop, administer servers, and run VMs.
+A note on rpm-ostree layering: maintaining hand-rolled `rpm-ostree install` package layers manually is fragile (see Bazzite's own [docs warning](https://docs.bazzite.gg/Installing_and_Managing_Software/rpm-ostree/#major-caveats-using-rpm-ostree)). Building a custom image refreshed hourly via the upstream watcher is cleaner than re-applying layers after every reboot.
 
 ## Who is bazzite-mx for?
 
@@ -24,9 +23,7 @@ The target persona is **the maintainer (MatrixDJ96)**, and incidentally any user
 - Code in VSCode + GitKraken
 - Sysadmin / dev sensitive to image reproducibility, supply-chain auditability, and the "don't fight the atomic distro" philosophy
 
-Internal docs and commit messages mix English and Italian. The README, code, and external-facing docs stay in English.
-
-If you don't fit this profile, bazzite-mx might still be useful — fork freely. But it is not designed to scale into a community distribution.
+If you don't fit this profile, bazzite-mx might still be useful — fork freely. It is not designed to scale into a community distribution.
 
 ## Design principles
 
@@ -72,7 +69,7 @@ The build is fully reproducible from the upstream Bazzite tag pin: see [Upstream
 | **Zsh / Ghostty / Homebrew brewfile imports** | Opinionated developer-shell preferences. AmyOS imposes them; we keep bash + Konsole + Ptyxis as user choices. |
 | **VFIO / Looking Glass / GPU passthrough** | Niche gaming/research workflow. Bazzite-DX has it; we treat it as out of scope for a daily-driver workstation. |
 | **`ujust verify-image-signature` recipe** | Bazzite already ships `ujust verify-image` (different semantics: rebases to upstream-signed). Adding our own would clutter the recipe namespace. The manual `cosign verify --key cosign.pub …` documented below is sufficient. |
-| **ROCm AMD GPU compute (rocm-hip / rocm-opencl / rocm-smi)** | Aurora-DX has it conditionally. We don't ship per-GPU-vendor variants — would require splitting the matrix or an `IMAGE_TIER`-style axis. Deferred until concrete need. |
+| **ROCm AMD GPU compute (rocm-hip / rocm-opencl / rocm-smi)** | Aurora-DX ships it conditionally (skipped on NVIDIA variants); Bazzite-DX ships it unconditionally on all variants. We omit it: ~150 MB of AMD-only libraries that would be dead weight on the two NVIDIA variants without a concrete maintainer use case. Easy to add later (or to layer per-user via `rpm-ostree install rocm-hip rocm-opencl rocm-smi`) if needed. |
 
 ## Repository layout
 

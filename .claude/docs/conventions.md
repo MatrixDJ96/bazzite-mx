@@ -47,7 +47,7 @@
   - `feat(mx): …` — new functionality (a phase landing)
   - `refactor(mx): …` — restructuring without behaviour change (hardening,
     splits, vendoring)
-  - `fix(mx): …` — bug fix in the build pipeline / smoke test / ricetta
+  - `fix(mx): …` — bug fix in the build pipeline / smoke test / ujust recipe
   - `docs(plan): …` / `docs(repo): …` — documentation only
   - `ci(...)`, `chore(...)`
   - **Legacy note**: pre-Phase 8 commits used scope `(dx)` from when the

@@ -1,23 +1,22 @@
 #!/usr/bin/bash
-# MX block 48: fetch della GPG key 1Password ad ogni build.
+# MX block 48: fetch the 1Password GPG key on every build.
 #
-# Approccio scelto invece del vendoring statico in
+# Why this approach instead of static vendoring at
 # `system_files/etc/pki/rpm-gpg/1password.asc`:
-#  - bazzite-mx si rebuilda hourly via watch-upstream → la key è
-#    sempre fresh, no manual rotation lato nostro quando 1Password
-#    ruota la key (la prima rebuild la cattura).
-#  - 1Password non shippa un pacchetto `release` rpm upstream
-#    (a differenza di RPM Fusion in 47-*), quindi non c'è
-#    un'alternativa "via dnf install". Build-time fetch è il path
-#    naturale.
+#  - bazzite-mx rebuilds hourly via watch-upstream → the key is
+#    always fresh, no manual rotation on our side when 1Password
+#    rotates the key (the next rebuild catches it).
+#  - 1Password doesn't ship an upstream `release` rpm (unlike
+#    RPM Fusion in 47-*), so there's no "via dnf install"
+#    alternative. Build-time fetch is the natural path.
 #  - Trust model: HTTPS endpoint `downloads.1password.com`
-#    (ufficiale, citato nella loro doc Linux). TLS verificato dal
+#    (official, cited in their Linux docs). TLS verified by the
 #    container build CI.
 #
-# Il file `.repo` di 1Password rimane vendored in
-# `system_files/etc/yum.repos.d/1password.repo` perché è policy
-# nostra (enabled=0, repo_gpgcheck=1) e cambia raramente — la key
-# è la rotating piece, non la config.
+# The 1Password `.repo` file stays vendored at
+# `system_files/etc/yum.repos.d/1password.repo` because it's our
+# policy (enabled=0, repo_gpgcheck=1) and rarely changes — the key
+# is the rotating piece, not the config.
 
 echo "::group:: ===$(basename "$0")==="
 
@@ -29,12 +28,12 @@ KEY_PATH=/etc/pki/rpm-gpg/1password.asc
 curl -fsSL "$KEY_URL" -o "$KEY_PATH"
 chmod 0644 "$KEY_PATH"
 
-# Sanity check: PGP block valido + non-empty. Se 1Password sostituisce
-# il file con qualcosa di diverso (es. errore HTML 404 o redirect), la
-# build fallisce qui invece di a runtime utente.
+# Sanity check: valid PGP block + non-empty. If 1Password replaces the
+# file with something else (e.g. HTML 404 page or redirect), the build
+# fails here instead of at runtime on the user's machine.
 [ -s "$KEY_PATH" ] || { echo "FAIL: $KEY_PATH empty"; exit 1; }
 grep -q '^-----BEGIN PGP PUBLIC KEY BLOCK-----$' "$KEY_PATH" || {
-    echo "FAIL: $KEY_PATH non sembra un PGP key block"
+    echo "FAIL: $KEY_PATH does not look like a PGP key block"
     exit 1
 }
 

@@ -148,10 +148,10 @@ on transparency.
 Format: a small table comparing **cost** / **value** / **provenance**, with
 an explicit recommendation. Example:
 
-| Item | Origine | Costo | Valore | Mio consiglio |
+| Item | Origin | Cost | Value | Recommendation |
 |---|---|---|---|---|
-| `flatpak-builder` | Aurora-DX + Bazzite-DX | 5 min, ~80 MB | medio | dentro |
-| `git-credential-libsecret` | mia proposta (validata in Aurora base) | 2 min, ~50 KB | medio-alto | dentro |
+| `flatpak-builder` | Aurora-DX + Bazzite-DX | 5 min, ~80 MB | medium | include |
+| `git-credential-libsecret` | my proposal (validated in Aurora base) | 2 min, ~50 KB | medium-high | include |
 
 This frames the user's decision as picking from clearly-attributed options,
 not approving an opaque list.

@@ -1,52 +1,52 @@
 #!/usr/bin/bash
-# MX block 45: Firefox dal repo RPM ufficiale di Mozilla.
+# MX block 45: Firefox from Mozilla's official RPM repo.
 #
-# Bazzite di default installa Firefox come flatpak Flathub
-# (org.mozilla.firefox). Lo sostituiamo con la build RPM ufficiale di
-# Mozilla per due motivi pratici:
-#  1. Integrazione browser-host nativa (es. 1Password native messaging
-#     funziona out-of-the-box; il flatpak richiede workaround sul socket
-#     della host integration).
-#  2. Allineamento con le system libs (glibc, mesa, ecc.) garantito,
-#     niente runtime flatpak che diverge dalla base.
+# Bazzite installs Firefox as a Flathub flatpak (org.mozilla.firefox)
+# by default. We replace it with Mozilla's official RPM build for two
+# practical reasons:
+#  1. Native browser-host integration (e.g. 1Password native messaging
+#     works out-of-the-box; the flatpak requires socket workarounds for
+#     host integration).
+#  2. Guaranteed alignment with system libraries (glibc, mesa, ...),
+#     no flatpak runtime drifting from the base image.
 #
-# Build-time: il .repo vendored è enabled=0 e --enablerepo=mozilla è il
-# runtime override (stesso pattern di gh-cli, docker-ce, vscode).
-# Il .repo dichiara priority=10: anche se per errore venissero abilitati
-# entrambi (mozilla + fedora) durante un'install futura, dnf5-priorities
-# fa vincere Mozilla.
+# Build-time: the vendored .repo ships enabled=0 and --enablerepo=mozilla
+# is the runtime override (same pattern as gh-cli, docker-ce, vscode).
+# The .repo declares priority=10: even if both repos accidentally got
+# enabled (mozilla + fedora) during a future install, dnf5-priorities
+# would let Mozilla win.
 #
-# Companion Phase 8 changes (commit successivo, non in questo file):
-#  - override di system-flatpaks.list: non auto-installare
-#    org.mozilla.firefox al primo boot
-#  - estensione flatpak-blocklist: nasconde org.mozilla.firefox dalla
-#    GUI (Discover/Bazaar) per evitare reinstall accidentale
-#  - system-setup + user-setup hooks: rimuove la flatpak Firefox
-#    pre-esistente per chi aggiorna da una bazzite-mx pre-Mozilla-RPM
+# Companion Phase 8 changes (later commit, not in this file):
+#  - system-flatpaks.list override: don't auto-install
+#    org.mozilla.firefox on first boot
+#  - flatpak-blocklist extension: hides org.mozilla.firefox from
+#    GUI stores (Discover/Bazaar) to prevent accidental reinstall
+#  - system-setup + user-setup hooks: remove a pre-existing Firefox
+#    flatpak for users upgrading from a pre-Mozilla-RPM bazzite-mx
 
 echo "::group:: ===$(basename "$0")==="
 
 set -euxo pipefail
 
-### Section 1: rimuove eventuale firefox del repo Fedora ###
-# Bazzite di base non installa firefox come rpm (solo flatpak), ma se
-# domani cambia scelta — o se uno dei due pacchetti è presente e
-# l'altro no — questo loop cattura comunque il rpm Fedora prima che il
-# nostro install Mozilla risolva al provider sbagliato.
-# Pattern: gate il remove su `rpm -q` invece di `|| true`. Così il
-# caso "non installato" è uno skip esplicito, mentre un fail di
-# `dnf5 remove` per ragioni reali (db corruption, dep deadlock) non
-# viene mascherato e fa fallire la build via `set -euxo pipefail`.
+### Section 1: remove any pre-existing Fedora-repo firefox ###
+# Bazzite doesn't install firefox as rpm by default (only flatpak),
+# but if upstream ever changes that — or if one of the two packages
+# is present and the other isn't — this loop catches the Fedora rpm
+# before our Mozilla install resolves to the wrong provider.
+# Pattern: gate the remove on `rpm -q` instead of `|| true`. The
+# "not installed" case is an explicit skip, while a real `dnf5 remove`
+# failure (db corruption, dep deadlock) is not masked and fails the
+# build via `set -euxo pipefail`.
 for pkg in firefox firefox-langpacks; do
     if rpm -q "$pkg" &>/dev/null; then
         dnf5 -y remove "$pkg"
     fi
 done
 
-### Section 2: install Firefox + langpack italiano dal repo Mozilla ###
-# firefox-l10n-it è il langpack italiano nel formato Mozilla
-# (firefox-l10n-<lang>). Per estendere la lista delle lingue: aggiungi
-# firefox-l10n-<code> alla install qui sotto.
+### Section 2: install Firefox + Italian langpack from Mozilla repo ###
+# firefox-l10n-it is the Italian langpack in Mozilla's format
+# (firefox-l10n-<lang>). To extend the language list: add
+# firefox-l10n-<code> to the install line below.
 dnf5 -y --enablerepo=mozilla install \
     firefox \
     firefox-l10n-it

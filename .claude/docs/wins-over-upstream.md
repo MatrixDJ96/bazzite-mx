@@ -190,133 +190,136 @@ extensions, tailscale init, etc.). Mixing two versioning patterns
 all-in on the framework now means every future hook follows the same
 pattern.
 
-## 12. Firefox dal repo RPM ufficiale Mozilla
+## 12. Firefox from Mozilla's official RPM repo
 
-**Upstream**: bazzite-dx, Bazzite base e tutto il ublue ecosystem
-(Aurora, Aurora-DX, AmyOS) shippano Firefox solo come flatpak
-Flathub `org.mozilla.firefox` (lista default-install di Bazzite).
+**Upstream**: bazzite-dx, Bazzite base, and the entire ublue ecosystem
+(Aurora, Aurora-DX, AmyOS) ship Firefox only as a Flathub flatpak
+(`org.mozilla.firefox`, in Bazzite's default-install list).
 
-**Us**: `system_files/etc/yum.repos.d/mozilla.repo` vendoredato
-(`enabled=0`, `priority=10`, `gpgcheck=1`, `repo_gpgcheck=0` per Mozilla
-docs). `build_files/mx/45-firefox-rpm.sh` rimuove eventuale `firefox`
-del repo Fedora se presente (gate via `rpm -q`) e installa
-`firefox` + `firefox-l10n-it` da repo Mozilla (commit `5d17d01`,
-fix-forward review in `b71b0e1`). Smoke test asserisce
-`VENDOR=Mozilla` come guard contro regressione al pacchetto Fedora.
+**Us**: `system_files/etc/yum.repos.d/mozilla.repo` is vendored
+(`enabled=0`, `priority=10`, `gpgcheck=1`, `repo_gpgcheck=0` per
+Mozilla docs). `build_files/mx/45-firefox-rpm.sh` removes any pre-
+existing `firefox` from the Fedora repo (gated by `rpm -q`) and
+installs `firefox` + `firefox-l10n-it` from the Mozilla repo
+(commit `5d17d01`, fix-forward review in `b71b0e1`). The smoke test
+asserts `VENDOR=Mozilla` as a guard against regression to the
+Fedora package.
 
-**Why it matters**: 1Password native messaging socket (browser autofill)
-è bloccato dal sandbox del flatpak. La rpm Mozilla risolve out-of-the-box.
-Bonus: niente flatpak-runtime drift dalle system libs (glibc/mesa/...).
+**Why it matters**: 1Password's native-messaging socket (browser
+autofill) is blocked by the flatpak sandbox. The Mozilla RPM solves
+that out-of-the-box. Bonus: no flatpak-runtime drift from system
+libraries (glibc/mesa/...).
 
-## 13. Migration cleanup hooks per flatpak preesistente
+## 13. Migration cleanup hooks for pre-existing flatpaks
 
-**Upstream**: nessuna distro ublue gestisce migration di stato
-flatpak utente preesistente quando la distro cambia provider per
-un'app (es. da flatpak a rpm).
+**Upstream**: no ublue distro handles user flatpak state migration
+when the distro switches provider for an app (e.g. from flatpak
+to rpm).
 
-**Us**: due hook complementari (commit `550c4f1`):
+**Us**: two complementary hooks (commit `550c4f1`):
 - `system-setup.hooks.d/15-cleanup-firefox-flatpak.sh` (root, oneshot
   via `ublue-system-setup.service`) — `flatpak uninstall --system
   org.mozilla.firefox`.
-- `user-setup.hooks.d/15-cleanup-firefox-flatpak.sh` (per-utente, via
+- `user-setup.hooks.d/15-cleanup-firefox-flatpak.sh` (per-user, via
   `ublue-user-setup.service --user`) — `flatpak uninstall --user
   org.mozilla.firefox`.
 
-Entrambi versionati con `version-script cleanup-firefox-flatpak
-{system,user} 1` di `libsetup.sh`. Bump del numero versione → l'hook
-rigira automaticamente al prossimo boot/login, senza intervento utente.
+Both versioned via `version-script cleanup-firefox-flatpak
+{system,user} 1` from `libsetup.sh`. Bumping the version number →
+the hook re-runs automatically on next boot/login, with no user
+intervention.
 
-**Why it matters**: chi aggiorna da una bazzite-mx pre-Phase-8 ha
-ancora la flatpak Firefox installata localmente. Senza cleanup hook,
-si troverebbe DUE Firefox sul sistema (rpm + flatpak), e l'icon launcher
-KDE potrebbe puntare al flatpak vecchio. Il pattern è generico: qualsiasi
-futura migrazione "flatpak → rpm" può riutilizzare lo stesso layout.
+**Why it matters**: anyone upgrading from a pre-Phase-8 bazzite-mx
+still has the Firefox flatpak installed locally. Without the cleanup
+hooks they would end up with TWO Firefox installs (rpm + flatpak),
+and the KDE icon launcher might point to the stale flatpak. The
+pattern is generic: any future "flatpak → rpm" migration can reuse
+the same layout.
 
-## 14. RPM Fusion + 1Password integrati senza maintenance debt
+## 14. RPM Fusion + 1Password integrated with zero maintenance debt
 
 **Upstream**:
-- Bazzite e Bazzite-DX **non integrano** RPM Fusion del tutto.
-- Aurora ha solo un loop *difensivo* (`build_files/dx/00-dx.sh:139`,
-  `build_files/base/17-cleanup.sh:79`) che disabilita rpmfusion-* se
-  per caso fossero abilitati, ma non vendora i `.repo` né installa
-  pacchetti da Fusion.
-- AmyOS è l'unica del ublue ecosystem che integra RPM Fusion
-  attivamente, ma il modo in cui acquisisce i `.repo` non è esplicito
-  in `install-apps.sh` (probabilmente eredità da base image), e per
-  istallare solo `audacious` + `audacity-freeworld`.
-- Per 1Password, nessuna distro ublue ha integrazione (la docs
-  ufficiale 1Password chiede sempre `rpm --import URL` + creazione
-  manuale di `.repo`).
+- Bazzite and Bazzite-DX **do not integrate** RPM Fusion at all.
+- Aurora has only a *defensive* loop (`build_files/dx/00-dx.sh:139`,
+  `build_files/base/17-cleanup.sh:79`) that disables rpmfusion-* if
+  they happen to be enabled, but neither vendors the `.repo` files
+  nor installs packages from Fusion.
+- AmyOS is the only ublue distro that integrates RPM Fusion
+  actively, but the way it acquires the `.repo` files isn't explicit
+  in `install-apps.sh` (probably inherited from the base image), and
+  it's only used to install `audacious` + `audacity-freeworld`.
+- For 1Password, no ublue distro has integration (the official
+  1Password docs always require `rpm --import URL` + manual `.repo`
+  creation).
 
-**Us** (commit iniziale `12709cf`, refactor `8d9152f`): zero-debt
-maintenance approach per entrambi i repo:
+**Us** (initial commit `12709cf`, refactor `8d9152f`): zero-debt
+maintenance approach for both repos:
 - `build_files/mx/47-rpmfusion-release.sh`: install
-  `rpmfusion-nonfree-release-$(rpm -E %fedora)` come pacchetto rpm
-  (5.9 KB). Il pacchetto shippa GPG keys per Fedora 2020/44/45/46/
-  latest/rawhide e i 3 `.repo` files (release/updates/updates-testing).
-  Sed disable di tutte le sezioni a baseline `enabled=0`.
-- `build_files/mx/48-1password-key.sh`: `curl -fsSL` della key
-  ufficiale `https://downloads.1password.com/linux/keys/1password.asc`
-  ad ogni build. PGP block sanity check fallisce build se 1Password
-  ritorna garbage.
-- `system_files/etc/yum.repos.d/1password.repo` rimane vendored
-  (è policy nostra, `enabled=0`, `repo_gpgcheck=1`).
+  `rpmfusion-nonfree-release-$(rpm -E %fedora)` as an rpm package
+  (5.9 KB). The package ships GPG keys for Fedora 2020/44/45/46/
+  latest/rawhide and the 3 `.repo` files (release/updates/updates-
+  testing). A sed disables every section to a baseline `enabled=0`.
+- `build_files/mx/48-1password-key.sh`: `curl -fsSL` of the official
+  key from `https://downloads.1password.com/linux/keys/1password.asc`
+  on every build. A PGP-block sanity check fails the build if
+  1Password returns garbage.
+- `system_files/etc/yum.repos.d/1password.repo` stays vendored (our
+  policy: `enabled=0`, `repo_gpgcheck=1`).
 
-**Why it matters**: zero responsabilità di key rotation lato nostro.
-Quando RPM Fusion ruota la key (raro, ma succede a major Fedora),
-il pacchetto release upstream la include automaticamente — `bootc
-upgrade` la prende. Quando 1Password ruota la key, la prossima
-rebuild hourly via watch-upstream la fetcha fresh. **Bazzite-DX e
-AmyOS hanno questa stessa scelta accessibile ma vendorano** —
-significa che il loro debt è latente, il nostro è strutturalmente
-zero. Future-proof per Fedora 45/46 senza alcun intervento manuale.
+**Why it matters**: zero responsibility for key rotation on our side.
+When RPM Fusion rotates its key (rare, but happens at major Fedora
+releases), the upstream release package picks it up automatically —
+`bootc upgrade` ships it. When 1Password rotates its key, the next
+hourly rebuild via watch-upstream re-fetches it fresh. **Bazzite-DX
+and AmyOS have the same option available and choose to vendor
+instead** — meaning their debt is latent, ours is structurally zero.
+Future-proof for Fedora 45/46 with no manual intervention.
 
 ## 15. `ujust install-{discord,1password}` opt-in pattern + reusable `_pkg_layered` helper
 
-**Upstream**: il file `82-bazzite-apps.just` di Bazzite ha
-ricette `install-coolercontrol`, `install-displaylink`,
-`install-jetbrains-toolbox` ecc., ma **né `install-discord` né
-`install-1password`**, e ogni ricetta ridefinisce inline la sua
-funzione bash `layered()` (duplicazione). bazzite-dx non aggiunge
-`install-*` recipes (il loro `95-bazzite-dx.just` ha solo
-`dx-group`, `install-fonts`, `toggle-gamemode`). Aurora-DX e
-AmyOS non shippano un justfile custom.
+**Upstream**: Bazzite's `82-bazzite-apps.just` has recipes like
+`install-coolercontrol`, `install-displaylink`,
+`install-jetbrains-toolbox`, etc. — but **neither `install-discord`
+nor `install-1password`**, and each recipe redefines its own bash
+`layered()` function inline (duplication). bazzite-dx adds no
+`install-*` recipes (their `95-bazzite-dx.just` only has
+`dx-group`, `install-fonts`, `toggle-gamemode`). Aurora-DX and
+AmyOS don't ship a custom justfile.
 
-**Us**: primo justfile MX con due ricette opt-in distinte:
+**Us**: the first MX justfile with two distinct opt-in recipes:
 - `system_files/usr/share/ublue-os/just/95-bazzite-mx.just`
-- `[private] _pkg_layered pkg` — helper **riutilizzabile** che usa
-  `rpm-ostree status --json | jq` per check del booted deployment.
-  Hardened con `// []` fallback (safe quando deployment ha 0
-  pacchetti layered o non c'è un booted deployment, es. CI).
-  Output `yes`/`no` su stdout (exit sempre 0) invece di usare
-  l'exit code di `jq -e` come segnale booleano: `just` logga
-  spuriamente `error: Recipe '_pkg_layered' failed on line N
-  with exit code 1` per ogni sub-recipe non-zero anche dentro
-  un `if` del caller, polluendo l'output di ogni `install-*`
-  (commit `a1cbdab`). A differenza del pattern Bazzite (function
-  inline ridefinita per ricetta), il nostro è DRY: ogni nuova
-  `install-*` recipe fa `if [ "$(just _pkg_layered <pkg>)" = "yes" ];
+- `[private] _pkg_layered pkg` — a **reusable** helper using
+  `rpm-ostree status --json | jq` to check the booted deployment.
+  Hardened with `// []` fallback (safe when the deployment has zero
+  layered packages or no booted deployment, e.g. in CI). Outputs
+  `yes`/`no` on stdout (always exits 0) instead of using `jq -e`'s
+  exit code as a boolean signal: `just` would otherwise spuriously
+  log `error: Recipe '_pkg_layered' failed on line N with exit code
+  1` for every sub-recipe that exits non-zero, even when wrapped in
+  the caller's `if` — polluting every `install-*`'s output (commit
+  `a1cbdab`). Unlike Bazzite's pattern (a `layered()` function
+  redefined inline per recipe), ours is DRY: every new `install-*`
+  recipe just does `if [ "$(just _pkg_layered <pkg>)" = "yes" ];
   then ...; fi`.
 - `[group("apps")] install-discord` (commit `12709cf`) — RPM Fusion
-  non-free, `sed '0,/^enabled=0/{...}'` (solo main section, non
-  debuginfo+source) e `sudo rpm-ostree install` esplicito.
-- `[group("apps")] install-1password` (commit `ec1acf0`) — repo
-  ufficiale 1Password (`downloads.1password.com`), file
-  single-section quindi `sed 's/^enabled=0/enabled=1/'` semplice.
-  GPG key vendoredata (fingerprint `3FEF9748469ADBE15DA7CA80AC2D6
-  2742012EA22`) per supportare `repo_gpgcheck=1` senza
-  `rpm --import` runtime.
+  non-free, `sed '0,/^enabled=0/{...}'` (main section only, not
+  debuginfo+source), explicit `sudo rpm-ostree install`.
+- `[group("apps")] install-1password` (commit `ec1acf0`) — official
+  1Password repo (`downloads.1password.com`), single-section file so
+  a simple `sed 's/^enabled=0/enabled=1/'`. GPG key fetched at build
+  time by `48-1password-key.sh` (refactor `8d9152f`) to support
+  `repo_gpgcheck=1` without runtime `rpm --import`.
 
-**Why it matters**: Discord ha update settimanali e nag intrusivo
-"Update Available" che su atomic distro l'utente non può ignorare
-via `dnf update`. 1Password ha integrazione native messaging che
-su flatpak è bloccata dal sandbox. Il modello opt-in via ujust
-significa che chi non usa l'app non ha la repo abilitata → niente
-metadata extra in `bootc upgrade`. Chi installa beneficia di
-update automatici via `ujust update` senza intervento manuale
-(la repo resta `enabled=1` post-install). Saremmo i primi del
-ublue ecosystem con queste ricette **e** con un helper `_pkg_layered`
-riutilizzabile (gli upstream duplicano la logica).
+**Why it matters**: Discord has weekly updates and an intrusive
+"Update Available" nag that on an atomic distro the user can't
+dismiss via `dnf update`. 1Password's native-messaging integration
+is blocked by the flatpak sandbox. The opt-in ujust pattern means
+users who don't install the app never enable the repo → no extra
+metadata fetched on `bootc upgrade`. Users who do install benefit
+from automatic updates via `ujust update` without manual
+intervention (the repo stays `enabled=1` post-install). We're the
+first in the ublue ecosystem with these recipes **and** with a
+reusable `_pkg_layered` helper (upstreams duplicate the logic).
 
 ## 16. VSCode extensions user-setup hook hardened against libsetup state-before-body race
 

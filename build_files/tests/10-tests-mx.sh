@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 # MX smoke tests. Runs after the build orchestrator, immediately before
-# bootc container lint. Bloccante: ogni assertion fa exit 1 sulla build.
+# bootc container lint. Blocking: every assertion exits 1 on failure.
 #
 # Phase 1 verifies the MX build markers (sysctl + modules-load) and
 # branding (image-info.json image-name, os-release VARIANT_ID,
@@ -25,29 +25,29 @@ if [ ! -f /etc/modules-load.d/90-bazzite-mx.conf ]; then
 fi
 
 # --- Image identity + KDE about-page branding (00-image-info.sh) ---
-# image-info.json image-name deve riflettere il fork.
+# image-info.json image-name must reflect the fork.
 grep -qE '"image-name":[[:space:]]*"bazzite-mx(-nvidia(-open)?)?"' /usr/share/ublue-os/image-info.json || {
     echo "FAIL: /usr/share/ublue-os/image-info.json image-name not rewritten"
     cat /usr/share/ublue-os/image-info.json
     exit 1
 }
-# image-vendor deve riflettere chi pubblica davvero (matrixdj96), non
-# l'eredità "ublue-os" del Bazzite base (Phase 9 closing).
+# image-vendor must reflect the actual publisher (matrixdj96), not
+# the inherited "ublue-os" from Bazzite base (Phase 9 closing).
 grep -qE '"image-vendor":[[:space:]]*"matrixdj96"' /usr/share/ublue-os/image-info.json || {
     echo "FAIL: /usr/share/ublue-os/image-info.json image-vendor not rewritten to matrixdj96"
     grep image-vendor /usr/share/ublue-os/image-info.json || true
     exit 1
 }
-# os-release VARIANT_ID idem.
+# os-release VARIANT_ID likewise.
 grep -qE '^VARIANT_ID=bazzite-mx(-nvidia(-open)?)?$' /usr/lib/os-release || {
     echo "FAIL: /usr/lib/os-release VARIANT_ID not rewritten"
     grep ^VARIANT_ID= /usr/lib/os-release || true
     exit 1
 }
 # KDE about page (Variant + Website).
-# Regex anchored on both ends: matcha solo le 3 stringhe valide
-# ('Bazzite-MX', 'Bazzite-MX (NVIDIA)', 'Bazzite-MX (NVIDIA Open)') e
-# rifiuta valori malformati tipo 'Bazzite-MX-BROKEN' o 'Bazzite-MXfoo'.
+# Regex anchored on both ends: matches only the 3 valid strings
+# ('Bazzite-MX', 'Bazzite-MX (NVIDIA)', 'Bazzite-MX (NVIDIA Open)') and
+# rejects malformed values like 'Bazzite-MX-BROKEN' or 'Bazzite-MXfoo'.
 grep -qE '^Variant=Bazzite-MX( \(NVIDIA( Open)?\))?$' /etc/xdg/kcm-about-distrorc || {
     echo "FAIL: /etc/xdg/kcm-about-distrorc Variant not rewritten or malformed"
     grep ^Variant= /etc/xdg/kcm-about-distrorc || true
@@ -195,40 +195,39 @@ if [ ! -f /usr/lib/ublue/setup-services/libsetup.sh ]; then
     exit 1
 fi
 
-# --- Phase 8: Firefox da repo RPM ufficiale Mozilla ---
-# La build sostituisce il flatpak Flathub di Bazzite con il rpm Mozilla
-# (45-firefox-rpm.sh). Asserzioni:
-#  - firefox + firefox-l10n-it installati
-#  - VENDOR = "Mozilla" (guardia contro regressione al rpm Fedora se in
-#    futuro venisse aggiunto al base Bazzite)
+# --- Phase 8: Firefox from Mozilla's official RPM repo ---
+# The build replaces Bazzite's Flathub flatpak with the Mozilla RPM
+# (45-firefox-rpm.sh). Assertions:
+#  - firefox + firefox-l10n-it installed
+#  - VENDOR = "Mozilla" (guard against regression to the Fedora rpm
+#    if it ever gets added to Bazzite base)
 FIREFOX_RPMS=( firefox firefox-l10n-it )
 for p in "${FIREFOX_RPMS[@]}"; do
     rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
 done
 
-# La VENDOR field "Mozilla" è la stringa esatta dal pacchetto Mozilla
-# RPM (verificata 2026-05-02 su firefox-150.0.1-1; il pacchetto Fedora
-# userebbe "Fedora Project"). head -1 difensivo per il caso (improbabile
-# in build pulita) di NEVR multipli installati post-failed-reinstall.
+# The VENDOR field "Mozilla" is the exact string from the Mozilla RPM
+# package (verified 2026-05-02 on firefox-150.0.1-1; the Fedora package
+# would use "Fedora Project"). Defensive head -1 for the (unlikely on a
+# clean build) case of multiple NEVRs installed post-failed-reinstall.
 FIREFOX_VENDOR=$(rpm -q firefox --qf '%{VENDOR}\n' | head -1)
 if [ "$FIREFOX_VENDOR" != "Mozilla" ]; then
     echo "FAIL: firefox vendor is '$FIREFOX_VENDOR', expected 'Mozilla'"
     exit 1
 fi
 
-# --- Phase 8: esclusione flatpak Firefox ---
-# 46-firefox-flatpak-exclude.sh patcha la default-install list di
-# Bazzite e estende il blocklist Flathub. Verifichiamo che entrambi
-# gli interventi siano effettivi.
+# --- Phase 8: Firefox flatpak exclusion ---
+# 46-firefox-flatpak-exclude.sh patches Bazzite's default-install list
+# and extends the Flathub blocklist. Verify both edits took effect.
 FIREFOX_INSTALL_LIST=/usr/share/ublue-os/bazzite/flatpak/install
 if grep -q '^org\.mozilla\.firefox$' "$FIREFOX_INSTALL_LIST"; then
-    echo "FAIL: org.mozilla.firefox ancora presente in $FIREFOX_INSTALL_LIST"
+    echo "FAIL: org.mozilla.firefox still present in $FIREFOX_INSTALL_LIST"
     exit 1
 fi
 
 FIREFOX_BLOCKLIST=/usr/share/ublue-os/flatpak-blocklist
 if ! grep -q '^deny org\.mozilla\.firefox/\*$' "$FIREFOX_BLOCKLIST"; then
-    echo "FAIL: deny org.mozilla.firefox/* non trovato in $FIREFOX_BLOCKLIST"
+    echo "FAIL: deny org.mozilla.firefox/* not found in $FIREFOX_BLOCKLIST"
     exit 1
 fi
 
@@ -245,9 +244,9 @@ if [ ! -x "$FIREFOX_HOOK_USER" ]; then
 fi
 
 # --- Phase 8: Discord ujust + RPM Fusion non-free (rpmfusion-nonfree-release pkg) ---
-# Discord NON è installato di default (è una ricetta opt-in via ujust).
-# I .repo + GPG keys arrivano dal pacchetto rpmfusion-nonfree-release
-# (47-rpmfusion-release.sh) — niente vendoring statico, future-proof.
+# Discord is NOT installed by default (it's an opt-in ujust recipe).
+# The .repo files + GPG keys come from the rpmfusion-nonfree-release
+# package (47-rpmfusion-release.sh) — no static vendoring, future-proof.
 rpm -q rpmfusion-nonfree-release >/dev/null || {
     echo "FAIL: rpmfusion-nonfree-release pkg missing (47-rpmfusion-release.sh broken?)"
     exit 1
@@ -266,21 +265,21 @@ for r in "${RPMFUSION_REPOS[@]}"; do
     fi
 done
 
-# La GPG key arriva dal pacchetto rpmfusion-nonfree-release (insieme a
-# le key per Fedora 45/46/rawhide). Verifichiamo che almeno la key
-# corrente per F44 sia al posto: senza di essa, il primo
-# `rpm-ostree install discord` via ujust prompt l'utente.
+# The GPG key ships with the rpmfusion-nonfree-release package (together
+# with keys for Fedora 45/46/rawhide). We verify that at least the
+# current F44 key is in place: without it, the first
+# `rpm-ostree install discord` via ujust would prompt the user.
 RPMFUSION_GPGKEY=/etc/pki/rpm-gpg/RPM-GPG-KEY-rpmfusion-nonfree-fedora-44
 if [ ! -s "$RPMFUSION_GPGKEY" ]; then
     echo "FAIL: $RPMFUSION_GPGKEY missing or empty"
     exit 1
 fi
 grep -q '^-----BEGIN PGP PUBLIC KEY BLOCK-----$' "$RPMFUSION_GPGKEY" || {
-    echo "FAIL: $RPMFUSION_GPGKEY non sembra un PGP key block"
+    echo "FAIL: $RPMFUSION_GPGKEY does not look like a PGP key block"
     exit 1
 }
 
-# 95-bazzite-mx.just deve esistere con la ricetta install-discord.
+# 95-bazzite-mx.just must exist and ship the install-discord recipe.
 MX_JUSTFILE=/usr/share/ublue-os/just/95-bazzite-mx.just
 if [ ! -f "$MX_JUSTFILE" ]; then
     echo "FAIL: $MX_JUSTFILE missing"
@@ -308,7 +307,7 @@ if [ ! -s "$ONEPW_GPGKEY" ]; then
     exit 1
 fi
 grep -q '^-----BEGIN PGP PUBLIC KEY BLOCK-----$' "$ONEPW_GPGKEY" || {
-    echo "FAIL: $ONEPW_GPGKEY non sembra un PGP key block"
+    echo "FAIL: $ONEPW_GPGKEY does not look like a PGP key block"
     exit 1
 }
 grep -q '^install-1password:' "$MX_JUSTFILE" || {
@@ -316,34 +315,34 @@ grep -q '^install-1password:' "$MX_JUSTFILE" || {
     exit 1
 }
 
-# --- Phase 8: justfile import nel master Bazzite ---
-# Senza questo, ujust non vede 95-bazzite-mx.just (Bazzite ujust ha
-# import espliciti, no glob).
+# --- Phase 8: justfile import in Bazzite's master file ---
+# Without this, ujust doesn't see 95-bazzite-mx.just (Bazzite's ujust
+# uses explicit imports, no glob).
 MASTER_JUSTFILE=/usr/share/ublue-os/justfile
 grep -qxF 'import "/usr/share/ublue-os/just/95-bazzite-mx.just"' "$MASTER_JUSTFILE" || {
-    echo "FAIL: 95-bazzite-mx.just non è imported nel master $MASTER_JUSTFILE"
+    echo "FAIL: 95-bazzite-mx.just is not imported in master $MASTER_JUSTFILE"
     exit 1
 }
 
-# Smoke test definitivo: ujust deve listare entrambe le ricette MX.
-# Se uno dei due nomi manca, l'import è broken.
+# Definitive smoke test: ujust must list both MX recipes.
+# If either name is missing, the import is broken.
 UJUST_LIST=$(ujust --list 2>&1)
 echo "$UJUST_LIST" | grep -q 'install-discord' || {
-    echo "FAIL: ujust --list non mostra install-discord"
+    echo "FAIL: ujust --list does not show install-discord"
     echo "--- output ---"
     echo "$UJUST_LIST"
     exit 1
 }
 echo "$UJUST_LIST" | grep -q 'install-1password' || {
-    echo "FAIL: ujust --list non mostra install-1password"
+    echo "FAIL: ujust --list does not show install-1password"
     echo "--- output ---"
     echo "$UJUST_LIST"
     exit 1
 }
 
 # --- Phase 8: desktop GUI apps (gparted, ptyxis) ---
-# 60-desktop-apps.sh installa gparted (rimpiazza kde-partitionmanager
-# rimosso da Bazzite) + ptyxis (bare install, no shim/sed integration).
+# 60-desktop-apps.sh installs gparted (replaces kde-partitionmanager
+# removed by Bazzite) + ptyxis (bare install, no shim/sed integration).
 DESKTOP_APPS_RPMS=( gparted ptyxis )
 for p in "${DESKTOP_APPS_RPMS[@]}"; do
     rpm -q "$p" >/dev/null || {
@@ -353,12 +352,12 @@ for p in "${DESKTOP_APPS_RPMS[@]}"; do
 done
 
 # --- Phase 8: vscode-extensions user-setup hook ---
-# Hook al primo login utente che pre-installa le 3 extension Microsoft
-# container/remote (lista convergente Aurora-DX + Bazzite-DX, verificato
-# 2026-05-03). Versioned via libsetup.sh::version-script. Il hook viene
-# eseguito sul deployment finale, non in build — qui controlliamo solo
-# che il file sia presente, eseguibile, e che non manchi nessuna delle
-# 3 extension attese (regression catch).
+# Hook that runs at first user login and pre-installs the 3 Microsoft
+# container/remote extensions (list convergent across Aurora-DX +
+# Bazzite-DX, verified 2026-05-03). Versioned via
+# libsetup.sh::version-script. The hook runs on the deployed system,
+# not at build time — here we only verify the file is present,
+# executable, and ships all 3 expected extension IDs (regression catch).
 VSCODE_HOOK=/usr/share/ublue-os/user-setup.hooks.d/11-vscode-extensions.sh
 if [ ! -x "$VSCODE_HOOK" ]; then
     echo "FAIL: $VSCODE_HOOK missing or not executable"
@@ -370,13 +369,13 @@ VSCODE_EXTENSIONS=(
     ms-vscode-remote.remote-ssh
     ms-azuretools.vscode-containers
 )
-# Greppiamo solo l'ID extension, non `code --install-extension <id>`:
-# se domani il hook venisse refactorato a array-loop la sintassi
-# cambia ma l'ID resta — il test deve catturare la regression
-# semantica ("manca un'extension"), non quella sintattica.
+# Grep only the extension ID, not `code --install-extension <id>`: if
+# the hook is ever refactored to an array-loop, the syntax changes but
+# the ID stays — the test should catch the semantic regression
+# ("an extension is missing"), not the syntactic one.
 for ext in "${VSCODE_EXTENSIONS[@]}"; do
     grep -qF "$ext" "$VSCODE_HOOK" || {
-        echo "FAIL: $VSCODE_HOOK non installa $ext (regression?)"
+        echo "FAIL: $VSCODE_HOOK does not install $ext (regression?)"
         exit 1
     }
 done

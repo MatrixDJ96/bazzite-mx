@@ -1,137 +1,153 @@
 # User preferences
 
-How the user (Mattia, MatrixDJ96) wants to collaborate. These are observed
-patterns from the porting session 2026-05-01 / 2026-05-02 and explicit
-statements. Update as new preferences emerge.
+How the user (Mattia, MatrixDJ96) wants to collaborate on this project.
+Observed patterns from the porting session 2026-05-01 / 2026-05-02 and
+explicit statements. Update as new preferences emerge.
 
-## Communication
+## Language policy
 
-- **Italiano è la lingua primaria**. Tutto il dialogo assistente↔user è in
-  italiano. Identifier di codice (variabili, package names, file paths,
-  command flags) restano in inglese — non tradurli mai.
-- **Diacritiche obbligatorie**: scrivere `però`, `città`, `così`, mai
-  `pero`, `citta`, `cosi`. Vale per ogni testo italiano (commit messages
-  e doc inclusi se in italiano — usiamo inglese per i doc tecnici per
-  convenzione internazionale).
-- **`★ Insight` blocks** (con il quadro Unicode e le linee orizzontali) per
-  contenuto educativo / esplicativo:
+**Single most important convention to internalize:**
+
+- **Conversational language (assistant ↔ user, in chat): Italian.**
+  All chat dialogue happens in Italian. Required diacritics: `però`,
+  `città`, `così` — never `pero`, `citta`, `cosi`.
+- **Committed content (code comments, commit messages, doc files,
+  settings.json, README): English.** The repo is a public global
+  project; non-Italian contributors and users must be able to read
+  every file. No mixed-language artifacts in git.
+
+Code identifiers (variable names, package names, file paths, command
+flags) always stay in their original form (English).
+
+If you write Italian in a file that gets committed, that's a bug to
+fix. If you reply in English in chat with the user, that's also a bug
+— they prefer the conversation in Italian.
+
+## Communication style
+
+- **`★ Insight` blocks** (Unicode square + horizontal lines) for
+  educational / explanatory content:
   ```
   ★ Insight ─────────────────────────────────────
-  [2-3 punti chiave specifici al codebase / al cambiamento appena fatto]
+  [2-3 specific points about the codebase or the change just made]
   ─────────────────────────────────────────────────
   ```
-  Non usare per scopi banali. Usa quando una scelta merita di essere
-  motivata o quando spieghi un meccanismo non ovvio.
-- **Tono terso, ma rigoroso**. Niente paragrafi di scusa o auto-apologia.
-  Quando sbagliato → ammetti in una frase, fixa, vai avanti.
+  Don't use for trivial purposes. Reserve for choices that deserve
+  motivation or non-obvious mechanisms that need explanation.
+- **Terse but rigorous tone.** No apology paragraphs, no self-
+  apologetic prose. When wrong → admit in one sentence, fix, move on.
 
-## Metodologia
+## Methodology
 
-- **Surgical, una cosa per volta**. Il piano `2026-05-01-aurora-dx-style-
-  porting.md` è suddiviso in 9 fasi proprio per questo. Ogni Phase tocca un
-  dominio. Non infilare 3 domini in una commit.
-- **Pre-flight locale prima del push**. L'utente ha PC e rete a casa che
-  reggono pre-flight in 3-5 min — quasi sempre vale la pena spenderli per
-  evitare 6 job CI rossi (15 min total, costo CI minutes pubblici).
-- **Pausa per conferma utente prima di azioni non reversibili**: ogni
-  `git push`, `podman rmi`, `gh release`, `git reset` deve avere una
-  conferma esplicita. Non auto-eseguire.
-- **Fix-forward, niente debt**: quando emerge un'issue durante una review
-  o per una domanda dell'utente, fixarla **subito** in un commit separato
-  (Conventional Commits `refactor(...)`), non lasciar accumulare.
-- **Skip quando l'upstream lo fa meglio**: la Phase 5 (Cockpit) è il caso
-  canonico — Bazzite ship cockpit come container quadlet, infinitamente
-  meglio di quanto produrremmo noi. Saltare è una vittoria, non una
-  rinuncia.
+- **Surgical, one thing at a time.** The plan
+  `2026-05-01-aurora-dx-style-porting.md` was split into 9 phases for
+  exactly this reason. Each phase touches one domain. Don't cram
+  three domains into one commit.
+- **Local pre-flight before push.** The user's home setup (PC + fiber)
+  runs a pre-flight in 3-5 min — almost always worth spending those
+  minutes to avoid 6 red CI jobs (15 min total + public CI minutes).
+- **Pause for user confirmation before non-reversible actions:** every
+  `git push`, `podman rmi`, `gh release`, `git reset` needs explicit
+  confirmation. Don't auto-execute.
+- **Fix-forward, no debt:** when an issue surfaces during a review or
+  via a user question, fix it **immediately** in a separate commit
+  (Conventional Commits `refactor(...)`); don't let it accumulate.
+- **Skip when upstream does it better:** Phase 5 (Cockpit) is the
+  canonical example — Bazzite ships Cockpit as a container quadlet,
+  infinitely better than what we'd produce. Skipping is a win, not
+  a forfeit.
 
-## Standard di qualità
+## Quality standards
 
-- **Verifica claim upstream leggendo il codice**, non i commenti. Il
-  bazzite-dx `vscode.repo gpgcheck=0` aveva un `FIXME` decennale che il
-  reale codice F44/dnf5 ha già risolto — l'utente avrebbe scoperto solo
-  rebuildando. Il pattern "leggi il codice, fai un test rapido" è la
-  difesa.
-- **Niente bypass di safety**: mai `|| true` per nascondere errori, mai
-  `--no-verify`, mai `--force`, mai `rm -rf /var`. Se un step fallisce è
-  perché c'è un bug — debug, non workaround.
-- **Better than upstream when possible**: bazzite-mx ha ora 17 vantaggi
-  documentati su bazzite-dx (vedi
-  [`wins-over-upstream.md`](wins-over-upstream.md)). Aspirazione: ogni
-  Phase aggiunge ≥1 vantaggio reale.
+- **Verify upstream claims by reading the code**, not the comments.
+  The bazzite-dx `vscode.repo gpgcheck=0` line had a decade-old
+  `FIXME` that the actual F44/dnf5 code had already resolved — only
+  rebuilding would have surfaced it. The pattern "read the code, run
+  a quick test" is the defense.
+- **No safety bypasses:** never `|| true` to hide errors, never
+  `--no-verify`, never `--force`, never `rm -rf /var`. If a step
+  fails it's because there's a bug — debug, don't work around.
+- **Better than upstream when possible:** bazzite-mx has 17 documented
+  wins over bazzite-dx (see
+  [`wins-over-upstream.md`](wins-over-upstream.md)). Aspiration:
+  every Phase adds ≥1 real advantage.
 
 ## Decision-making
 
-- **Provenance citation always**. Quando proponi un pacchetto / pattern /
-  fix, citare "da Aurora-DX riga X", "da Bazzite-DX file Y", "mia proposta
-  basata su Z". L'utente ha pizzicato hallucination di provenance più
-  volte; trasparenza = fiducia.
-- **Tradeoff esplicito**. Ogni proposta ha trade-off; metterli in tabella
-  costo/valore + raccomandazione esplicita ("mio consiglio: X"). Non
-  scaricare la decisione lasciando 3 opzioni equivalenti.
-- **Concise verdict over long debate**. Quando review trova issue:
-  "PROCEED to Phase X" / "FIX FIRST" / "DESIGN DISCUSSION". Niente paragrafo
-  di prefazione.
-- **Niente default opinionati**: se una scelta è stilistica (font, theme,
-  formatter), lasciarla all'utente. AmyOS impone scelte → non è il nostro
-  modello. Bazzite-DX stripped di opinioni → è il nostro modello.
+- **Provenance citation always.** When proposing a package / pattern /
+  fix, cite "from Aurora-DX line X", "from Bazzite-DX file Y", "my
+  proposal based on Z". The user has caught hallucinated provenance
+  multiple times; transparency = trust.
+- **Explicit tradeoff.** Every proposal has tradeoffs; lay them out
+  in a cost/value table + explicit recommendation ("my advice: X").
+  Don't punt the decision by leaving three equivalent options.
+- **Concise verdict over long debate.** When review finds an issue:
+  "PROCEED to Phase X" / "FIX FIRST" / "DESIGN DISCUSSION". No
+  prefatory paragraph.
+- **No opinionated defaults:** if a choice is stylistic (font, theme,
+  formatter), leave it to the user. AmyOS imposes choices → not our
+  model. Bazzite-DX strips opinions → that's our model.
 
 ## Git / CI
 
-- **Conventional Commits + Co-Authored-By trailer** su ogni commit
-  Claude-assistito. Subject ≤ 70 char, body ricco con WHY + scoperte +
-  pre-flight outcome.
-- **SSH per origin remote** (memoria persistente, è nei `.claude` /
-  preferences globali utente).
-- **Push solo dopo conferma esplicita** ("vai", "procedi"). Mai pushare
-  preemptivamente anche dopo pre-flight verde.
-- **Commit splitting per concern**: una feature + una refactor = due
-  commit, non uno solo. Granularità migliore per `git revert` futuro.
-- **Documentation commits dovrebbero matchare paths-ignore**: `**.md`,
-  `LICENSE`, `docs/**` skippano CI. Se un commit "doc" tocca anche file
-  fuori da quei pattern (es: `.claude/settings.json`, `.gitignore`),
-  CI gira comunque — calcolarlo prima.
+- **Conventional Commits + Co-Authored-By trailer** on every Claude-
+  assisted commit. Subject ≤ 70 chars, body rich with WHY +
+  discoveries + pre-flight outcome.
+- **SSH for `origin` remote** (persistent memory, in user's global
+  `.claude` / preferences).
+- **Push only after explicit confirmation** ("vai", "procedi"). Never
+  push preemptively, even after a green pre-flight.
+- **Commit splitting per concern:** one feature + one refactor = two
+  commits, not one. Better granularity for future `git revert`.
+- **Documentation commits should match paths-ignore:** `**.md`,
+  `LICENSE`, `docs/**` skip CI. If a "doc" commit also touches files
+  outside those patterns (e.g. `.claude/settings.json`,
+  `.gitignore`), CI runs anyway — calculate it before push.
 
-## Comportamenti aspettati di Claude
+## Expected Claude behavior
 
-- **Honest about uncertainty**. "Non lo so, lo verifico" è meglio di una
-  proposta confidente ma sbagliata.
-- **Anticipa le domande di rigore**. L'utente farà sempre "dove l'hai
-  preso?" e "perché?". Includere già la provenance nella prima proposta.
-- **Run-and-notify, non polling sleep**. Per build/CI lunghi: usare
-  `run_in_background: true` e aspettare la notifica del harness. Mai
-  loop di sleep.
-- **Cleanup dopo verifiche**. Se hai pre-flightato in locale e CI è
-  verde, rimuovi l'immagine pre-flight (`podman rmi`) per liberare disk.
-  Tieni la base Bazzite cached (riusabile per Phase successive).
-- **Aggiorna CLAUDE.md / `.claude/docs/` proattivamente** quando emergono
-  nuove convenzioni / gotchas / preferenze. La conoscenza non deve restare
-  solo nel transcript — questo è il "auto memory" del progetto.
+- **Honest about uncertainty.** "I don't know, let me verify" beats
+  a confident-but-wrong proposal.
+- **Anticipate rigor questions.** The user will always ask "where did
+  you get this?" and "why?". Include provenance in the first proposal.
+- **Run-and-notify, no polling sleep.** For long builds/CI: use
+  `run_in_background: true` and wait for the harness notification.
+  No sleep loops.
+- **Cleanup after verifications.** If you pre-flighted locally and CI
+  is green, remove the pre-flight image (`podman rmi`) to free disk.
+  Keep the Bazzite base cached (reusable for next phases).
+- **Update CLAUDE.md / `.claude/docs/` proactively** when new
+  conventions / gotchas / preferences emerge. Knowledge must not
+  stay only in the chat transcript — this is the project's "auto
+  memory".
 
-## Cose specifiche dell'utente
+## User-specific
 
-- **Ambiente**: Bazzite (atomic Fedora) come daily driver. Conosce bene
-  l'ecosistema ublue.
-- **PC potente + fibra a casa**, build locale è economica. Quando in
-  trasferta (mobile / mobile internet), preferisce CI-only. Lui lo
-  segnala esplicitamente.
+- **Environment**: Bazzite (atomic Fedora) as daily driver. Knows the
+  ublue ecosystem well.
+- **Powerful PC + fiber at home**, local builds are cheap. When
+  traveling (mobile / mobile internet), prefers CI-only. The user
+  signals this explicitly.
 - **GitHub username**: MatrixDJ96. Email: mattyro96@gmail.com. Repo
-  `MatrixDJ96/bazzite-mx`. Sa esattamente cosa fanno gh CLI / cosign /
-  podman / buildah — niente spiegazioni elementari.
-- **Apprezza la spiegazione delle scelte** (insight blocks), ma non i
-  paragrafi enciclopedici. Misura: 3-5 righe per insight, max.
+  `MatrixDJ96/bazzite-mx`. Knows exactly what gh CLI / cosign /
+  podman / buildah do — no elementary explanations needed.
+- **Appreciates explanation of choices** (insight blocks), but not
+  encyclopedic paragraphs. Target: 3-5 lines per insight, max.
 
-## Anti-patterns da evitare
+## Anti-patterns to avoid
 
-- **Non dare proposte come liste senza raccomandazione** ("opzione A, B, C
-  — comanda tu" senza dire quale tu raccomandi). L'utente vuole il tuo
-  judgement, anche se poi può sovvertirlo.
-- **Non shipping in fretta senza verificare provenance**. La Phase 4 v1
-  aveva GitKraken come "IDE" — sbagliato semanticamente. Una passata di
-  "is this actually correct taxonomy?" prima del commit l'avrebbe colto.
-- **Non ignorare le domande dell'utente con un tirare avanti**. Quando
-  pone una domanda di scope ("serve davvero questa Phase?"), pausare e
-  rispondere. Non procedere col piano originale ignorando il dubbio.
-- **Non usare emoji** nel codice / nei commit / nei file (unless
-  esplicitamente richiesto). Plain text e Markdown standard.
-- **Non gonfiare i commit body con boilerplate**. Solo informazione
-  rilevante: scope, why, discovery, pre-flight outcome, references.
+- **Don't present proposals as lists without a recommendation**
+  ("option A, B, C — you decide" without saying which one you
+  recommend). The user wants your judgment, even if they then
+  override it.
+- **Don't ship in a hurry without verifying provenance.** Phase 4 v1
+  had GitKraken as "IDE" — semantically wrong. A "is this actually
+  correct taxonomy?" pass before commit would have caught it.
+- **Don't ignore user questions by pushing forward.** When they raise
+  a scope question ("do we really need this Phase?"), pause and
+  answer. Don't proceed with the original plan while ignoring the
+  doubt.
+- **Don't use emoji** in code / commits / files (unless explicitly
+  requested). Plain text and standard Markdown.
+- **Don't bloat commit bodies with boilerplate.** Only relevant
+  information: scope, why, discovery, pre-flight outcome, references.
