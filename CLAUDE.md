@@ -90,19 +90,12 @@ Cumulative wins over upstream `bazzite-dx`: see
    <noreply@anthropic.com>` trailer. SSH for `origin` remote. Never
    `--force`, `--no-verify`, `--amend` without explicit ask.
 
-6. **Language policy**: chat with the user is in Italian (with diacritics:
-   `però`, `città`); all committed content (code, comments, doc files,
-   commit messages) is in English for the global audience. Code
-   identifiers always English. Full policy in
-   [`.claude/docs/preferences.md`](.claude/docs/preferences.md) §Language
-   policy.
-
-7. **Provenance citations always**: when proposing a package or pattern,
+6. **Provenance citations always**: when proposing a package or pattern,
    cite the source ("from Aurora-DX line X", "lifted from bazzite-dx",
    "my proposal validated by Y"). The user has caught hallucinated
    provenance — transparency is non-negotiable.
 
-8. **Skip a phase when upstream handles it well** (Phase 5 / Cockpit is
+7. **Skip a phase when upstream handles it well** (Phase 5 / Cockpit is
    the canonical example). Document why in the plan doc; don't re-derive
    the decision next session.
 

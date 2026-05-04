@@ -4,25 +4,6 @@ How the user (Mattia, MatrixDJ96) wants to collaborate on this project.
 Observed patterns from the porting session 2026-05-01 / 2026-05-02 and
 explicit statements. Update as new preferences emerge.
 
-## Language policy
-
-**Single most important convention to internalize:**
-
-- **Conversational language (assistant ↔ user, in chat): Italian.**
-  All chat dialogue happens in Italian. Required diacritics: `però`,
-  `città`, `così` — never `pero`, `citta`, `cosi`.
-- **Committed content (code comments, commit messages, doc files,
-  settings.json, README): English.** The repo is a public global
-  project; non-Italian contributors and users must be able to read
-  every file. No mixed-language artifacts in git.
-
-Code identifiers (variable names, package names, file paths, command
-flags) always stay in their original form (English).
-
-If you write Italian in a file that gets committed, that's a bug to
-fix. If you reply in English in chat with the user, that's also a bug
-— they prefer the conversation in Italian.
-
 ## Communication style
 
 - **`★ Insight` blocks** (Unicode square + horizontal lines) for
