@@ -2,7 +2,7 @@
 
 bazzite-mx is a personal fork that aims to be **strictly better** than
 `ublue-os/bazzite-dx` upstream by adopting Aurora-DX's build patterns and
-fixing concrete issues. **10 wins** as of the Firefox commit;
+fixing concrete issues. **11 wins** as of the third-party packages commit;
 wins accumulate as each domain commit lands.
 
 ## 1. Strict repo isolation via `validate-repos.sh`
@@ -208,6 +208,32 @@ on next boot/login.
   cycle, no flatpak runtime drifting from the base image).
 - No accidental "two Firefoxes installed" surprise from a user
   clicking Discover's "Install Firefox" button.
+
+
+
+## 11. Zero-maintenance third-party GPG keys
+
+**Upstream**: bazzite-dx and Aurora-DX historically vendor GPG keys
+statically under `system_files/etc/pki/rpm-gpg/`. When upstream
+rotates a key, the vendored copy goes stale and the install starts
+warning (or failing in strict mode).
+
+**Us**:
+- **RPM Fusion non-free**: install `rpmfusion-nonfree-release` (the
+  release-info package). It ships keys for F44 / F45 / F46 / rawhide
+  in a single rpm. Future Bazzite rebases against newer Fedora pull
+  the corresponding key for free. The `.repo` files come with the
+  same package (we sed `enabled=0` after install for isolation).
+- **1Password**: `curl -fsSL https://downloads.1password.com/linux/
+  keys/1password.asc` at build time. Every CI build re-fetches the
+  current key. If 1Password rotates it, we get the new key on the
+  next build (~1h via the upstream watcher).
+
+**Why it matters**: zero maintenance debt for key rotation. A key
+that goes stale on a vendored static copy is a slow ticking bomb;
+we trade it for a per-build network call to the trust anchor
+(documented as part of the "third-party `.repo` is `enabled=0`"
+isolation invariant).
 
 ## How to extend this list
 

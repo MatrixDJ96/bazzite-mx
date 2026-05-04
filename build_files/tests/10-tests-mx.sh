@@ -228,4 +228,43 @@ if [ ! -x "$FIREFOX_HOOK_USER" ]; then
     exit 1
 fi
 
+# --- Phase 8: RPM Fusion non-free release pkg + repo files ---
+rpm -q rpmfusion-nonfree-release >/dev/null || {
+    echo "FAIL: rpmfusion-nonfree-release pkg missing"
+    exit 1
+}
+RPMFUSION_REPOS=(
+    /etc/yum.repos.d/rpmfusion-nonfree.repo
+    /etc/yum.repos.d/rpmfusion-nonfree-updates.repo
+    /etc/yum.repos.d/rpmfusion-nonfree-updates-testing.repo
+)
+for r in "${RPMFUSION_REPOS[@]}"; do
+    [ -f "$r" ] || { echo "FAIL: $r missing"; exit 1; }
+    if grep -q "^enabled=1" "$r"; then
+        echo "FAIL: $r should be enabled=0 after 47-rpmfusion-release.sh sed"
+        exit 1
+    fi
+done
+RPMFUSION_GPGKEY=/etc/pki/rpm-gpg/RPM-GPG-KEY-rpmfusion-nonfree-fedora-44
+if [ ! -s "$RPMFUSION_GPGKEY" ]; then
+    echo "FAIL: $RPMFUSION_GPGKEY missing or empty"
+    exit 1
+fi
+
+# --- Phase 8: 1Password vendored repo + GPG key fetched at build ---
+ONEPW_REPO=/etc/yum.repos.d/1password.repo
+ONEPW_GPGKEY=/etc/pki/rpm-gpg/1password.asc
+if [ ! -f "$ONEPW_REPO" ]; then
+    echo "FAIL: $ONEPW_REPO missing"
+    exit 1
+fi
+if grep -q "^enabled=1" "$ONEPW_REPO"; then
+    echo "FAIL: $ONEPW_REPO should be enabled=0 (runtime-enabled by ujust install-1password)"
+    exit 1
+fi
+if [ ! -s "$ONEPW_GPGKEY" ]; then
+    echo "FAIL: $ONEPW_GPGKEY missing or empty (48-1password-key.sh broken?)"
+    exit 1
+fi
+
 echo "MX smoke tests OK."

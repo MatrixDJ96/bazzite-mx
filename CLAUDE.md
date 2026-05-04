@@ -31,6 +31,8 @@ Auto-loaded by Claude Code at session start.
 
 | 7 — Firefox via Mozilla RPM | ✅ Done | `45-firefox-rpm.sh` installs `firefox` + `firefox-l10n-it` from Mozilla's official RPM repo (`mozilla.repo` vendored) — replaces Bazzite's Flathub flatpak. `46-firefox-flatpak-exclude.sh` removes `org.mozilla.firefox` from Bazzite's default flatpak install list and adds `deny org.mozilla.firefox/*` to the flatpak-blocklist (Discover/Bazaar hide it). Two libsetup-versioned cleanup hooks (`15-cleanup-firefox-flatpak.sh` system + user) flatpak-uninstall any pre-existing namespace at first boot/login. |
 
+| 8 — Third-party packages | ✅ Done | `47-rpmfusion-release.sh` installs `rpmfusion-nonfree-release` (ships GPG keys for F44/F45/F46/rawhide + the 3 `.repo` files); we sed `enabled=0` immediately. `48-1password-key.sh` fetches 1Password's official GPG key at build time (`curl -fsSL` from downloads.1password.com); `1password.repo` vendored with `enabled=0`. Both repos are runtime-enabled per-install via the `ujust install-{discord,1password}` recipes. Zero static-vendoring of GPG keys (auto-update via `bootc upgrade` for RPM Fusion's release pkg; build-time fetch refresh for 1Password). |
+
 ## Where to look
 
 | If you need to… | Read |
