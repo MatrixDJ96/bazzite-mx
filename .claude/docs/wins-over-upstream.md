@@ -2,7 +2,7 @@
 
 bazzite-mx is a personal fork that aims to be **strictly better** than
 `ublue-os/bazzite-dx` upstream by adopting Aurora-DX's build patterns and
-fixing concrete issues. **9 wins** as of the CLI commit;
+fixing concrete issues. **10 wins** as of the Firefox commit;
 wins accumulate as each domain commit lands.
 
 ## 1. Strict repo isolation via `validate-repos.sh`
@@ -186,6 +186,28 @@ multiple minor versions ahead of the Fedora repo.
 **Why it matters**: `gh` evolves quickly (new commands, GitHub API
 features). Lagging by 5+ versions on a "DX" distro is a poor signal.
 The vendoring pattern matches what we did for docker-ce.
+
+
+
+## 10. Firefox from Mozilla's official RPM (vs. Flatpak)
+
+**Upstream**: Bazzite installs Firefox as a Flathub flatpak
+(`org.mozilla.firefox`) via its default-install list.
+
+**Us**: Firefox via Mozilla's RPM repo, plus flatpak excluded from
+default install + blocklisted from Discover/Bazaar + cleanup hooks
+that uninstall any pre-existing per-user/per-system flatpak Firefox
+on next boot/login.
+
+**Why it matters**:
+- Native messaging, system fonts, system policies, system keyring
+  integration all work out-of-the-box — flatpak Firefox requires
+  socket workarounds (xdg-desktop-portal-gtk, file-system access
+  permissions, etc.) for several of these.
+- One source of truth for security updates (Mozilla's release
+  cycle, no flatpak runtime drifting from the base image).
+- No accidental "two Firefoxes installed" surprise from a user
+  clicking Discover's "Install Firefox" button.
 
 ## How to extend this list
 

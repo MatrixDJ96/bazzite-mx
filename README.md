@@ -24,6 +24,7 @@ Each variant is published with two stream tags: `:stable` and `:testing`.
 | **Virtualization** | libvirt, qemu, virt-manager, swtpm, waypipe + `libvirtd.service` enabled at build + KVM kargs (`kvm.ignore_msrs=1`, `kvm.report_ignored_msrs=0`) shipped via `bootc/kargs.d` + flatpak virt-manager masked | Windows 11 VM compat (TPM 2.0 via swtpm) + remote-display Wayland forwarding; the stack is fully working on first boot without `ujust setup-virtualization` (which is also overridden to remove an upstream gate that silently no-ops on RPM-installed virt-manager) |
 | **IDE / Dev** | VSCode (`update.mode=none`) + GitKraken + `git-credential-libsecret` | atomic-correct settings (auto-update fights `/usr` read-only); keyring-backed git auth; minimalism (no opinionated font/theme/formatter overrides) |
 | **Dev / Sysadmin CLI** | `bcc-tools` + `bpftrace` + `bpftop` + `sysprof` + `iotop-c` + `nicstat` + `numactl` + `trace-cmd` + `flatpak-builder` + `gh` (upstream vendored repo) + `cosign` (already in Bazzite base) | observability + container build + GitHub workflow |
+| **Web / browsers** | Firefox via Mozilla RPM repo (replaces Flatpak Firefox) + Bazzite's flatpak default-install adjusted to skip Firefox | RPM Firefox supports system fonts, system policies, native messaging; Flatpak doesn't |
 
 ## Build
 

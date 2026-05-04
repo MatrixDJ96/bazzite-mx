@@ -188,4 +188,44 @@ for p in "${DEV_CLI_RPMS[@]}"; do
     rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
 done
 
+# --- Phase 7: Firefox from Mozilla's official RPM repo ---
+# The build replaces Bazzite's Flathub flatpak with the Mozilla RPM
+# (45-firefox-rpm.sh). Assertions:
+#  - firefox + firefox-l10n-it installed
+#  - VENDOR = "Mozilla" (guard against regression to the Fedora rpm
+#    or accidental layer of the flatpak's bin/firefox)
+FIREFOX_RPMS=( firefox firefox-l10n-it )
+for p in "${FIREFOX_RPMS[@]}"; do
+    rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
+done
+firefox_vendor=$(rpm -q --qf '%{VENDOR}\n' firefox 2>/dev/null)
+if [ "$firefox_vendor" != "Mozilla" ]; then
+    echo "FAIL: firefox VENDOR is '$firefox_vendor' (expected 'Mozilla')"
+    exit 1
+fi
+
+# --- Phase 7: Firefox flatpak exclusion ---
+INSTALL_LIST=/usr/share/ublue-os/bazzite/flatpak/install
+BLOCKLIST=/usr/share/ublue-os/flatpak-blocklist
+if [ -f "$INSTALL_LIST" ] && grep -qx "org.mozilla.firefox" "$INSTALL_LIST"; then
+    echo "FAIL: $INSTALL_LIST still contains org.mozilla.firefox"
+    exit 1
+fi
+grep -q '^deny org\.mozilla\.firefox/\*$' "$BLOCKLIST" || {
+    echo "FAIL: $BLOCKLIST missing firefox deny line"
+    exit 1
+}
+
+# --- Phase 7: Firefox cleanup hooks (system + user) ---
+FIREFOX_HOOK_SYS=/usr/share/ublue-os/system-setup.hooks.d/15-cleanup-firefox-flatpak.sh
+FIREFOX_HOOK_USER=/usr/share/ublue-os/user-setup.hooks.d/15-cleanup-firefox-flatpak.sh
+if [ ! -x "$FIREFOX_HOOK_SYS" ]; then
+    echo "FAIL: $FIREFOX_HOOK_SYS missing or not executable"
+    exit 1
+fi
+if [ ! -x "$FIREFOX_HOOK_USER" ]; then
+    echo "FAIL: $FIREFOX_HOOK_USER missing or not executable"
+    exit 1
+fi
+
 echo "MX smoke tests OK."

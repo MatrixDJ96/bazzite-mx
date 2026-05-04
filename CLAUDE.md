@@ -29,6 +29,8 @@ Auto-loaded by Claude Code at session start.
 
 | 6 — Dev/sysadmin CLI | ✅ Done | `40-dev-cli.sh` installs observability + dev tooling: `android-tools`, `bcc` + **`bcc-tools`** (BPF tracing utilities — both Aurora-DX and Bazzite-DX install only `bcc` itself, missing the tools), `bpftrace`, `bpftop`, `sysprof`, `iotop-c`, `nicstat`, `numactl`, `trace-cmd`, `flatpak-builder`, `gh` (GitHub CLI from vendored `gh-cli.repo` pointing at upstream's official RPM repo — multiple minor versions ahead of Fedora's package). `cosign` is already in Bazzite base; we assert it for defensive depth. |
 
+| 7 — Firefox via Mozilla RPM | ✅ Done | `45-firefox-rpm.sh` installs `firefox` + `firefox-l10n-it` from Mozilla's official RPM repo (`mozilla.repo` vendored) — replaces Bazzite's Flathub flatpak. `46-firefox-flatpak-exclude.sh` removes `org.mozilla.firefox` from Bazzite's default flatpak install list and adds `deny org.mozilla.firefox/*` to the flatpak-blocklist (Discover/Bazaar hide it). Two libsetup-versioned cleanup hooks (`15-cleanup-firefox-flatpak.sh` system + user) flatpak-uninstall any pre-existing namespace at first boot/login. |
+
 ## Where to look
 
 | If you need to… | Read |
