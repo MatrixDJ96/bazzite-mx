@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git remote:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git config --get:*)",
+      "Bash(git config user.email)",
+      "Bash(git config user.name)",
+      "Bash(git fetch:*)",
+
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh run watch:*)",
+      "Bash(gh api:*)",
+      "Bash(gh release view:*)",
+      "Bash(gh release list:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr view:*)",
+
+      "Bash(podman images:*)",
+      "Bash(podman ps:*)",
+      "Bash(podman inspect:*)",
+      "Bash(podman volume ls:*)",
+      "Bash(podman volume inspect:*)",
+      "Bash(podman system df:*)",
+      "Bash(podman build:*)",
+      "Bash(podman run --rm:*)",
+      "Bash(podman image prune -f:*)",
+      "Bash(podman volume prune -f:*)",
+
+      "Bash(skopeo inspect:*)",
+      "Bash(skopeo list-tags:*)",
+
+      "Bash(buildah from:*)",
+
+      "Bash(jq:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(awk:*)",
+      "Bash(sed:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(file:*)",
+      "Bash(xxd:*)",
+      "Bash(diff:*)",
+      "Bash(tree:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(stat:*)",
+      "Bash(realpath:*)",
+      "Bash(dirname:*)",
+      "Bash(basename:*)",
+      "Bash(df:*)",
+      "Bash(du:*)",
+      "Bash(free:*)",
+
+      "Bash(curl -sL:*)",
+      "Bash(curl -sI:*)",
+      "Bash(curl -sIL:*)",
+      "Bash(curl -fsSL:*)",
+
+      "Bash(chmod +x:*)",
+      "Bash(mkdir -p:*)",
+
+      "Bash(date:*)",
+      "Bash(echo:*)",
+      "Bash(printf:*)",
+      "Bash(hostname:*)",
+      "Bash(true:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(rm -rf /:*)",
+      "Bash(rm -rf /var:*)",
+      "Bash(sudo rm -rf:*)"
+    ],
+    "additionalDirectories": []
+  },
+  "env": {},
+  "hooks": {}
+}
