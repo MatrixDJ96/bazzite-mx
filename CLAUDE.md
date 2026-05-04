@@ -37,6 +37,8 @@ Auto-loaded by Claude Code at session start.
 
 | 10 — Justfile + ujust recipes | ✅ Done | `system_files/usr/share/ublue-os/just/95-bazzite-mx.just` ships our custom recipes: `install-discord` (RPM Fusion non-free, runtime-flips repo `enabled=0` → `enabled=1` via sed, then `rpm-ostree install discord` — mirrors Bazzite's `install-coolercontrol` idiom) + `install-1password` (vendored repo, same pattern) + `_pkg_layered` private helper (returns `yes`/`no` on stdout, idempotency check that doesn't pollute output with `just` "Recipe failed" noise). `55-justfile-import.sh` idempotently appends `import "/usr/share/ublue-os/just/95-bazzite-mx.just"` to Bazzite's master `/usr/share/ublue-os/justfile` (Bazzite uses explicit `import` directives, no glob, so unimported files are silently invisible). |
 
+| 11 — Desktop apps + vscode extensions | ✅ Done | `60-desktop-apps.sh` installs `gparted` (restores Bazzite-removed `kde-partitionmanager` functionality — Bazzite removed the KDE GUI partition tool in commit `378e524a` Plasma 6.4 cleanup, didn't replace it) + `ptyxis` (container-aware GNOME terminal, opt-in alongside Konsole). `system_files/usr/share/ublue-os/user-setup.hooks.d/11-vscode-extensions.sh` runs at first user login and pre-installs the 3 Microsoft container/remote extensions (Aurora-DX + Bazzite-DX convergent: ms-vscode-remote.remote-containers, ms-vscode-remote.remote-ssh, ms-azuretools.vscode-containers). Hardened against `libsetup.sh::version-script` state-before-body race: every `code --install-extension` has `\|\| true` so transient marketplace timeouts don't permanently disable the hook. |
+
 ## Where to look
 
 | If you need to… | Read |

@@ -2,7 +2,7 @@
 
 bazzite-mx is a personal fork that aims to be **strictly better** than
 `ublue-os/bazzite-dx` upstream by adopting Aurora-DX's build patterns and
-fixing concrete issues. **13 wins** as of the justfile commit;
+fixing concrete issues. **15 wins** as of the desktop commit;
 wins accumulate as each domain commit lands.
 
 ## 1. Strict repo isolation via `validate-repos.sh`
@@ -293,6 +293,51 @@ The stdout-as-boolean pattern keeps install-* output clean.
 **Why it matters**: clean recipe UX, no spurious "error" lines on
 re-run, and a reusable layering-check helper for any future
 `install-*` recipe.
+
+
+
+## 14. VSCode extensions hardened against libsetup.sh state-before-body race
+
+**Upstream**: Bazzite-DX has the same race in their vscode-extensions
+hook but never noticed because their hook has no failure modes more
+sensitive than ours. Aurora-DX dodges the race by writing state at
+the END of their custom libexec (no libsetup.sh).
+
+**Race**: `libsetup.sh::version-script` writes the versioned state
+file BEFORE the hook body runs. Under `set -euo pipefail`, a single
+failed command (transient marketplace timeout, missing skel file,
+…) aborts the hook AFTER the state has been committed → next login
+skips the hook → silent permanent disable.
+
+**Us**: every `code --install-extension X` has `|| true` so failure
+becomes benign and the hook completes (state correctly reflects "I
+tried"). Source paths in the hook (`/etc/skel/.config/Code/User/
+settings.json`) are guarded with `[ -e ... ]` so a future skel
+removal doesn't trigger the trap.
+
+**Why it matters**: a one-time login glitch (network blip when
+fetching from the marketplace) on the original would silently
+disable the hook forever — the user's `code` would never get the
+3 expected extensions auto-installed, and they'd never know why.
+
+## 15. `gparted` ships to fill the gap Bazzite leaves
+
+**Upstream**: Bazzite **removes** `kde-partitionmanager` from their
+KDE base (commit `378e524a`, Plasma 6.4 cleanup) and does NOT
+replace it with anything else. The bootc deployment image therefore
+ships **with no GUI partition tool** — only CLI `parted` / `fdisk`
+survive. Bazzite's own ISO installer hook installs gparted but
+only into the live ISO environment, not into the deployed system.
+
+**Us**: `build_files/mx/60-desktop-apps.sh` ships `gparted` (~9
+MiB) as a universal partition manager. Provenance also reinforced
+by AmyOS, which ships gparted in their DX-style list.
+
+**Why it matters**: a daily-driver workstation needs a GUI
+partition tool. Discovering only at the moment of need that
+`kde-partitionmanager` is gone (and the live-ISO gparted is not
+on the deployed system) would mean dropping to terminal `parted`
+or rebooting from USB.
 
 ## How to extend this list
 

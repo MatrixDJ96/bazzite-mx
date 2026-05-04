@@ -27,6 +27,7 @@ Each variant is published with two stream tags: `:stable` and `:testing`.
 | **Web / browsers** | Firefox via Mozilla RPM repo (replaces Flatpak Firefox) + Bazzite's flatpak default-install adjusted to skip Firefox | RPM Firefox supports system fonts, system policies, native messaging; Flatpak doesn't |
 | **System integration** | first-boot system-setup hooks (groups, flatpak Firefox cleanup, virt-manager flatpak cleanup) + first-login user-setup hooks (flatpak Firefox cleanup, virt-manager flatpak cleanup) — all versioned via `libsetup.sh` | bridges the `/etc/skel` doesn't-reach-existing-users gotcha; same hooks framework as Bazzite-DX |
 | **ujust opt-in recipes** | `ujust install-discord` (RPM Fusion non-free) + `ujust install-1password` (vendored official repo) + `_pkg_layered` reusable helper | rpm-ostree layered installs with idempotency check; opt-in keeps metadata footprint small for users who don't want them |
+| **Desktop apps** | gparted (restores Bazzite-removed `kde-partitionmanager` functionality) + ptyxis (2nd container-aware terminal) + VSCode extensions auto-installed at first login (3 Microsoft container/remote extensions, hardened against libsetup race) | GUI partition tool back; Ptyxis as opt-in alongside Konsole, no replacement of the default; same 3 extensions Aurora-DX and Bazzite-DX both converged on |
 
 ## Build
 

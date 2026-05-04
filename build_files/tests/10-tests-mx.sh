@@ -336,4 +336,28 @@ grep -q "import \"/usr/share/ublue-os/just/95-bazzite-mx.just\"" /usr/share/ublu
     exit 1
 }
 
+# --- Phase 11: Desktop apps (gparted + ptyxis) ---
+DESKTOP_RPMS=( gparted ptyxis )
+for p in "${DESKTOP_RPMS[@]}"; do
+    rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
+done
+
+# --- Phase 11: vscode-extensions user-setup hook ---
+VSCODE_HOOK=/usr/share/ublue-os/user-setup.hooks.d/11-vscode-extensions.sh
+if [ ! -x "$VSCODE_HOOK" ]; then
+    echo "FAIL: $VSCODE_HOOK missing or not executable"
+    exit 1
+fi
+VSCODE_EXTENSIONS=(
+    ms-vscode-remote.remote-containers
+    ms-vscode-remote.remote-ssh
+    ms-azuretools.vscode-containers
+)
+for ext in "${VSCODE_EXTENSIONS[@]}"; do
+    grep -qF "$ext" "$VSCODE_HOOK" || {
+        echo "FAIL: $VSCODE_HOOK does not install $ext (regression?)"
+        exit 1
+    }
+done
+
 echo "MX smoke tests OK."
