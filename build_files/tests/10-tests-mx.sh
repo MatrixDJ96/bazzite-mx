@@ -267,6 +267,32 @@ if [ ! -f /usr/lib/ublue/setup-services/libsetup.sh ]; then
     exit 1
 fi
 
+# Hook version must be 2 (post 2026-05-04 docker-group fix). v1 had a
+# silent gap because the docker group did not exist on the deployed
+# system; v2 ships alongside /usr/lib/sysusers.d/bazzite-mx-docker.conf
+# and re-runs on existing installations to add the user to docker.
+# Pattern: anchor the start, require the version literal followed by a
+# whitespace boundary (the actual line is `version-script ... 2 || exit 0`).
+grep -qE '^version-script bazzite-mx-groups system 2[[:space:]]' "$GROUPS_HOOK" || {
+    echo "FAIL: $GROUPS_HOOK is not at version 2 (regression on docker-group fix)"
+    exit 1
+}
+
+# Companion sysusers.d entry that creates the docker group at boot
+# (docker-ce's rpm postinstall scriptlet is suppressed on rpm-ostree
+# atomic; without this file the group never exists and usermod -aG
+# docker silently skips). systemd-sysusers reads this at sysinit
+# .target, before our group-adding hook fires.
+DOCKER_SYSUSERS=/usr/lib/sysusers.d/bazzite-mx-docker.conf
+if [ ! -f "$DOCKER_SYSUSERS" ]; then
+    echo "FAIL: $DOCKER_SYSUSERS missing (docker-ce group gap not patched)"
+    exit 1
+fi
+grep -qE '^g[[:space:]]+docker[[:space:]]+-' "$DOCKER_SYSUSERS" || {
+    echo "FAIL: $DOCKER_SYSUSERS does not declare 'g docker -' (malformed sysusers)"
+    exit 1
+}
+
 # --- Phase 8: Firefox from Mozilla's official RPM repo ---
 # The build replaces Bazzite's Flathub flatpak with the Mozilla RPM
 # (45-firefox-rpm.sh). Assertions:

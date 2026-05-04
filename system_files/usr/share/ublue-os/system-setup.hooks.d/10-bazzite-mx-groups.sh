@@ -11,18 +11,37 @@
 # Bumping the third arg of `version-script` re-runs the hook on every
 # user the next time the system boots. Useful when the TARGET_GROUPS
 # list changes.
+#
+# Version history:
+#  v1 — initial (Phase 7).
+#  v2 — bumped 2026-05-04 in concert with the new
+#       /usr/lib/sysusers.d/bazzite-mx-docker.conf shipping the docker
+#       group via systemd-sysusers. v1 had run on every existing
+#       installation and silently skipped docker (because docker-ce's
+#       postinstall scriptlet that calls `groupadd --system docker` is
+#       suppressed on rpm-ostree → group never existed → hook
+#       short-circuited with a WARNING). v2 re-runs the hook body on
+#       next boot now that systemd-sysusers has created the group
+#       early at sysinit.target, allowing usermod -aG docker to
+#       succeed.
 
 set -euo pipefail
 
 # shellcheck disable=SC1091
 source /usr/lib/ublue/setup-services/libsetup.sh
 
-version-script bazzite-mx-groups system 1 || exit 0
+version-script bazzite-mx-groups system 2 || exit 0
 
 # Append a group from /usr/lib/group (vendor) into /etc/group (mutable)
 # if it isn't already there. Required because atomic distros only seed
 # /etc/group with a minimal subset; package-installed groups land in
 # /usr/lib/group and have to be merged at runtime.
+#
+# For the `docker` group specifically, /usr/lib/sysusers.d/bazzite-mx-
+# docker.conf creates it via systemd-sysusers BEFORE this hook runs,
+# so the `getent group docker` check below succeeds and usermod -aG
+# proceeds. The /etc/group path here remains the fallback for
+# package-shipped groups (libvirt arrives this way on Bazzite).
 append_group() {
     local group_name="$1"
     if ! grep -q "^${group_name}:" /etc/group; then
