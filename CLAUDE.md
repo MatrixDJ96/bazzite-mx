@@ -27,6 +27,8 @@ Auto-loaded by Claude Code at session start.
 
 | 5 — IDE & Git tools | ✅ Done | `30-ide.sh` installs `code` (VSCode) from vendored `vscode.repo` (`enabled=0`, `gpgcheck=1` — strictly more secure than upstream's `gpgcheck=0` workaround). `35-git-tools.sh` installs `gitkraken` (URL-fetched RPM from release.gitkraken.com, ~80 MiB) and `git-credential-libsecret` (Aurora base only, missing from Bazzite-DX). `system_files/etc/skel/.config/Code/User/settings.json` ships `{"update.mode": "none"}` so VSCode's self-updater doesn't fight a read-only `/usr` — atomic-correct default with no opinionated styling overlay. |
 
+| 6 — Dev/sysadmin CLI | ✅ Done | `40-dev-cli.sh` installs observability + dev tooling: `android-tools`, `bcc` + **`bcc-tools`** (BPF tracing utilities — both Aurora-DX and Bazzite-DX install only `bcc` itself, missing the tools), `bpftrace`, `bpftop`, `sysprof`, `iotop-c`, `nicstat`, `numactl`, `trace-cmd`, `flatpak-builder`, `gh` (GitHub CLI from vendored `gh-cli.repo` pointing at upstream's official RPM repo — multiple minor versions ahead of Fedora's package). `cosign` is already in Bazzite base; we assert it for defensive depth. |
+
 ## Where to look
 
 | If you need to… | Read |

@@ -175,4 +175,17 @@ for p in "${GIT_TOOLS_RPMS[@]}"; do
     rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
 done
 
+# --- Phase 6: Dev/sysadmin CLI tools ---
+DEV_CLI_RPMS=(
+    android-tools
+    bcc bcc-tools bpftrace bpftop
+    sysprof iotop-c nicstat numactl trace-cmd
+    flatpak-builder
+    gh
+    cosign
+)
+for p in "${DEV_CLI_RPMS[@]}"; do
+    rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
+done
+
 echo "MX smoke tests OK."
