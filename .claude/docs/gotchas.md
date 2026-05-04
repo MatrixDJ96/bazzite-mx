@@ -7,6 +7,7 @@ date and the commit / context where the lesson was learned.
 | # | Symptom | Root cause | Fix | First seen |
 |---|---|---|---|---|
 | 1 | Phase 2 v1 build failed: KCM branding test — "expected Variant=…, got ''" | `/usr/share/kcm-about-distro/kcm-about-distrorc` doesn't exist on Bazzite (Aurora-only path). Initial workaround used a `[ -f ]` guard that made the branding step silently no-op. | Bazzite ships the file at `/etc/xdg/kcm-about-distrorc` (the Bazzite-DX-style location). `build_files/mx/00-image-info.sh` seds `Variant` and `Website` there + updates `image-info.json` (image-name + image-ref + image-vendor) and `/usr/lib/os-release` VARIANT_ID. Smoke test asserts all four values to prevent silent regression. | Phase 2 (branding) |
+| 2 | `dnf5 config-manager setopt <id>.enabled=0` returns 0 but the .repo file is unchanged | dnf5 5.x: setopt is a silent no-op on .repo files added via `addrepo --from-repofile=URL` or `--repofrompath` | `sed -i 's/^enabled=1/enabled=0/g' /etc/yum.repos.d/<file>.repo` — same idiomatic pattern used everywhere we touch a runtime-added .repo | Phase 3 (container runtime) |
 
 ## Patterns to be wary of
 

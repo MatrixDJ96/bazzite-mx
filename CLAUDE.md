@@ -22,6 +22,7 @@ Auto-loaded by Claude Code at session start.
 | 0 — Bootstrap | ✅ Done | Containerfile (FROM bazzite + labels) + CI workflows + cosign signing-by-digest |
 | 1 — Scaffold | ✅ Done | `build_files/{shared,mx,tests}` + orchestrator (`build.sh`, `build-mx.sh`, `clean-stage.sh`, `validate-repos.sh`, `copr-helpers.sh`) + smoke-test framework (`10-tests-mx.sh` skeleton: sysctl + modules-load markers) + `.claude/` project conventions |
 | 2 — Branding | ✅ Done | `00-image-info.sh` rewrites `/usr/share/ublue-os/image-info.json` (image-name, image-vendor, image-ref), `/usr/lib/os-release` VARIANT_ID, and `/etc/xdg/kcm-about-distrorc` (Variant + Website) so KDE System Settings → About reflects bazzite-mx. Smoke test asserts all four values to prevent silent regression. |
+| 3 — Container runtime | ✅ Done | `10-container-runtime.sh` installs Docker CE + extras (`docker-ce`, `docker-ce-cli`, `containerd.io`, `docker-buildx-plugin`, `docker-compose-plugin`, `docker-model-plugin`) and podman extras (`podman-compose`, `podman-machine`, `podman-tui`, `podman-bootc`). `docker.socket` and `podman.socket` enabled at build. `docker-ce.repo` vendored under `system_files/etc/yum.repos.d/` with `enabled=0` and `gpgcheck=1`; `validate-repos.sh` enforces the isolation invariant. |
 
 ## Where to look
 

@@ -16,9 +16,11 @@ This repository builds and publishes three GHCR images that differ only in `BASE
 
 Each variant is published with two stream tags: `:stable` and `:testing`.
 
-## Status
+## What's added on top of Bazzite
 
-**Bootstrap.** The build produces a passthrough copy of upstream Bazzite with rebranded image labels, signed with cosign. No customisation yet. Following commits add domain-specific layers (container runtime, virtualization, IDE, CLI, etc.).
+| Domain | What | Why |
+|---|---|---|
+| **Container runtime** | Docker CE + extras (compose, machine, tui, bootc) + sockets | full Docker workflow alongside Bazzite's existing Podman; isolated upstream Docker repo (`docker-ce.repo` vendored, `enabled=0`) |
 
 ## Build
 
