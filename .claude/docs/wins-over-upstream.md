@@ -2,7 +2,7 @@
 
 bazzite-mx is a personal fork that aims to be **strictly better** than
 `ublue-os/bazzite-dx` upstream by adopting Aurora-DX's build patterns and
-fixing concrete issues. **16 wins** as of CI rechunker commit;
+fixing concrete issues. **17 wins** as of CI rechunker commit;
 wins accumulate as each domain commit lands.
 
 ## 1. Strict repo isolation via `validate-repos.sh`
@@ -385,16 +385,39 @@ Sunshine back to first-class status: same speed of install (zero
 — already there), `bootc upgrade` updates, no brew prerequisite,
 and works on a fresh deployment without any user setup.
 
+## 17. Rechunker enabled by default (vs. Bazzite-DX/AmyOS template-commented-out)
+
+**Upstream**: Bazzite-DX (`build.yml:155-181`) and AmyOS
+(`build.yml`, similar) both ship the rechunker step **commented
+out** in their template, with a comment block telling the user to
+"uncomment if you want it". Default behavior on a fresh fork:
+no rechunking, the published image is one giant overlay layer per
+build. Aurora-DX takes a different path: a custom `just rechunk`
+recipe wrapping the `hhd-dev/rechunk` action; activated by default.
+
+**Us**: rechunker enabled by default in
+`.github/workflows/reusable-build.yml` using bootc's native
+`rpm-ostree compose build-chunked-oci`. Choice over `hhd-dev/
+rechunk`:
+- No external action version pin to maintain — runs in-image, the
+  version shipped is exactly what bazzite ships.
+- Integrates cleanly with our cosign-by-digest signing (no
+  re-tagging dance).
+- `--bootc --max-layers 127 --format-version 2` matches Bazzite's
+  internal pattern, maximising cross-image dedup with the base.
+
+**Cost**: ~+15 min wall-clock on the 6-job matrix (~13-15 min per
+job, parallel).
+
+**Why it matters**: a fresh-fork user who copy-pastes the
+Bazzite-DX template gets a rechunkless image silently, then has
+to discover the gap (typically when their users hit slow /
+non-resumable downloads or when they run out of GHCR storage
+quota faster than expected). We surface the choice explicitly,
+default it to "on", and document the trade-off here so the cost
+is visible.
+
 ## How to extend this list
-
-## How to extend this list — addendum: rechunker
-
-Note: the rechunker step is the canonical example of a "ship it on
-by default" choice that Bazzite-DX and AmyOS both leave commented
-out in their template (with a "uncomment if you want it" comment).
-It is enabled by default in our `reusable-build.yml`. The win is
-visible in `git log -p .github/workflows/reusable-build.yml` —
-look for the "Run Rechunker" step.
 
 
 When adding a new Phase, deliberately ask: **does this give us an edge

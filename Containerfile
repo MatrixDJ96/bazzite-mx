@@ -18,6 +18,9 @@ ARG VERSION=
 ARG UPSTREAM_DIGEST=
 ARG UPSTREAM_TAG=
 
+# Re-export the build args as ENV so they are visible to the RUN scripts
+# (in particular 00-image-info.sh, which keys image-info.json + os-release
+# + kcm-about-distrorc on $IMAGE_NAME and $IMAGE_VENDOR).
 ENV IMAGE_NAME=${IMAGE_NAME}
 ENV IMAGE_VENDOR=${IMAGE_VENDOR}
 

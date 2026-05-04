@@ -404,3 +404,4 @@ if [ -f "$SUNSHINE_NAG" ]; then
 fi
 
 echo "MX smoke tests OK."
+echo "::endgroup::"

@@ -100,3 +100,34 @@ runs survive.
 Every third-party repository file (added in later commits) ships to the image
 with `enabled=0`. `validate-repos.sh` enforces this for an explicit list of
 tracked filenames + globs (`_copr:*`, `rpmfusion-*`).
+
+
+## Cockpit pattern (intentionally NOT overridden)
+
+Bazzite ships Cockpit as a **podman quadlet** at
+`/usr/share/containers/systemd/cockpit-container.container`:
+
+```
+[Container]
+Image=quay.io/cockpit/ws:latest
+Volume=/:/host
+PodmanArgs=--privileged --pid=host --cgroups=split
+```
+
+systemd's `podman-systemd-generator` reads this at boot and
+creates `cockpit-container.service` dynamically in
+`/run/systemd/system/`. The `cockpit.service` stub at
+`/usr/lib/systemd/system/cockpit.service` (custom-injected by
+Bazzite, not owned by any RPM) `Requires=cockpit-container
+.service`.
+
+`ujust cockpit enable` toggles the stub → starts the container
+→ user gets a full Cockpit UI at https://localhost:9090 with all
+standard modules bundled in `quay.io/cockpit/ws:latest` and
+auto-updates via `Label=io.containers.autoupdate=registry`.
+
+bazzite-mx **deliberately does NOT add host-side `cockpit-machines`
+or `cockpit-ostree` RPMs**. The container already serves all
+standard modules; layering would duplicate. This is one of the
+canonical examples of "skip when upstream handles it well" — see
+`workflow.md` § When to skip a phase.
