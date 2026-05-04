@@ -21,6 +21,7 @@ Auto-loaded by Claude Code at session start.
 |---|---|---|
 | 0 — Bootstrap | ✅ Done | Containerfile (FROM bazzite + labels) + CI workflows + cosign signing-by-digest |
 | 1 — Scaffold | ✅ Done | `build_files/{shared,mx,tests}` + orchestrator (`build.sh`, `build-mx.sh`, `clean-stage.sh`, `validate-repos.sh`, `copr-helpers.sh`) + smoke-test framework (`10-tests-mx.sh` skeleton: sysctl + modules-load markers) + `.claude/` project conventions |
+| 2 — Branding | ✅ Done | `00-image-info.sh` rewrites `/usr/share/ublue-os/image-info.json` (image-name, image-vendor, image-ref), `/usr/lib/os-release` VARIANT_ID, and `/etc/xdg/kcm-about-distrorc` (Variant + Website) so KDE System Settings → About reflects bazzite-mx. Smoke test asserts all four values to prevent silent regression. |
 
 ## Where to look
 

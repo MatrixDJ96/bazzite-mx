@@ -22,4 +22,39 @@ if [ ! -f /etc/modules-load.d/90-bazzite-mx.conf ]; then
     exit 1
 fi
 
+# --- Image identity + KDE about-page branding (00-image-info.sh) ---
+# image-info.json image-name must reflect the fork.
+grep -qE '"image-name":[[:space:]]*"bazzite-mx(-nvidia(-open)?)?"' /usr/share/ublue-os/image-info.json || {
+    echo "FAIL: /usr/share/ublue-os/image-info.json image-name not rewritten"
+    cat /usr/share/ublue-os/image-info.json
+    exit 1
+}
+# image-vendor must reflect the actual publisher (matrixdj96), not
+# the inherited "ublue-os" from Bazzite base.
+grep -qE '"image-vendor":[[:space:]]*"matrixdj96"' /usr/share/ublue-os/image-info.json || {
+    echo "FAIL: /usr/share/ublue-os/image-info.json image-vendor not rewritten to matrixdj96"
+    grep image-vendor /usr/share/ublue-os/image-info.json || true
+    exit 1
+}
+# os-release VARIANT_ID likewise.
+grep -qE '^VARIANT_ID=bazzite-mx(-nvidia(-open)?)?$' /usr/lib/os-release || {
+    echo "FAIL: /usr/lib/os-release VARIANT_ID not rewritten"
+    grep ^VARIANT_ID= /usr/lib/os-release || true
+    exit 1
+}
+# KDE about page (Variant + Website).
+# Regex anchored on both ends: matches only the 3 valid strings
+# ('Bazzite-MX', 'Bazzite-MX (NVIDIA)', 'Bazzite-MX (NVIDIA Open)') and
+# rejects malformed values like 'Bazzite-MX-BROKEN' or 'Bazzite-MXfoo'.
+grep -qE '^Variant=Bazzite-MX( \(NVIDIA( Open)?\))?$' /etc/xdg/kcm-about-distrorc || {
+    echo "FAIL: /etc/xdg/kcm-about-distrorc Variant not rewritten or malformed"
+    grep ^Variant= /etc/xdg/kcm-about-distrorc || true
+    exit 1
+}
+grep -q '^Website=https://github.com/MatrixDJ96/bazzite-mx$' /etc/xdg/kcm-about-distrorc || {
+    echo "FAIL: /etc/xdg/kcm-about-distrorc Website not rewritten"
+    grep ^Website= /etc/xdg/kcm-about-distrorc || true
+    exit 1
+}
+
 echo "MX smoke tests OK."

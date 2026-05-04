@@ -6,6 +6,7 @@ date and the commit / context where the lesson was learned.
 
 | # | Symptom | Root cause | Fix | First seen |
 |---|---|---|---|---|
+| 1 | Phase 2 v1 build failed: KCM branding test — "expected Variant=…, got ''" | `/usr/share/kcm-about-distro/kcm-about-distrorc` doesn't exist on Bazzite (Aurora-only path). Initial workaround used a `[ -f ]` guard that made the branding step silently no-op. | Bazzite ships the file at `/etc/xdg/kcm-about-distrorc` (the Bazzite-DX-style location). `build_files/mx/00-image-info.sh` seds `Variant` and `Website` there + updates `image-info.json` (image-name + image-ref + image-vendor) and `/usr/lib/os-release` VARIANT_ID. Smoke test asserts all four values to prevent silent regression. | Phase 2 (branding) |
 
 ## Patterns to be wary of
 
