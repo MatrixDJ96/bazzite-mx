@@ -35,6 +35,8 @@ Auto-loaded by Claude Code at session start.
 
 | 9 — Bazzite-DX gems + groups | ✅ Done | `50-bazzite-extras.sh` installs `ccache` (Bazzite-DX shipped) + the `ublue-setup-services` COPR (system-setup + user-setup hook framework with `libsetup.sh` versioning). `system_files/usr/share/ublue-os/system-setup.hooks.d/10-bazzite-mx-groups.sh` (v2) runs at first boot: appends `docker` + `libvirt` to `/etc/group` from `/usr/lib/group`, then `usermod -aG` adds wheel users to both. v2 ships alongside `system_files/usr/lib/sysusers.d/bazzite-mx-docker.conf` (`g docker -`) which compensates the rpm-ostree suppression of docker-ce's `groupadd --system docker` post-install scriptlet. |
 
+| 10 — Justfile + ujust recipes | ✅ Done | `system_files/usr/share/ublue-os/just/95-bazzite-mx.just` ships our custom recipes: `install-discord` (RPM Fusion non-free, runtime-flips repo `enabled=0` → `enabled=1` via sed, then `rpm-ostree install discord` — mirrors Bazzite's `install-coolercontrol` idiom) + `install-1password` (vendored repo, same pattern) + `_pkg_layered` private helper (returns `yes`/`no` on stdout, idempotency check that doesn't pollute output with `just` "Recipe failed" noise). `55-justfile-import.sh` idempotently appends `import "/usr/share/ublue-os/just/95-bazzite-mx.just"` to Bazzite's master `/usr/share/ublue-os/justfile` (Bazzite uses explicit `import` directives, no glob, so unimported files are silently invisible). |
+
 ## Where to look
 
 | If you need to… | Read |

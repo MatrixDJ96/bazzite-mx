@@ -2,7 +2,7 @@
 
 bazzite-mx is a personal fork that aims to be **strictly better** than
 `ublue-os/bazzite-dx` upstream by adopting Aurora-DX's build patterns and
-fixing concrete issues. **12 wins** as of the bazzite-extras commit;
+fixing concrete issues. **13 wins** as of the justfile commit;
 wins accumulate as each domain commit lands.
 
 ## 1. Strict repo isolation via `validate-repos.sh`
@@ -267,6 +267,32 @@ sysusers.d for docker.
 enabled but the user can't `docker ps` without `sudo`. Phase 4's
 libvirt is similarly inaccessible. UX regression that bazzite-dx
 upstream has fixed only partially.
+
+
+
+## 13. Idempotent justfile import + `_pkg_layered` reusable helper
+
+**Upstream**: Bazzite-DX (`60-clean-base.sh:5`) and AmyOS
+(`install-apps.sh:107`) append their `import` directive to Bazzite's
+master justfile **without** an idempotency check — the line is
+appended on every build, accumulating duplicates if the same script
+runs twice (e.g., during local pre-flights).
+
+**Us**: `55-justfile-import.sh` uses `grep -qxF "$IMPORT_LINE"
+"$MASTER" || echo "$IMPORT_LINE" >> "$MASTER"` — the line is
+appended only if not already present. Side-effect-free re-runs.
+
+`95-bazzite-mx.just` ships a `_pkg_layered` helper recipe that
+checks rpm-ostree overlay layer membership (not `rpm -q`, which
+sees base-image packages too) and returns `yes`/`no` on stdout
+rather than via exit code. Reason: `just` always emits
+`error: Recipe X failed on line N with exit code 1` when a
+sub-recipe exits non-zero, even when wrapped in the caller's `if`.
+The stdout-as-boolean pattern keeps install-* output clean.
+
+**Why it matters**: clean recipe UX, no spurious "error" lines on
+re-run, and a reusable layering-check helper for any future
+`install-*` recipe.
 
 ## How to extend this list
 

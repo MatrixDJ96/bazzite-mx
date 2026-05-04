@@ -26,6 +26,7 @@ Each variant is published with two stream tags: `:stable` and `:testing`.
 | **Dev / Sysadmin CLI** | `bcc-tools` + `bpftrace` + `bpftop` + `sysprof` + `iotop-c` + `nicstat` + `numactl` + `trace-cmd` + `flatpak-builder` + `gh` (upstream vendored repo) + `cosign` (already in Bazzite base) | observability + container build + GitHub workflow |
 | **Web / browsers** | Firefox via Mozilla RPM repo (replaces Flatpak Firefox) + Bazzite's flatpak default-install adjusted to skip Firefox | RPM Firefox supports system fonts, system policies, native messaging; Flatpak doesn't |
 | **System integration** | first-boot system-setup hooks (groups, flatpak Firefox cleanup, virt-manager flatpak cleanup) + first-login user-setup hooks (flatpak Firefox cleanup, virt-manager flatpak cleanup) — all versioned via `libsetup.sh` | bridges the `/etc/skel` doesn't-reach-existing-users gotcha; same hooks framework as Bazzite-DX |
+| **ujust opt-in recipes** | `ujust install-discord` (RPM Fusion non-free) + `ujust install-1password` (vendored official repo) + `_pkg_layered` reusable helper | rpm-ostree layered installs with idempotency check; opt-in keeps metadata footprint small for users who don't want them |
 
 ## Build
 

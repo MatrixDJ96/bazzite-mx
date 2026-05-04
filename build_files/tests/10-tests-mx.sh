@@ -313,4 +313,27 @@ grep -qE '^g[[:space:]]+docker[[:space:]]+-' "$DOCKER_SYSUSERS" || {
     exit 1
 }
 
+# --- Phase 10: 95-bazzite-mx.just shipped + master justfile import wired ---
+MX_JUSTFILE=/usr/share/ublue-os/just/95-bazzite-mx.just
+if [ ! -f "$MX_JUSTFILE" ]; then
+    echo "FAIL: $MX_JUSTFILE missing"
+    exit 1
+fi
+grep -q '^install-discord:' "$MX_JUSTFILE" || {
+    echo "FAIL: install-discord recipe not found in $MX_JUSTFILE"
+    exit 1
+}
+grep -q '^install-1password:' "$MX_JUSTFILE" || {
+    echo "FAIL: install-1password recipe not found in $MX_JUSTFILE"
+    exit 1
+}
+grep -q '^_pkg_layered ' "$MX_JUSTFILE" || {
+    echo "FAIL: _pkg_layered private helper not found in $MX_JUSTFILE"
+    exit 1
+}
+grep -q "import \"/usr/share/ublue-os/just/95-bazzite-mx.just\"" /usr/share/ublue-os/justfile || {
+    echo "FAIL: import line for 95-bazzite-mx.just missing from master justfile"
+    exit 1
+}
+
 echo "MX smoke tests OK."
