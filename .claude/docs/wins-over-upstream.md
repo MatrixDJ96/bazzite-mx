@@ -2,7 +2,7 @@
 
 bazzite-mx is a personal fork that aims to be **strictly better** than
 `ublue-os/bazzite-dx` upstream by adopting Aurora-DX's build patterns and
-fixing concrete issues. **4 wins** as of the virt commit;
+fixing concrete issues. **7 wins** as of the IDE commit;
 wins accumulate as each domain commit lands.
 
 ## 1. Strict repo isolation via `validate-repos.sh`
@@ -104,6 +104,52 @@ flatpak; Bazzite has the most complete recipe; **none** ship a
 working-on-first-boot stack while also providing a working recipe
 for VFIO advanced users. Our single image gives both. Net effect:
 opening virt-manager.app from the launcher post-install just works.
+
+
+
+## 5. VSCode `gpgcheck=1`
+
+**Upstream**: bazzite-dx's install pattern sets `gpgcheck=0` on the
+vscode repo with a `FIXME: gpgcheck broken on newer rpm policies`
+comment.
+
+**Us**: `system_files/etc/yum.repos.d/vscode.repo` ships `gpgcheck=1`.
+Verified empirically on Bazzite 44 / dnf5 5.x that the Microsoft .asc
+key (0xBE1229CF, fingerprint
+BC528686B50D79E339D3721CEB3E94ADBE1229CF) imports cleanly during the
+first transaction touching the repo.
+
+**Why it matters**: actual signature verification of the `code`
+package on every install. The bazzite-dx FIXME comment was true for
+an earlier dnf/rpm version; it has aged out. We catch the fix.
+
+## 6. `git-credential-libsecret` shipped (Aurora-only otherwise)
+
+**Upstream**: Aurora base ships `git-credential-libsecret`. Bazzite
+base does NOT, and Bazzite-DX inherits the gap.
+
+**Us**: `35-git-tools.sh` installs `git-credential-libsecret` so
+git authentication via system keyring works out-of-the-box. Day-1
+git auth UX upgrade for free.
+
+**Why it matters**: GUI password prompts via the keyring vs. typing
+HTTPS tokens / pasting them into terminal each push. Standard
+modern git auth on Linux desktops.
+
+## 7. VSCode `update.mode=none` atomic-correct default
+
+**Upstream**: bazzite-dx ships the same setting plus opinionated
+font (Cascadia Code) + theme defaults. AmyOS goes further with
+formatOnSave + Hack Nerd Font + zsh terminal default + many style
+choices.
+
+**Us**: `system_files/etc/skel/.config/Code/User/settings.json` is
+just `{ "update.mode": "none" }`. The atomic-correctness fix only
+— no font, no theme, no formatter opinion.
+
+**Why it matters**: distros should not impose stylistic preferences.
+The fix is mandatory (VSCode's self-updater fights a read-only
+`/usr`); the rest is the user's choice. Minimalism is a feature.
 
 ## How to extend this list
 

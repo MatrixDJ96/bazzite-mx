@@ -22,6 +22,7 @@ Each variant is published with two stream tags: `:stable` and `:testing`.
 |---|---|---|
 | **Container runtime** | Docker CE + extras (compose, machine, tui, bootc) + sockets | full Docker workflow alongside Bazzite's existing Podman; isolated upstream Docker repo (`docker-ce.repo` vendored, `enabled=0`) |
 | **Virtualization** | libvirt, qemu, virt-manager, swtpm, waypipe + `libvirtd.service` enabled at build + KVM kargs (`kvm.ignore_msrs=1`, `kvm.report_ignored_msrs=0`) shipped via `bootc/kargs.d` + flatpak virt-manager masked | Windows 11 VM compat (TPM 2.0 via swtpm) + remote-display Wayland forwarding; the stack is fully working on first boot without `ujust setup-virtualization` (which is also overridden to remove an upstream gate that silently no-ops on RPM-installed virt-manager) |
+| **IDE / Dev** | VSCode (`update.mode=none`) + GitKraken + `git-credential-libsecret` | atomic-correct settings (auto-update fights `/usr` read-only); keyring-backed git auth; minimalism (no opinionated font/theme/formatter overrides) |
 
 ## Build
 

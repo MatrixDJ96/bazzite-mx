@@ -149,4 +149,30 @@ if [ ! -x "$VIRT_HOOK_USER" ]; then
     exit 1
 fi
 
+# --- Phase 5: IDE packages ---
+IDE_RPMS=( code )
+for p in "${IDE_RPMS[@]}"; do
+    rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
+done
+
+# --- Phase 5: VSCode atomic-aware default settings ---
+# Shipped via /etc/skel/.config/Code/User/settings.json so first-login
+# user accounts inherit `update.mode=none` (atomic /usr is read-only,
+# VSCode self-updater would fail).
+VSCODE_SETTINGS=/etc/skel/.config/Code/User/settings.json
+if [ ! -f "$VSCODE_SETTINGS" ]; then
+    echo "FAIL: $VSCODE_SETTINGS missing"
+    exit 1
+fi
+grep -q '"update.mode": "none"' "$VSCODE_SETTINGS" || {
+    echo "FAIL: $VSCODE_SETTINGS missing update.mode=none guard"
+    exit 1
+}
+
+# --- Phase 5: Git tools (GUI + system helper) ---
+GIT_TOOLS_RPMS=( gitkraken git-credential-libsecret )
+for p in "${GIT_TOOLS_RPMS[@]}"; do
+    rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
+done
+
 echo "MX smoke tests OK."
