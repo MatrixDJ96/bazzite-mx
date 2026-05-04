@@ -25,6 +25,7 @@ Each variant is published with two stream tags: `:stable` and `:testing`.
 | **IDE / Dev** | VSCode (`update.mode=none`) + GitKraken + `git-credential-libsecret` | atomic-correct settings (auto-update fights `/usr` read-only); keyring-backed git auth; minimalism (no opinionated font/theme/formatter overrides) |
 | **Dev / Sysadmin CLI** | `bcc-tools` + `bpftrace` + `bpftop` + `sysprof` + `iotop-c` + `nicstat` + `numactl` + `trace-cmd` + `flatpak-builder` + `gh` (upstream vendored repo) + `cosign` (already in Bazzite base) | observability + container build + GitHub workflow |
 | **Web / browsers** | Firefox via Mozilla RPM repo (replaces Flatpak Firefox) + Bazzite's flatpak default-install adjusted to skip Firefox | RPM Firefox supports system fonts, system policies, native messaging; Flatpak doesn't |
+| **System integration** | first-boot system-setup hooks (groups, flatpak Firefox cleanup, virt-manager flatpak cleanup) + first-login user-setup hooks (flatpak Firefox cleanup, virt-manager flatpak cleanup) — all versioned via `libsetup.sh` | bridges the `/etc/skel` doesn't-reach-existing-users gotcha; same hooks framework as Bazzite-DX |
 
 ## Build
 

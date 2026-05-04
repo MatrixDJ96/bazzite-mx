@@ -2,7 +2,7 @@
 
 bazzite-mx is a personal fork that aims to be **strictly better** than
 `ublue-os/bazzite-dx` upstream by adopting Aurora-DX's build patterns and
-fixing concrete issues. **11 wins** as of the third-party packages commit;
+fixing concrete issues. **12 wins** as of the bazzite-extras commit;
 wins accumulate as each domain commit lands.
 
 ## 1. Strict repo isolation via `validate-repos.sh`
@@ -234,6 +234,39 @@ that goes stale on a vendored static copy is a slow ticking bomb;
 we trade it for a per-build network call to the trust anchor
 (documented as part of the "third-party `.repo` is `enabled=0`"
 isolation invariant).
+
+
+
+## 12. Docker group + libvirt group via system-setup hook (with sysusers.d for docker)
+
+**Upstream**: bazzite-dx-groups exists but bundles its setup with
+several other concerns. Bazzite base does not have an equivalent.
+More critically, both Aurora-DX and Bazzite-DX inherit the
+`docker-ce` postinstall-scriptlet gap: `groupadd --system docker`
+in the rpm scriptlet is SUPPRESSED on rpm-ostree atomic systems
+(rpm-ostree skips package scriptlets to keep the OCI layer
+reproducible) — so the `docker` group never exists at runtime,
+the user is never added to it, and every `docker run` requires
+sudo. Verified: neither Aurora-DX nor Bazzite-DX ships a
+sysusers.d for docker.
+
+**Us**: two-piece fix:
+- `system_files/usr/share/ublue-os/system-setup.hooks.d/
+  10-bazzite-mx-groups.sh` runs at first boot via the
+  `ublue-system-setup.service` framework (with `libsetup.sh
+  version-script` for idempotency). Appends `docker` + `libvirt`
+  groups to `/etc/group` from `/usr/lib/group`, then `usermod
+  -aG` for every wheel user.
+- `system_files/usr/lib/sysusers.d/bazzite-mx-docker.conf`: a
+  single `g docker -` line that systemd-sysusers reads at
+  sysinit.target (early in the boot sequence, before our
+  group-adding hook). This creates the docker system group on
+  every boot, exactly compensating the suppressed rpm scriptlet.
+
+**Why it matters**: without this, Phase 3's `docker.socket` is
+enabled but the user can't `docker ps` without `sudo`. Phase 4's
+libvirt is similarly inaccessible. UX regression that bazzite-dx
+upstream has fixed only partially.
 
 ## How to extend this list
 

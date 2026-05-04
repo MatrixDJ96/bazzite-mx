@@ -267,4 +267,50 @@ if [ ! -s "$ONEPW_GPGKEY" ]; then
     exit 1
 fi
 
+# --- Phase 9: Bazzite-DX gems (ccache + ublue-setup-services COPR) ---
+EXTRAS_RPMS=( ccache ublue-setup-services )
+for p in "${EXTRAS_RPMS[@]}"; do
+    rpm -q "$p" >/dev/null || { echo "FAIL: rpm $p missing"; exit 1; }
+done
+
+# --- Phase 9: ublue setup-services framework wiring ---
+EXTRAS_UNITS=( ublue-system-setup.service )
+for u in "${EXTRAS_UNITS[@]}"; do
+    state=$(systemctl is-enabled "$u" 2>/dev/null || echo missing)
+    if [ "$state" != "enabled" ]; then
+        echo "FAIL: $u not enabled (state=$state)"
+        exit 1
+    fi
+done
+if [ ! -f /usr/lib/systemd/user/ublue-user-setup.service ]; then
+    echo "FAIL: ublue-user-setup.service unit file missing"
+    exit 1
+fi
+
+# --- Phase 9: bazzite-mx-groups system-setup hook (v2) ---
+GROUPS_HOOK=/usr/share/ublue-os/system-setup.hooks.d/10-bazzite-mx-groups.sh
+if [ ! -x "$GROUPS_HOOK" ]; then
+    echo "FAIL: $GROUPS_HOOK missing or not executable"
+    exit 1
+fi
+if [ ! -f /usr/lib/ublue/setup-services/libsetup.sh ]; then
+    echo "FAIL: /usr/lib/ublue/setup-services/libsetup.sh missing"
+    exit 1
+fi
+grep -qE '^version-script bazzite-mx-groups system 2[[:space:]]' "$GROUPS_HOOK" || {
+    echo "FAIL: $GROUPS_HOOK is not at version 2 (regression on docker-group fix)"
+    exit 1
+}
+
+# --- Phase 9: docker group via sysusers.d (compensates rpm-ostree scriptlet suppression) ---
+DOCKER_SYSUSERS=/usr/lib/sysusers.d/bazzite-mx-docker.conf
+if [ ! -f "$DOCKER_SYSUSERS" ]; then
+    echo "FAIL: $DOCKER_SYSUSERS missing (docker-ce group gap not patched)"
+    exit 1
+fi
+grep -qE '^g[[:space:]]+docker[[:space:]]+-' "$DOCKER_SYSUSERS" || {
+    echo "FAIL: $DOCKER_SYSUSERS does not declare 'g docker -' (malformed sysusers)"
+    exit 1
+}
+
 echo "MX smoke tests OK."

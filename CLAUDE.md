@@ -33,6 +33,8 @@ Auto-loaded by Claude Code at session start.
 
 | 8 — Third-party packages | ✅ Done | `47-rpmfusion-release.sh` installs `rpmfusion-nonfree-release` (ships GPG keys for F44/F45/F46/rawhide + the 3 `.repo` files); we sed `enabled=0` immediately. `48-1password-key.sh` fetches 1Password's official GPG key at build time (`curl -fsSL` from downloads.1password.com); `1password.repo` vendored with `enabled=0`. Both repos are runtime-enabled per-install via the `ujust install-{discord,1password}` recipes. Zero static-vendoring of GPG keys (auto-update via `bootc upgrade` for RPM Fusion's release pkg; build-time fetch refresh for 1Password). |
 
+| 9 — Bazzite-DX gems + groups | ✅ Done | `50-bazzite-extras.sh` installs `ccache` (Bazzite-DX shipped) + the `ublue-setup-services` COPR (system-setup + user-setup hook framework with `libsetup.sh` versioning). `system_files/usr/share/ublue-os/system-setup.hooks.d/10-bazzite-mx-groups.sh` (v2) runs at first boot: appends `docker` + `libvirt` to `/etc/group` from `/usr/lib/group`, then `usermod -aG` adds wheel users to both. v2 ships alongside `system_files/usr/lib/sysusers.d/bazzite-mx-docker.conf` (`g docker -`) which compensates the rpm-ostree suppression of docker-ce's `groupadd --system docker` post-install scriptlet. |
+
 ## Where to look
 
 | If you need to… | Read |
