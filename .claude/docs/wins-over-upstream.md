@@ -2,7 +2,7 @@
 
 bazzite-mx is a personal fork that aims to be **strictly better** than
 `ublue-os/bazzite-dx` upstream by adopting Aurora-DX's build patterns and
-fixing concrete issues. **15 wins** as of the desktop commit;
+fixing concrete issues. **16 wins** as of the Sunshine commit;
 wins accumulate as each domain commit lands.
 
 ## 1. Strict repo isolation via `validate-repos.sh`
@@ -338,6 +338,52 @@ partition tool. Discovering only at the moment of need that
 `kde-partitionmanager` is gone (and the live-ISO gparted is not
 on the deployed system) would mean dropping to terminal `parted`
 or rebooting from USB.
+
+
+
+## 16. Sunshine reintegrated as system RPM (vs. Bazzite's brew migration)
+
+**Upstream**: Bazzite shipped Sunshine as a system RPM from the
+`lizardbyte/beta` COPR until commit `079fa8ad` (2026-03-26), then
+removed it citing "numerous ignored issues about their stable repo
+not supporting Fedora 43 these last 6 months." Their replacement
+is a Homebrew-based `setup-sunshine` recipe (commit `aa6ec9da`)
+that requires the user to install Homebrew first, then `brew
+install sunshine` — which downloads and *compiles* a 30+ MiB
+binary on every machine.
+
+**Us**: `build_files/mx/65-sunshine.sh` re-integrates Sunshine
+as a system RPM via the same COPR Aurora has used continuously
+without abandoning. By 2026-04-28 the COPR resumed Fedora 44
+builds. Three pieces:
+1. `copr_install_isolated "lizardbyte/beta" "sunshine"`: same
+   isolated-COPR pattern we use for `ublue-os-libvirt-workarounds`.
+2. `setcap cap_sys_admin+p` on `/usr/bin/sunshine` for KMS-based
+   capture. The COPR package does NOT ship the cap; without it
+   Sunshine falls back to a slower PipeWire portal path.
+3. `systemctl --global disable app-dev.lizardbyte.app.Sunshine
+   .service`: defense-in-depth (Aurora pattern). The user-service
+   is `disabled` by default (no preset ships); user opts in via
+   `ujust setup-sunshine enable`.
+
+Recipe override (`system_files/usr/share/ublue-os/just/82-bazzite-
+sunshine.just`): replaces Bazzite's brew-flavored recipe with our
+RPM-flavored version. Manages `app-dev.lizardbyte.app.Sunshine
+.service` (the COPR-shipped user unit) via `systemctl --user
+enable --now`.
+
+Nag suppression: `/usr/share/ublue-os/announcements/sunshine-
+brew.msg.json` shows users a "Sunshine will soon be removed" nag
+whenever they have a Sunshine config. With our RPM integration
+the nag is permanently misleading; we `rm` it at build time.
+
+**Why it matters**: brew-on-ostree adds ~30 minutes of first-run
+install time (compile from source on a mid-tier laptop), an
+unsupported package manager dependency, and a slower update path
+(`brew upgrade` is per-user, manual). RPM integration brings
+Sunshine back to first-class status: same speed of install (zero
+— already there), `bootc upgrade` updates, no brew prerequisite,
+and works on a fresh deployment without any user setup.
 
 ## How to extend this list
 

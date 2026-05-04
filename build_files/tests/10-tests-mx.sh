@@ -360,4 +360,47 @@ for ext in "${VSCODE_EXTENSIONS[@]}"; do
     }
 done
 
+# --- Phase 12: Sunshine reintegration (build-time RPM, opt-in user service) ---
+rpm -q Sunshine >/dev/null || {
+    echo "FAIL: Sunshine rpm missing (65-sunshine.sh broken? COPR offline?)"
+    exit 1
+}
+SUNSHINE_BIN=$(readlink -f /usr/bin/sunshine)
+SUNSHINE_CAPS=$(getcap "$SUNSHINE_BIN" 2>/dev/null || true)
+case "$SUNSHINE_CAPS" in
+    *cap_sys_admin*) ;;
+    *)
+        echo "FAIL: $SUNSHINE_BIN missing cap_sys_admin (getcap output: '$SUNSHINE_CAPS')"
+        exit 1
+        ;;
+esac
+SUNSHINE_UNIT=app-dev.lizardbyte.app.Sunshine.service
+sun_state=$(systemctl --global is-enabled "$SUNSHINE_UNIT" 2>/dev/null || true)
+if [ -z "$sun_state" ]; then
+    echo "FAIL: $SUNSHINE_UNIT lookup returned empty stdout"
+    exit 1
+fi
+if [ "$sun_state" != "disabled" ]; then
+    echo "FAIL: $SUNSHINE_UNIT --global state is '$sun_state' (expected 'disabled')"
+    exit 1
+fi
+SUNSHINE_JUSTFILE=/usr/share/ublue-os/just/82-bazzite-sunshine.just
+if [ ! -f "$SUNSHINE_JUSTFILE" ]; then
+    echo "FAIL: $SUNSHINE_JUSTFILE missing"
+    exit 1
+fi
+grep -q 'bazzite-mx OVERRIDE of Bazzite' "$SUNSHINE_JUSTFILE" || {
+    echo "FAIL: $SUNSHINE_JUSTFILE is the upstream brew-flavored version"
+    exit 1
+}
+if grep -qE '^[[:space:]]*[^#].*homebrew\.sunshine' "$SUNSHINE_JUSTFILE"; then
+    echo "FAIL: $SUNSHINE_JUSTFILE contains a residual 'homebrew.sunshine' reference outside comments"
+    exit 1
+fi
+SUNSHINE_NAG=/usr/share/ublue-os/announcements/sunshine-brew.msg.json
+if [ -f "$SUNSHINE_NAG" ]; then
+    echo "FAIL: $SUNSHINE_NAG should have been removed by 65-sunshine.sh"
+    exit 1
+fi
+
 echo "MX smoke tests OK."

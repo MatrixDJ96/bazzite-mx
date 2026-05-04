@@ -39,6 +39,8 @@ Auto-loaded by Claude Code at session start.
 
 | 11 — Desktop apps + vscode extensions | ✅ Done | `60-desktop-apps.sh` installs `gparted` (restores Bazzite-removed `kde-partitionmanager` functionality — Bazzite removed the KDE GUI partition tool in commit `378e524a` Plasma 6.4 cleanup, didn't replace it) + `ptyxis` (container-aware GNOME terminal, opt-in alongside Konsole). `system_files/usr/share/ublue-os/user-setup.hooks.d/11-vscode-extensions.sh` runs at first user login and pre-installs the 3 Microsoft container/remote extensions (Aurora-DX + Bazzite-DX convergent: ms-vscode-remote.remote-containers, ms-vscode-remote.remote-ssh, ms-azuretools.vscode-containers). Hardened against `libsetup.sh::version-script` state-before-body race: every `code --install-extension` has `\|\| true` so transient marketplace timeouts don't permanently disable the hook. |
 
+| 12 — Sunshine | ✅ Done | `65-sunshine.sh` reintegrates Sunshine as a system RPM via the `lizardbyte/beta` COPR (Bazzite removed it 2026-03-26 due to F43 stale builds; the COPR resumed F44 builds 2026-04-28). `copr_install_isolated` pattern + `setcap cap_sys_admin+p` (KMS capture) + `systemctl --global disable app-dev.lizardbyte.app.Sunshine.service` (opt-in via `ujust setup-sunshine enable`) + removal of Bazzite's `sunshine-brew.msg.json` migration nag. `system_files/usr/share/ublue-os/just/82-bazzite-sunshine.just` overrides Bazzite's brew-flavored recipe with our RPM-flavored one. |
+
 ## Where to look
 
 | If you need to… | Read |
