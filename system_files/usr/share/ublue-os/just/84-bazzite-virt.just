@@ -16,7 +16,7 @@
 #   1. virt-on path: dropped the `! rpm -q virt-manager` gate AND the
 #      `flatpak install flathub org.virt_manager.virt-manager` line.
 #      Build-time RPM is the source of truth; flatpak is masked
-#      separately (build_files/mx/48-virt-manager-flatpak-exclude.sh
+#      separately (build_files/mx/21-virt-manager-flatpak-exclude.sh
 #      adds it to /usr/share/ublue-os/flatpak-blocklist).
 #   2. virt-on path: dropped the `rpm-ostree kargs --append-if-missing
 #      kvm.ignore_msrs=1 / kvm.report_ignored_msrs=0` lines. Those

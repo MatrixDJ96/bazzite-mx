@@ -161,7 +161,7 @@ if grep -qE '^[[:space:]]*flatpak install.*org\.virt_manager\.virt-manager' "$VI
     exit 1
 fi
 
-# --- Phase 3: virt-manager flatpak blocklist (48-virt-manager-flatpak-exclude.sh) ---
+# --- Phase 3: virt-manager flatpak blocklist (21-virt-manager-flatpak-exclude.sh) ---
 # Defense-in-depth: hide the flatpak from Discover/Bazaar so users
 # don't end up with a duplicate (and partially-broken) install
 # alongside the RPM. virt-manager is NOT in Bazzite's default-install
@@ -486,11 +486,16 @@ esac
 # `|| echo missing` fallback idiom from earlier sections (it would
 # concatenate two lines and break the equality check). Use `|| true`
 # to make the inner pipeline exit 0; the stdout is captured untouched.
-# Empty stdout means the unit does not exist on the image.
+# Note: a truly missing unit prints `not-found` (not empty), so the
+# `[ -z "$sun_state" ]` guard below is defensive against the
+# theoretical case of stdout being lost (e.g. systemctl SIGSEGV); the
+# common "unit removed by upstream" path is caught by the second
+# inequality check (which prints `state='not-found'` in the failure
+# message).
 SUNSHINE_UNIT=app-dev.lizardbyte.app.Sunshine.service
 sun_state=$(systemctl --global is-enabled "$SUNSHINE_UNIT" 2>/dev/null || true)
 if [ -z "$sun_state" ]; then
-    echo "FAIL: $SUNSHINE_UNIT does not exist (Sunshine package broken?)"
+    echo "FAIL: $SUNSHINE_UNIT lookup returned empty stdout (systemctl crashed?)"
     exit 1
 fi
 if [ "$sun_state" != "disabled" ]; then

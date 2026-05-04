@@ -41,7 +41,7 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     CTX=/ctx \
     /ctx/build_files/shared/build.sh
 
-# MX smoke tests. Bloccante: ogni assertion fa exit 1 sulla build.
+# MX smoke tests. Blocking: every assertion exits 1 on build failure.
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     /ctx/build_files/tests/10-tests-mx.sh
 

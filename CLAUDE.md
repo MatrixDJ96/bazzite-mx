@@ -33,20 +33,21 @@ unconditional and applied always. Three GHCR images differ only in
 |---|---|---|
 | 1 — Scaffold | ✅ Done | build_files {shared,mx,tests}, helpers, validate-repos |
 | 2 — Container runtime | ✅ Done | Docker CE + podman extras + podman-bootc + sockets |
-| 3 — Virtualization | ✅ Done | libvirt + qemu + virt-manager + swtpm + waypipe + groups service |
+| 3 — Virtualization | ✅ Done | libvirt + qemu + virt-manager + swtpm + waypipe + groups service. **Phase 9 follow-up (2026-05-04)**: build-time `libvirtd.service` enable + KVM kargs (`/usr/lib/bootc/kargs.d/01-bazzite-mx-virt.toml`: `kvm.ignore_msrs=1` + `kvm.report_ignored_msrs=0`) + override of upstream `setup-virtualization` recipe (gate `! rpm -q virt-manager` was permanently FALSE on our image) + virt-manager flatpak mask (blocklist + 2 cleanup hooks). |
 | 4 — IDE | ✅ Done | vscode + gitkraken + git-credential-libsecret + minimal vscode settings |
 | **5 — Cockpit** | ❌ **SKIPPED** | Bazzite ships cockpit as a podman quadlet (`quay.io/cockpit/ws:latest`) — host-side RPMs would duplicate. See [`.claude/docs/architecture.md`](.claude/docs/architecture.md) § Cockpit pattern |
 | 6 — Dev/sysadmin CLI | ✅ Done | android-tools + bcc + **bcc-tools** + bpftrace + bpftop + sysprof + iotop-c + nicstat + numactl + trace-cmd + flatpak-builder + gh (upstream vendored repo). cosign already in Bazzite base. claude-code/kcli deferred. |
 | 7 — Bazzite-DX gems | ✅ Done | Curated subset: only **ccache** + **ublue-setup-services** (COPR). Migrated `bazzite-mx-groups` from custom service+versioning to a system-setup hook under `/usr/share/ublue-os/system-setup.hooks.d/` using `libsetup.sh`. Skipped: ramalama/restic/rclone/zsh/tiptop/git-subtree (per use-case review); usbmuxd already in base. |
 | 8 — Justfile + hooks | ✅ Done | Firefox via Mozilla RPM repo + flatpak exclusion/cleanup hooks; `95-bazzite-mx.just` with `[private] _pkg_layered` helper (hardened: outputs `yes`/`no` on stdout to avoid `just` "Recipe failed" noise); ujust opt-in `install-discord` (RPM Fusion non-free) + `install-1password` (vendored repo); zero-maintenance third-party keys (`rpmfusion-nonfree-release` pkg install + 1Password key build-time fetch); idempotent justfile import in master; vscode-extensions user-setup hook (Aurora+Bazzite-DX convergent 3 ext, hardened against libsetup.sh state-before-body race); gparted + ptyxis desktop apps. |
 | 9 — Final hardening | ✅ Done | Full Bazzite-DX-style branding (image-name + image-vendor + image-ref + VARIANT_ID + KCM Variant + Website all aligned); README "Building locally" section (pre-flight command + link to `.claude/docs/`); cosign verification documented (manual `cosign verify --key cosign.pub …` — ujust recipe deliberately deferred to avoid namespace clash with Bazzite's `verify-image`). |
+| 9 follow-ups (2026-05-03 → 04) | ✅ Done | (a) `install-{discord,1password}` ujust recipes: add `sudo rpm-ostree reload` after `sed`-flipping `.repo` files (`rpm-ostreed` daemon caches its view of `/etc/yum.repos.d/` at start). (b) Virt L2 hardening — see Phase 3 row. (c) **Sunshine reintegrated** as system RPM via `lizardbyte/beta` COPR (Bazzite removed it 2026-03-26 due to F43 stale builds; the COPR resumed F44 builds 2026-04-28). `build_files/mx/65-sunshine.sh` adds COPR install + `setcap cap_sys_admin+p` (KMS capture) + `--global disable` (Aurora pattern, opt-in via `ujust setup-sunshine enable`). Override of brew-flavored `82-bazzite-sunshine.just` with our RPM-flavored version. Nag `sunshine-brew.msg.json` removed. |
 
 Long-form plan with checkboxes:
 [`docs/superpowers/plans/2026-05-01-aurora-dx-style-porting.md`](docs/superpowers/plans/2026-05-01-aurora-dx-style-porting.md).
 
 Cumulative wins over upstream `bazzite-dx`: see
 [`.claude/docs/wins-over-upstream.md`](.claude/docs/wins-over-upstream.md)
-(17 wins as of 2026-05-03).
+(19 wins as of 2026-05-04).
 
 ---
 

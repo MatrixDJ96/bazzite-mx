@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# MX block 48: hide the virt-manager flatpak from Discover/Bazaar.
+# MX block 21: hide the virt-manager flatpak from Discover/Bazaar.
 #
 # Companion to 20-virtualization.sh: now that virt-manager comes from
 # the Fedora repo as rpm AND we override Bazzite's setup-virtualization

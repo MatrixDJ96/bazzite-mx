@@ -395,7 +395,7 @@ upstream image enables `libvirtd.service` at build, so a fresh boot has
 the full virt stack but disabled — clicking virt-manager fails until the
 user runs the recipe.
 
-**Us**: Three-layer fix delivered together (commit pending 2026-05-03):
+**Us**: Three-layer fix delivered together (commit `32c1c59`, 2026-05-03):
 1. **Build-time enable** (`build_files/mx/20-virtualization.sh`):
    `systemctl enable libvirtd.service` runs at image build, so the
    service is `enabled` on first boot. Pattern lifted from AmyOS
@@ -415,7 +415,7 @@ user runs the recipe.
    USB-hot-plug / libvirt-group blocks, which handle hardware-passthrough
    scenarios orthogonal to the basic stack.
 
-**Defense-in-depth**: `build_files/mx/48-virt-manager-flatpak-exclude.sh`
+**Defense-in-depth**: `build_files/mx/21-virt-manager-flatpak-exclude.sh`
 adds `deny org.virt_manager.virt-manager/*` to `/usr/share/ublue-os/
 flatpak-blocklist` so Discover/Bazaar hide the flatpak from search
 results. Two cleanup hooks (`system-setup.hooks.d/16-cleanup-virt-
