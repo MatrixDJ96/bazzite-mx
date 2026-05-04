@@ -2,7 +2,7 @@
 
 bazzite-mx is a personal fork that aims to be **strictly better** than
 `ublue-os/bazzite-dx` upstream by adopting Aurora-DX's build patterns and
-fixing concrete issues. **16 wins** as of the Sunshine commit;
+fixing concrete issues. **16 wins** as of CI rechunker commit;
 wins accumulate as each domain commit lands.
 
 ## 1. Strict repo isolation via `validate-repos.sh`
@@ -386,6 +386,16 @@ Sunshine back to first-class status: same speed of install (zero
 and works on a fresh deployment without any user setup.
 
 ## How to extend this list
+
+## How to extend this list — addendum: rechunker
+
+Note: the rechunker step is the canonical example of a "ship it on
+by default" choice that Bazzite-DX and AmyOS both leave commented
+out in their template (with a "uncomment if you want it" comment).
+It is enabled by default in our `reusable-build.yml`. The win is
+visible in `git log -p .github/workflows/reusable-build.yml` —
+look for the "Run Rechunker" step.
+
 
 When adding a new Phase, deliberately ask: **does this give us an edge
 over upstream `bazzite-dx`?** If yes, document it here with:

@@ -181,39 +181,45 @@ jobs:
           done
           sudo buildah commit --identity-label=false --rm "$container" raw-img
 
-      # Rechunker (bazzite-dx PR 168 pattern). Validated working in commit
-      # 3309c5b: produces correctly-chunked, signed, multi-tag images. The
-      # cost is high (~13-15 min added per matrix job) and the gain on an
-      # overlay-only fork that adds at most a couple of layers on top of an
-      # already-rechunked bazzite is marginal: the user's incremental pulls
-      # come from bazzite's own chunked layout, our delta is one layer
-      # regardless. Re-enable when build_files/*/build.sh ships
-      # customisations heavy enough to benefit from semantic re-layering.
+      # Rechunker (bazzite-dx PR 168 pattern). Re-enabled 2026-05-04
+      # after the Phase 9 follow-ups (virt L2, Sunshine reintegration,
+      # docker-group sysusers fix) brought the cumulative delta over the
+      # base bazzite image to ~80 MiB across many small files. Semantic
+      # re-layering via `rpm-ostree compose build-chunked-oci` produces
+      # finer-grained chunks for better resumability, smaller incremental
+      # pulls on subsequent `bootc upgrade`, and reduced storage on the
+      # registry side via cross-image dedup. Cost: ~13-15 min added per
+      # matrix job (parallel, so wall clock +~15 min for the 6-job
+      # matrix). Validated previously in commit 3309c5b — same exact
+      # block, was disabled when the delta was ~5 MiB and the gain
+      # marginal.
       #
-      # When re-enabling, also point the push step at the rechunk output ref
-      # (containers-storage:localhost/chunked-img) instead of raw-img.
-      #
-      # - name: Run Rechunker
-      #   id: rechunk
-      #   if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-      #   run: |
-      #     set -euo pipefail
-      #     container=$(sudo buildah from raw-img)
-      #     mnt=$(sudo buildah mount "$container")
-      #     sudo bash -c "rm -rf $mnt/run/.* $mnt/run/* $mnt/tmp/.* $mnt/tmp/*"
-      #     sudo buildah umount "$container"
-      #     sudo buildah commit --identity-label=false --rm "$container" raw-img
-      #
-      #     sudo podman run --rm --privileged \
-      #         --volume /var/lib/containers:/var/lib/containers \
-      #         localhost/raw-img \
-      #         rpm-ostree compose build-chunked-oci \
-      #         --bootc --max-layers 127 --format-version 2 \
-      #         --from localhost/raw-img \
-      #         --output containers-storage:localhost/chunked-img
-      #     sudo podman untag raw-img
-      #
-      #     echo "ref=containers-storage:localhost/chunked-img" >> "$GITHUB_OUTPUT"
+      # We use bootc's native `rpm-ostree compose build-chunked-oci`
+      # (rather than the hhd-dev/rechunk action that Bazzite-DX/AmyOS
+      # ship template-commented-out): runs in-image, no external action
+      # version pin, integrates cleanly with our cosign-by-digest sign
+      # step that already follows the push.
+      - name: Run Rechunker
+        id: rechunk
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        run: |
+          set -euo pipefail
+          container=$(sudo buildah from raw-img)
+          mnt=$(sudo buildah mount "$container")
+          sudo bash -c "rm -rf $mnt/run/.* $mnt/run/* $mnt/tmp/.* $mnt/tmp/*"
+          sudo buildah umount "$container"
+          sudo buildah commit --identity-label=false --rm "$container" raw-img
+
+          sudo podman run --rm --privileged \
+              --volume /var/lib/containers:/var/lib/containers \
+              localhost/raw-img \
+              rpm-ostree compose build-chunked-oci \
+              --bootc --max-layers 127 --format-version 2 \
+              --from localhost/raw-img \
+              --output containers-storage:localhost/chunked-img
+          sudo podman untag raw-img
+
+          echo "ref=containers-storage:localhost/chunked-img" >> "$GITHUB_OUTPUT"
 
       - name: Login to GHCR
         if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
@@ -232,7 +238,7 @@ jobs:
         env:
           OUTPUT_IMAGE: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_TAGS: ${{ steps.metadata.outputs.tags }}
-          SOURCE_REF: containers-storage:localhost/raw-img
+          SOURCE_REF: ${{ steps.rechunk.outputs.ref }}
           DEFAULT_TAG: ${{ inputs.stream_name }}
         with:
           max_attempts: 3

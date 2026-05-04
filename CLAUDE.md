@@ -41,6 +41,8 @@ Auto-loaded by Claude Code at session start.
 
 | 12 — Sunshine | ✅ Done | `65-sunshine.sh` reintegrates Sunshine as a system RPM via the `lizardbyte/beta` COPR (Bazzite removed it 2026-03-26 due to F43 stale builds; the COPR resumed F44 builds 2026-04-28). `copr_install_isolated` pattern + `setcap cap_sys_admin+p` (KMS capture) + `systemctl --global disable app-dev.lizardbyte.app.Sunshine.service` (opt-in via `ujust setup-sunshine enable`) + removal of Bazzite's `sunshine-brew.msg.json` migration nag. `system_files/usr/share/ublue-os/just/82-bazzite-sunshine.just` overrides Bazzite's brew-flavored recipe with our RPM-flavored one. |
 
+| 13 — CI rechunker | ✅ Done | `.github/workflows/reusable-build.yml` enables `rpm-ostree compose build-chunked-oci` for the matrix. Cumulative delta over base bazzite (~80 MiB across many small files) makes semantic re-layering pay off: better resumability, smaller incremental pulls on `bootc upgrade`, lower registry storage via cross-image dedup. Cost: ~+15 min wall-clock on the 6-job matrix. Bazzite-DX/AmyOS ship this commented-out by default. |
+
 ## Where to look
 
 | If you need to… | Read |
