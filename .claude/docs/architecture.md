@@ -96,11 +96,18 @@ bazzite-mx/
 │   ├── etc/yum.repos.d/         # Vendored .repo files (enabled=0)
 │   ├── etc/skel/                # Per-user defaults (.config/Code/...)
 │   ├── usr/share/ublue-os/
-│   │   ├── just/                # 95-bazzite-mx.just (ujust install-* recipes)
+│   │   ├── just/                # 95-bazzite-mx.just (ujust install-*)
+│   │   │                        # 82-bazzite-sunshine.just (override of
+│   │   │                        # Bazzite's brew-flavored recipe with our
+│   │   │                        # COPR-flavored one); 84-bazzite-virt.just
+│   │   │                        # (override that drops upstream's broken gate)
 │   │   ├── system-setup.hooks.d/  # boot-time hooks (groups, flatpak cleanup)
 │   │   └── user-setup.hooks.d/    # first-login hooks (vscode-extensions, flatpak)
-│   ├── usr/lib/systemd/system/  # bazzite-mx-* units (legacy + new)
-│   └── usr/libexec/             # bazzite-mx-* helper scripts
+│   ├── usr/lib/bootc/kargs.d/   # 01-bazzite-mx-virt.toml — kvm.* kargs
+│   │                              applied at deploy time by bootc
+│   └── usr/lib/sysusers.d/      # bazzite-mx-docker.conf — `g docker -`
+│                                  to compensate the rpm-ostree scriptlet
+│                                  suppression for docker-ce
 ├── .github/workflows/
 │   ├── build-stable.yml         # push → 3-job matrix on stable Bazzite
 │   ├── build-testing.yml        # push → 3-job matrix on testing Bazzite
