@@ -1,0 +1,79 @@
+name: Watch Upstream Releases
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  check:
+    name: Check upstream
+    runs-on: ubuntu-24.04
+    outputs:
+      stable_changed: ${{ steps.compare.outputs.stable_changed }}
+      testing_changed: ${{ steps.compare.outputs.testing_changed }}
+      stable_tag: ${{ steps.compare.outputs.stable_tag }}
+      testing_tag: ${{ steps.compare.outputs.testing_tag }}
+    steps:
+      - name: Compare upstream releases vs published images
+        id: compare
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+
+          STABLE=$(gh release view --repo ublue-os/bazzite --json tagName -q .tagName)
+          TESTING=$(gh release list --repo ublue-os/bazzite --json tagName,createdAt --limit 50 \
+            | jq -r '[.[] | select(.tagName|startswith("testing-"))] | sort_by(.createdAt) | last | .tagName')
+
+          OWNER_LC=$(echo "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
+
+          read_current_tag() {
+            local stream=$1
+            skopeo inspect --no-tags "docker://ghcr.io/${OWNER_LC}/bazzite-mx:${stream}" 2>/dev/null \
+              | jq -r '.Labels["org.opencontainers.image.base.name"] // ""' \
+              | awk -F: 'NF>1 {print $NF}'
+          }
+
+          CUR_STABLE=$(read_current_tag stable || true)
+          CUR_TESTING=$(read_current_tag testing || true)
+
+          STABLE_CHANGED=false
+          TESTING_CHANGED=false
+          [ "$STABLE" != "$CUR_STABLE" ] && STABLE_CHANGED=true
+          [ "$TESTING" != "$CUR_TESTING" ] && TESTING_CHANGED=true
+
+          echo "Latest upstream: stable=$STABLE  testing=$TESTING"
+          echo "Currently built: stable=$CUR_STABLE  testing=$CUR_TESTING"
+          echo "stable_changed=$STABLE_CHANGED  testing_changed=$TESTING_CHANGED"
+
+          {
+            echo "stable_tag=$STABLE"
+            echo "testing_tag=$TESTING"
+            echo "stable_changed=$STABLE_CHANGED"
+            echo "testing_changed=$TESTING_CHANGED"
+          } >> "$GITHUB_OUTPUT"
+
+  build-stable:
+    needs: check
+    if: needs.check.outputs.stable_changed == 'true'
+    uses: ./.github/workflows/reusable-build.yml
+    secrets: inherit
+    with:
+      stream_name: stable
+      upstream_tag: ${{ needs.check.outputs.stable_tag }}
+
+  build-testing:
+    needs: check
+    if: needs.check.outputs.testing_changed == 'true'
+    uses: ./.github/workflows/reusable-build.yml
+    secrets: inherit
+    with:
+      stream_name: testing
+      upstream_tag: ${{ needs.check.outputs.testing_tag }}
