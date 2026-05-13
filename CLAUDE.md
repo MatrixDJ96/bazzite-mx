@@ -43,6 +43,8 @@ Auto-loaded by Claude Code at session start.
 
 | 13 — CI rechunker | ✅ Done | `.github/workflows/reusable-build.yml` enables `rpm-ostree compose build-chunked-oci` for the matrix. Cumulative delta over base bazzite (~80 MiB across many small files) makes semantic re-layering pay off: better resumability, smaller incremental pulls on `bootc upgrade`, lower registry storage via cross-image dedup. Cost: ~+15 min wall-clock on the 6-job matrix. Bazzite-DX/AmyOS ship this commented-out by default. |
 
+| 14 — Release & GHCR cleanup | ✅ Done | `.github/workflows/generate-release.yml` (workflow_call) creates a GitHub Release per upstream stable bump: resolves prev release tag from the repo, pulls the 3 image digests via `skopeo inspect`, renders Markdown body through `.github/scripts/changelog.sh` (git-log + link upstream, no SBOM), then `softprops/action-gh-release@v3` (SHA-pinned) publishes. `watch-upstream.yml` chains a `release-stable` job (`needs: [check, build-stable]`) so the release fires only on actual upstream change with a green build. `.github/workflows/clean.yml` (SHA-pinned `dataaxiom/ghcr-cleanup-action@v1.0.16`) runs Sundays 00:15 UTC, prunes images >90 days, keeps last 7 tagged + 7 untagged, supports `dry_run` opt-in via dispatch. Patterns lifted from `ublue-os/bazzite` (`generate_release.yml`, `clean.yml`) — simplified (no SBOM, no Python). |
+
 ## Where to look
 
 | If you need to… | Read |
@@ -93,9 +95,21 @@ rule, COPR pattern, comment policy), see
 Containerfile               # 3 RUN steps: build.sh → 10-tests-mx.sh → bootc lint
 build_files/{shared,mx,tests}/
 system_files/{etc,usr}/
-.github/workflows/          # build-stable, build-testing, reusable-build, watch-upstream
+.github/workflows/          # build-stable, build-testing, clean, generate-release, reusable-build, watch-upstream
 .claude/                    # this folder + settings.json + commands/preflight.md + docs/
 cosign.{key,pub}            # .key gitignored
+```
+
+## CI flow at a glance
+
+```
+watch-upstream     (cron hourly)        ─► build-{stable,testing}* ─► release-stable** ─► generate-release
+build-{stable,testing}  (push to main / dispatch) ─► reusable-build (3-image matrix: bazzite-mx{,-nvidia,-nvidia-open})
+clean              (cron Sun 00:15)     ─► prunes the 3 GHCR packages (>90d, keep 7+7)
+generate-release   (workflow_call / dispatch)  ─► gh release create on MatrixDJ96/bazzite-mx
+
+ *  fire only if upstream tag differs from the one currently on ghcr.io
+ ** fires only on green build-stable + actual upstream change
 ```
 
 ## Quick command cheatsheet
@@ -118,4 +132,15 @@ gh run list --repo MatrixDJ96/bazzite-mx --limit 4 \
 
 # Cleanup local
 podman rmi localhost/bazzite-mx:preflight && podman image prune -f
+```
+
+```bash
+# Trigger a release manually (auto-resolves latest ublue-os/bazzite stable)
+gh workflow run "Generate Release" --repo MatrixDJ96/bazzite-mx
+
+# List published releases on the repo
+gh release list --repo MatrixDJ96/bazzite-mx
+
+# Preview what the weekly GHCR cleanup would prune (no destructive action)
+gh workflow run "Cleanup GHCR" --repo MatrixDJ96/bazzite-mx -f dry_run=true
 ```

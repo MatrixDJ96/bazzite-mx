@@ -1,4 +1,4 @@
-name: Watch Upstream Releases
+name: Watch Upstream
 
 on:
   schedule:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   check:
-    name: Check upstream
+    name: Detect upstream change
     runs-on: ubuntu-24.04
     outputs:
       stable_changed: ${{ steps.compare.outputs.stable_changed }}
@@ -20,7 +20,7 @@ jobs:
       stable_tag: ${{ steps.compare.outputs.stable_tag }}
       testing_tag: ${{ steps.compare.outputs.testing_tag }}
     steps:
-      - name: Compare upstream releases vs published images
+      - name: Diff upstream tags
         id: compare
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -61,6 +61,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   build-stable:
+    name: Build stable matrix
     needs: check
     if: needs.check.outputs.stable_changed == 'true'
     uses: ./.github/workflows/reusable-build.yml
@@ -70,6 +71,7 @@ jobs:
       upstream_tag: ${{ needs.check.outputs.stable_tag }}
 
   build-testing:
+    name: Build testing matrix
     needs: check
     if: needs.check.outputs.testing_changed == 'true'
     uses: ./.github/workflows/reusable-build.yml
@@ -77,3 +79,16 @@ jobs:
     with:
       stream_name: testing
       upstream_tag: ${{ needs.check.outputs.testing_tag }}
+
+  release-stable:
+    name: Publish stable release
+    needs: [check, build-stable]
+    if: needs.check.outputs.stable_changed == 'true' && needs.build-stable.result == 'success'
+    uses: ./.github/workflows/generate-release.yml
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: read
+    with:
+      upstream_tag: ${{ needs.check.outputs.stable_tag }}
+      stream_version: ${{ needs.check.outputs.stable_tag }}

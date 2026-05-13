@@ -1,0 +1,112 @@
+name: Generate Release
+
+on:
+  workflow_call:
+    inputs:
+      upstream_tag:
+        description: "Upstream Bazzite tag, e.g. 44.20260513"
+        type: string
+        required: true
+      stream_version:
+        description: "Release tag/version (defaults to upstream_tag)"
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: "Upstream tag, empty = latest stable"
+        type: string
+        required: false
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.upstream_tag }}
+  cancel-in-progress: false
+
+jobs:
+  generate-release:
+    name: Compose changelog & publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve inputs
+        id: inputs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+          INPUT_STREAM_VERSION: ${{ inputs.stream_version }}
+        run: |
+          set -euo pipefail
+          UP="$INPUT_UPSTREAM_TAG"
+          if [ -z "$UP" ]; then
+            UP=$(gh release view --repo ublue-os/bazzite --json tagName -q .tagName)
+          fi
+          SV="$INPUT_STREAM_VERSION"
+          [ -z "$SV" ] && SV="$UP"
+          {
+            echo "upstream_tag=$UP"
+            echo "stream_version=$SV"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Find previous release
+        id: prev
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PREV=$(gh release list --repo "$GITHUB_REPOSITORY" --json tagName,createdAt --limit 50 \
+            | jq -r '[.[] | select(.tagName | test("^[0-9]+\\.[0-9]+$"))] | sort_by(.createdAt) | last | .tagName // ""')
+          echo "tag=$PREV" >> "$GITHUB_OUTPUT"
+          echo "Previous release: ${PREV:-<none>}"
+
+      - name: Pin image digests
+        id: digests
+        env:
+          UPSTREAM_TAG: ${{ steps.inputs.outputs.upstream_tag }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          OWNER_LC="${OWNER,,}"
+          resolve() {
+            skopeo inspect --no-tags "docker://ghcr.io/${OWNER_LC}/$1:${UPSTREAM_TAG}" | jq -r .Digest
+          }
+          {
+            echo "main=$(resolve bazzite-mx)"
+            echo "nvidia=$(resolve bazzite-mx-nvidia)"
+            echo "nvidia_open=$(resolve bazzite-mx-nvidia-open)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Render changelog body
+        env:
+          UPSTREAM_TAG: ${{ steps.inputs.outputs.upstream_tag }}
+          STREAM_VERSION: ${{ steps.inputs.outputs.stream_version }}
+          PREV_TAG: ${{ steps.prev.outputs.tag }}
+          D_MAIN: ${{ steps.digests.outputs.main }}
+          D_NV: ${{ steps.digests.outputs.nvidia }}
+          D_NVO: ${{ steps.digests.outputs.nvidia_open }}
+        run: |
+          set -euo pipefail
+          ./.github/scripts/changelog.sh \
+            "$UPSTREAM_TAG" "$STREAM_VERSION" "$PREV_TAG" \
+            "$D_MAIN" "$D_NV" "$D_NVO" > changelog.md
+          echo "--- preview ---"
+          head -60 changelog.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        with:
+          name: "${{ steps.inputs.outputs.stream_version }}: Stable (Bazzite ${{ steps.inputs.outputs.upstream_tag }})"
+          tag_name: ${{ steps.inputs.outputs.stream_version }}
+          body_path: ./changelog.md
+          make_latest: "true"
+          prerelease: false
+          target_commitish: ${{ github.sha }}

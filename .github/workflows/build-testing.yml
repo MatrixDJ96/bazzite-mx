@@ -28,6 +28,7 @@ permissions:
 
 jobs:
   build:
+    name: Testing matrix
     uses: ./.github/workflows/reusable-build.yml
     secrets: inherit
     with:
