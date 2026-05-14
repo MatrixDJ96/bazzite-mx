@@ -2,7 +2,7 @@ name: Build Stable
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths-ignore:
       - "**.md"
       - "LICENSE"
@@ -20,17 +20,112 @@ on:
         required: false
         type: string
         default: ""
+  workflow_call:
+    inputs:
+      upstream_tag:
+        description: "Override upstream release tag (leave empty for latest)"
+        required: false
+        type: string
+        default: ""
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   id-token: write
 
+concurrency:
+  group: bazzite-mx-stable-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  resolve:
+    name: Resolve release tag
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      upstream_tag: ${{ steps.compute.outputs.upstream_tag }}
+      release_tag: ${{ steps.compute.outputs.release_tag }}
+    steps:
+      - name: Compute upstream + release tag
+        id: compute
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+          REPO_FULL: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          UP="$INPUT_UPSTREAM_TAG"
+          if [ -z "$UP" ]; then
+            UP=$(gh release view --repo ublue-os/bazzite --json tagName -q .tagName)
+          fi
+          # Collision detection on our own releases: stable schema has no prefix,
+          # so PREFIX == UPSTREAM_TAG. First release uses bare tag; subsequent
+          # rebuilds on the same upstream use .1 .2 .3.
+          PREFIX="$UP"
+          EXISTING=$(gh release list --repo "$REPO_FULL" --limit 200 --json tagName -q '.[].tagName' || true)
+          if ! echo "$EXISTING" | grep -qx "$PREFIX"; then
+            RT="$PREFIX"
+          else
+            N=1
+            while echo "$EXISTING" | grep -qx "${PREFIX}.${N}"; do N=$((N+1)); done
+            RT="${PREFIX}.${N}"
+          fi
+          {
+            echo "upstream_tag=$UP"
+            echo "release_tag=$RT"
+          } >> "$GITHUB_OUTPUT"
+          echo "Upstream: $UP"
+          echo "Release tag: $RT"
+
+  validate-just:
+    name: Validate just syntax
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Install Just
+        run: |
+          set -euo pipefail
+          /home/linuxbrew/.linuxbrew/bin/brew install just
+          echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+      - name: Check just syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in system_files/usr/share/ublue-os/just/*.just; do
+            echo "::group::$f"
+            if ! just --justfile "$f" --list >/dev/null; then
+              echo "::error file=$f::just parse error"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$fail"
+
   build:
     name: Stable matrix
+    needs: [resolve, validate-just]
+    if: ${{ !cancelled() && needs.validate-just.result == 'success' && (needs.resolve.result == 'success' || needs.resolve.result == 'skipped') }}
     uses: ./.github/workflows/reusable-build.yml
     secrets: inherit
     with:
       stream_name: stable
-      upstream_tag: ${{ inputs.upstream_tag || '' }}
+      upstream_tag: ${{ needs.resolve.outputs.upstream_tag || '' }}
+      release_tag: ${{ needs.resolve.outputs.release_tag || '' }}
+
+  release:
+    name: Publish stable release
+    needs: [resolve, build]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.build.result == 'success' && needs.resolve.result == 'success'
+    uses: ./.github/workflows/generate-release.yml
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: read
+    with:
+      stream_name: stable
+      upstream_tag: ${{ needs.resolve.outputs.upstream_tag }}
+      release_tag: ${{ needs.resolve.outputs.release_tag }}

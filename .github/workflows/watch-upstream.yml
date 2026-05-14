@@ -6,9 +6,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   id-token: write
+
+concurrency:
+  group: bazzite-mx-watch-upstream
+  cancel-in-progress: false
 
 jobs:
   check:
@@ -60,35 +64,28 @@ jobs:
             echo "testing_changed=$TESTING_CHANGED"
           } >> "$GITHUB_OUTPUT"
 
-  build-stable:
-    name: Build stable matrix
+  trigger-stable:
+    name: Trigger stable build + release
     needs: check
     if: needs.check.outputs.stable_changed == 'true'
-    uses: ./.github/workflows/reusable-build.yml
-    secrets: inherit
-    with:
-      stream_name: stable
-      upstream_tag: ${{ needs.check.outputs.stable_tag }}
-
-  build-testing:
-    name: Build testing matrix
-    needs: check
-    if: needs.check.outputs.testing_changed == 'true'
-    uses: ./.github/workflows/reusable-build.yml
-    secrets: inherit
-    with:
-      stream_name: testing
-      upstream_tag: ${{ needs.check.outputs.testing_tag }}
-
-  release-stable:
-    name: Publish stable release
-    needs: [check, build-stable]
-    if: needs.check.outputs.stable_changed == 'true' && needs.build-stable.result == 'success'
-    uses: ./.github/workflows/generate-release.yml
+    uses: ./.github/workflows/build-stable.yml
     secrets: inherit
     permissions:
       contents: write
-      packages: read
+      packages: write
+      id-token: write
     with:
       upstream_tag: ${{ needs.check.outputs.stable_tag }}
-      stream_version: ${{ needs.check.outputs.stable_tag }}
+
+  trigger-testing:
+    name: Trigger testing build + pre-release
+    needs: check
+    if: needs.check.outputs.testing_changed == 'true'
+    uses: ./.github/workflows/build-testing.yml
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    with:
+      upstream_tag: ${{ needs.check.outputs.testing_tag }}

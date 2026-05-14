@@ -3,18 +3,33 @@ name: Generate Release
 on:
   workflow_call:
     inputs:
+      stream_name:
+        description: "Upstream stream: stable or testing"
+        type: string
+        required: true
       upstream_tag:
         description: "Upstream Bazzite tag, e.g. 44.20260513"
         type: string
         required: true
-      stream_version:
-        description: "Release tag/version (defaults to upstream_tag)"
+      release_tag:
+        description: "Downstream release tag (e.g. 44.20260513 or 44.20260513.1)"
         type: string
         required: true
   workflow_dispatch:
     inputs:
+      stream_name:
+        description: "stable | testing"
+        type: choice
+        options: [stable, testing]
+        default: stable
+        required: true
       upstream_tag:
-        description: "Upstream tag, empty = latest stable"
+        description: "Upstream tag (empty = latest for stream)"
+        type: string
+        required: false
+        default: ""
+      release_tag:
+        description: "Downstream release tag (empty = same as upstream_tag, with collision detection)"
         type: string
         required: false
         default: ""
@@ -22,7 +37,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.upstream_tag }}
+  group: bazzite-mx-release-${{ inputs.stream_name }}-${{ inputs.upstream_tag }}
   cancel-in-progress: false
 
 jobs:
@@ -42,71 +57,100 @@ jobs:
         id: inputs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_STREAM_NAME: ${{ inputs.stream_name }}
           INPUT_UPSTREAM_TAG: ${{ inputs.upstream_tag }}
-          INPUT_STREAM_VERSION: ${{ inputs.stream_version }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          REPO_FULL: ${{ github.repository }}
         run: |
           set -euo pipefail
+          STREAM="$INPUT_STREAM_NAME"
           UP="$INPUT_UPSTREAM_TAG"
           if [ -z "$UP" ]; then
-            UP=$(gh release view --repo ublue-os/bazzite --json tagName -q .tagName)
+            if [ "$STREAM" = "stable" ]; then
+              UP=$(gh release view --repo ublue-os/bazzite --json tagName -q .tagName)
+            else
+              UP=$(gh release list --repo ublue-os/bazzite --json tagName,createdAt --limit 50 \
+                | jq -r '[.[] | select(.tagName|startswith("testing-"))] | sort_by(.createdAt) | last | .tagName')
+            fi
           fi
-          SV="$INPUT_STREAM_VERSION"
-          [ -z "$SV" ] && SV="$UP"
+          RT="$INPUT_RELEASE_TAG"
+          if [ -z "$RT" ]; then
+            # workflow_dispatch fallback: run collision detection on the fly
+            EXISTING=$(gh release list --repo "$REPO_FULL" --limit 200 --json tagName -q '.[].tagName' || true)
+            if ! echo "$EXISTING" | grep -qx "$UP"; then
+              RT="$UP"
+            else
+              N=1
+              while echo "$EXISTING" | grep -qx "${UP}.${N}"; do N=$((N+1)); done
+              RT="${UP}.${N}"
+            fi
+          fi
           {
+            echo "stream_name=$STREAM"
             echo "upstream_tag=$UP"
-            echo "stream_version=$SV"
+            echo "release_tag=$RT"
           } >> "$GITHUB_OUTPUT"
+          echo "Stream=$STREAM upstream=$UP release_tag=$RT"
 
       - name: Find previous release
         id: prev
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STREAM_NAME: ${{ steps.inputs.outputs.stream_name }}
+          RELEASE_TAG: ${{ steps.inputs.outputs.release_tag }}
         run: |
           set -euo pipefail
-          PREV=$(gh release list --repo "$GITHUB_REPOSITORY" --json tagName,createdAt --limit 50 \
-            | jq -r '[.[] | select(.tagName | test("^[0-9]+\\.[0-9]+$"))] | sort_by(.createdAt) | last | .tagName // ""')
+          if [ "$STREAM_NAME" = "stable" ]; then
+            PATTERN='^[0-9]+\.[0-9]+(\.[0-9]+)?$'
+          else
+            PATTERN='^testing-[0-9]+\.[0-9]+(\.[0-9]+)?$'
+          fi
+          PREV=$(gh release list --repo "$GITHUB_REPOSITORY" --json tagName,createdAt --limit 200 \
+            | jq -r --arg p "$PATTERN" --arg cur "$RELEASE_TAG" \
+                '[.[] | select(.tagName | test($p)) | select(.tagName != $cur)] | sort_by(.createdAt) | last | .tagName // ""')
           echo "tag=$PREV" >> "$GITHUB_OUTPUT"
           echo "Previous release: ${PREV:-<none>}"
 
       - name: Pin image digests
         id: digests
         env:
-          UPSTREAM_TAG: ${{ steps.inputs.outputs.upstream_tag }}
+          RELEASE_TAG: ${{ steps.inputs.outputs.release_tag }}
           OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
           OWNER_LC="${OWNER,,}"
           resolve() {
-            skopeo inspect --no-tags "docker://ghcr.io/${OWNER_LC}/$1:${UPSTREAM_TAG}" | jq -r .Digest
+            skopeo inspect --no-tags "docker://ghcr.io/${OWNER_LC}/$1:${RELEASE_TAG}" | jq -r .Digest
           }
           {
-            echo "main=$(resolve bazzite-mx)"
+            echo "base=$(resolve bazzite-mx)"
             echo "nvidia=$(resolve bazzite-mx-nvidia)"
             echo "nvidia_open=$(resolve bazzite-mx-nvidia-open)"
           } >> "$GITHUB_OUTPUT"
 
       - name: Render changelog body
         env:
+          STREAM_NAME: ${{ steps.inputs.outputs.stream_name }}
           UPSTREAM_TAG: ${{ steps.inputs.outputs.upstream_tag }}
-          STREAM_VERSION: ${{ steps.inputs.outputs.stream_version }}
+          RELEASE_TAG: ${{ steps.inputs.outputs.release_tag }}
           PREV_TAG: ${{ steps.prev.outputs.tag }}
-          D_MAIN: ${{ steps.digests.outputs.main }}
-          D_NV: ${{ steps.digests.outputs.nvidia }}
-          D_NVO: ${{ steps.digests.outputs.nvidia_open }}
+          DIGEST_MAIN: ${{ steps.digests.outputs.base }}
+          DIGEST_NVIDIA: ${{ steps.digests.outputs.nvidia }}
+          DIGEST_NVIDIA_OPEN: ${{ steps.digests.outputs.nvidia_open }}
         run: |
           set -euo pipefail
           ./.github/scripts/changelog.sh \
-            "$UPSTREAM_TAG" "$STREAM_VERSION" "$PREV_TAG" \
-            "$D_MAIN" "$D_NV" "$D_NVO" > changelog.md
+            "$UPSTREAM_TAG" "$RELEASE_TAG" "$PREV_TAG" \
+            "$DIGEST_MAIN" "$DIGEST_NVIDIA" "$DIGEST_NVIDIA_OPEN" "$STREAM_NAME" > changelog.md
           echo "--- preview ---"
           head -60 changelog.md
 
       - name: Publish release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
-          name: "${{ steps.inputs.outputs.stream_version }}: Stable (Bazzite ${{ steps.inputs.outputs.upstream_tag }})"
-          tag_name: ${{ steps.inputs.outputs.stream_version }}
+          name: "${{ steps.inputs.outputs.stream_name == 'stable' && format('{0}: Stable (Bazzite {1})', steps.inputs.outputs.release_tag, steps.inputs.outputs.upstream_tag) || format('{0}: Testing (Bazzite {1})', steps.inputs.outputs.release_tag, steps.inputs.outputs.upstream_tag) }}"
+          tag_name: ${{ steps.inputs.outputs.release_tag }}
           body_path: ./changelog.md
-          make_latest: "true"
-          prerelease: false
+          make_latest: ${{ steps.inputs.outputs.stream_name == 'stable' }}
+          prerelease: ${{ steps.inputs.outputs.stream_name != 'stable' }}
           target_commitish: ${{ github.sha }}

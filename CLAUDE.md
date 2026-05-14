@@ -45,6 +45,8 @@ Auto-loaded by Claude Code at session start.
 
 | 14 — Release & GHCR cleanup | ✅ Done | `.github/workflows/generate-release.yml` (workflow_call) creates a GitHub Release per upstream stable bump: resolves prev release tag from the repo, pulls the 3 image digests via `skopeo inspect`, renders Markdown body through `.github/scripts/changelog.sh` (git-log + link upstream, no SBOM), then `softprops/action-gh-release@v3` (SHA-pinned) publishes. `watch-upstream.yml` chains a `release-stable` job (`needs: [check, build-stable]`) so the release fires only on actual upstream change with a green build. `.github/workflows/clean.yml` (SHA-pinned `dataaxiom/ghcr-cleanup-action@v1.0.16`) runs Sundays 00:15 UTC, prunes images >90 days, keeps last 7 tagged + 7 untagged, supports `dry_run` opt-in via dispatch. Patterns lifted from `ublue-os/bazzite` (`generate_release.yml`, `clean.yml`) — simplified (no SBOM, no Python). |
 
+| 15 — Pipeline end-to-end (resolve → validate → build → release) | ✅ Done | `build-{stable,testing}.yml` are end-to-end and `workflow_call`-callable. Jobs: `resolve` (collision detection on `gh release list`, computes `release_tag` `<upstream_tag>(.N)?`) → `validate-just` (brew install + `just --list` on each `.just`, gates the matrix so a syntax error aborts before any GHCR push) → `build` matrix (`reusable-build.yml`, pushes immutable `:RELEASE_TAG` so `:44.20260511` retains its first-build digest after a `.1` rebuild) → `release` (`generate-release.yml` takes `stream_name`, emits stable / testing with the right `prerelease` + `make_latest` + title prefix). `watch-upstream.yml` is just a cron-fired detector that calls the two build workflows via `workflow_call`. **Permissions chain**: workflow-level `contents: write` on the three top-level workflows (otherwise the called release-publish step gets capped to `contents: read` and softprops 403s). **Concurrency**: literal kebab-case group `bazzite-mx-{stream}-${{ github.ref_name }}` with `cancel-in-progress: false` — literal because in a chained `workflow_call` the callee's `github.workflow` resolves to the caller's name, colliding with the caller's own group and producing a deadlock-cancel (empirically observed 2026-05-14); per-ref scoping lets `develop` runs proceed in parallel with `main` instead of queueing behind it. **`develop` branch policy**: push to `develop` runs `resolve`-skip + full `build` matrix with rechunk/login/push/sign/release skipped via `github.ref == default_branch` guards — sandbox for fast CI feedback without GHCR spam. Naming policy v2 enforced (Title Case workflows, sentence-case jobs/steps, SCREAMING_SNAKE_CASE env vars with no 2-3 letter sigle, snake_case canonical input/output keys with `release_tag` replacing `stream_version` everywhere). |
+
 ## Where to look
 
 | If you need to… | Read |
@@ -85,6 +87,29 @@ Auto-loaded by Claude Code at session start.
 7. **Skip a phase when upstream handles it well**. Document why in the
    commit / status table; don't re-derive the decision next session.
 
+8. **CI naming conventions**: Workflow `name:` = Title Case (`Build Stable`).
+   Job/step `name:` = sentence case, imperative + object (`Resolve release
+   tag`, `Check just syntax`). Env vars = `SCREAMING_SNAKE_CASE` (no 2-3
+   letter sigle: `DIGEST_NVIDIA_OPEN`, not `D_NVO`). Input/output keys =
+   `snake_case`, no synonyms cross-workflow (`release_tag` everywhere, not
+   `stream_version` in one file and `release_tag` in another). Concurrency
+   `group:` = literal `bazzite-mx-<phase>[-<flavour>][-<key>]` kebab-case
+   (NEVER `${{ github.workflow }}` — in any callee invoked via
+   `workflow_call` it resolves to the caller's name, colliding with the
+   caller's own group and triggering "deadlock detected → canceling" on
+   every chained call. Empirically validated 2026-05-14). Shell binary
+   names (`just`, `gh`, `podman`) lowercase, acronyms (`GHCR`, `OCI`,
+   `BTRFS`, `SBOM`) uppercase.
+
+9. **`validate-just` is a gating job inside `build-{stable,testing}.yml`**
+   (not a standalone workflow). It runs `just --list` on each `.just`
+   file via preinstalled brew (NOT `setup-just` or `ublue-os/just-action`;
+   GitHub-hosted runners ship `just` via Linuxbrew, +30s install vs +1
+   third-party action dependency — pattern aurora-conforming). The `build`
+   job depends on `validate-just`, so a broken `.just` aborts the matrix
+   before any GHCR push or release. Don't "modernize" this — decision
+   validated by 4-lens audit + empirical gate refactor.
+
 For the full set of conventions (bash style, smoke test idiom, vendoring
 rule, COPR pattern, comment policy), see
 [`.claude/docs/conventions.md`](.claude/docs/conventions.md).
@@ -103,14 +128,26 @@ cosign.{key,pub}            # .key gitignored
 ## CI flow at a glance
 
 ```
-watch-upstream     (cron hourly)        ─► build-{stable,testing}* ─► release-stable** ─► generate-release
-build-{stable,testing}  (push to main / dispatch) ─► reusable-build (3-image matrix: bazzite-mx{,-nvidia,-nvidia-open})
-clean              (cron Sun 00:15)     ─► prunes the 3 GHCR packages (>90d, keep 7+7)
-generate-release   (workflow_call / dispatch)  ─► gh release create on MatrixDJ96/bazzite-mx
+push to main / dispatch / watch-upstream (workflow_call) ─►
+  build-{stable,testing}.yml:
+     resolve  (collision .N on gh release list)
+       └─► build    (reusable-build, 3-image matrix, push :stable + :<release_tag> immutable)
+            └─► release  (generate-release.yml, stable=latest / testing=prerelease)
 
- *  fire only if upstream tag differs from the one currently on ghcr.io
- ** fires only on green build-stable + actual upstream change
+watch-upstream     (cron hourly)     ─► triggers build-{stable,testing}.yml if upstream changed
+clean              (cron Sun 00:15)  ─► prunes the 3 GHCR packages (>90d, keep 7+7)
+generate-release   (workflow_call / dispatch) ─► takes stream_name + upstream_tag + release_tag
 ```
+
+### Branch policy
+
+| Branch | Build | Rechunk | Push GHCR | Sign | Release |
+|---|---|---|---|---|---|
+| `main` | ✓ | ✓ | ✓ | ✓ | ✓ (push + watch-upstream + dispatch) |
+| `develop` | ✓ | ✗ | ✗ | ✗ | ✗ — fast CI sandbox |
+| PR to `main` | ✓ | ✗ | ✗ | ✗ | ✗ |
+
+Rebuild on the same upstream produces incremental tags `44.20260511.1`, `.2`, … both as GitHub Release and as immutable GHCR image tag (the original `:44.20260511` stays pinned to its first build's digest; `:stable` is mutable and always points to the latest build).
 
 ## Quick command cheatsheet
 
@@ -135,8 +172,17 @@ podman rmi localhost/bazzite-mx:preflight && podman image prune -f
 ```
 
 ```bash
-# Trigger a release manually (auto-resolves latest ublue-os/bazzite stable)
-gh workflow run "Generate Release" --repo MatrixDJ96/bazzite-mx
+# Iterate WIP on the develop branch (CI runs build only — no push, no release)
+git checkout -b develop
+git push -u origin develop
+# Then: gh run list --workflow "Build Stable" --branch develop
+
+# Trigger a release manually (stream defaults to stable, upstream auto-resolves latest)
+gh workflow run "Generate Release" --repo MatrixDJ96/bazzite-mx \
+  -f stream_name=stable
+# Force a testing pre-release for the latest upstream testing tag:
+gh workflow run "Generate Release" --repo MatrixDJ96/bazzite-mx \
+  -f stream_name=testing
 
 # List published releases on the repo
 gh release list --repo MatrixDJ96/bazzite-mx
