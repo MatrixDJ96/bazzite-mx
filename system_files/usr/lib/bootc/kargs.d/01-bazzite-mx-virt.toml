@@ -1,0 +1,14 @@
+# Kernel args for KVM nested-MSR tolerance, needed by Windows 11 guests
+# under libvirt + QEMU on consumer Intel/AMD CPUs that expose
+# unimplemented MSRs. Without them KVM injects #GP on unsupported MSR
+# accesses (Windows guest panics) and dmesg floods with "ignored rdmsr".
+#
+# `kvm.ignore_msrs=1`         → KVM returns 0 instead of #GP (Windows-friendly).
+# `kvm.report_ignored_msrs=0` → suppress the dmesg spam from `ignore_msrs`.
+#
+# Baked in at build time (rather than via ujust) so the stack works on
+# first boot. bootc reads /usr/lib/bootc/kargs.d/*.toml at deploy time.
+kargs = [
+    "kvm.ignore_msrs=1",
+    "kvm.report_ignored_msrs=0",
+]
