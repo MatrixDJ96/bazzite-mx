@@ -1,0 +1,10 @@
+[copr:copr.fedorainfracloud.org:teackot:msi]
+name=Copr repo for msi owned by teackot
+baseurl=https://download.copr.fedorainfracloud.org/results/teackot/msi/fedora-$releasever-$basearch/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=https://download.copr.fedorainfracloud.org/results/teackot/msi/pubkey.gpg
+repo_gpgcheck=0
+enabled=0
+enabled_metadata=0
