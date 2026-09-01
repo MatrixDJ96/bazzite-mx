@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<svg width="600" height="600" viewBox="0 0 600 600" fill="none" version="1.1" id="svg8" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg">
+  <namedview id="namedview1" pagecolor="#ffffff" bordercolor="#000000" borderopacity="0.25"></namedview>
+  <path d="M 242,110 C 242,93.4315 228.569,80 212,80 h -4 c -16.569,0 -30,13.4315 -30,30 v 68 h -68 c -16.5685,0 -30,13.431 -30,30 v 4 c 0,16.569 13.4315,30 30,30 h 68 v 68 c 0,16.569 13.431,30 30,30 h 4 c 16.569,0 30,-13.431 30,-30 v -68 h 68 c 16.569,0 30,-13.431 30,-30 v -4 c 0,-16.569 -13.431,-30 -30,-30 h -68 z" fill="#ffffff" fill-opacity="0.7" id="path3"></path>
+  <defs id="defs8">
+    <linearGradient id="paint0_linear_1016_105" x1="50" y1="50" x2="550" y2="550" gradientUnits="userSpaceOnUse">
+      <stop offset="0.0684898" stop-color="#0047AB" id="stop7"></stop>
+      <stop offset="0.741212" stop-color="#8A2BE2" id="stop8"></stop>
+    </linearGradient>
+  </defs>
+</svg>
