@@ -1,0 +1,6 @@
+# bootc install-time defaults, read by `bootc install` and bcvk when
+# provisioning a disk from this image (pattern from Aurora upstream).
+# Bazzite targets BTRFS as its root filesystem; without this file a
+# plain `bootc install to-disk` would fall back to the bootc default.
+[install]
+root-fs-type = "btrfs"

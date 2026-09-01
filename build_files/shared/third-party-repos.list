@@ -1,0 +1,26 @@
+# Third-party .repo basenames that must ship enabled=0 — the single
+# authoritative list. Adding a repo means adding it here (AGENTS.md
+# convention 2): validate-repos.sh hard-fails the build on any entry left
+# enabled=1 OR listed here but absent from the image (a renamed upstream
+# repo file must be renamed here too), and reusable-build.yml hands the
+# same list to check-image-integrity.sh, which re-proves both rules on the
+# chunked image's cold bytes. A '?' prefix marks an optional entry:
+# enforced enabled=0 when present, tolerated when absent — for repos the
+# base has shipped before and may ship again. The '?' syntax is this
+# repo's own convention (no upstream equivalent; aurora keeps a plain
+# inline array). A repo absent from this list is only listed, never
+# enforced.
+#
+# Blank lines and # comments are ignored by both readers.
+negativo17-fedora-multimedia.repo
+tailscale.repo
+vscode.repo
+docker-ce.repo
+mozilla.repo
+1password.repo
+teackot-msi.repo
+fedora-cisco-openh264.repo
+?fedora-coreos-pool.repo
+terra.repo
+terra-extras.repo
+terra-mesa.repo
