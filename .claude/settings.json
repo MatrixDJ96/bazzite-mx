@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(git branch:*)",
+      "Bash(git remote:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(git config --get:*)",
+      "Bash(git config user.email)",
+      "Bash(git config user.name)",
+      "Bash(git fetch:*)",
+
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh run watch:*)",
+      "Bash(gh api:*)",
+      "Bash(gh release view:*)",
+      "Bash(gh release list:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr view:*)",
+
+      "Bash(podman images:*)",
+      "Bash(podman ps:*)",
+      "Bash(podman inspect:*)",
+      "Bash(podman volume ls:*)",
+      "Bash(podman volume inspect:*)",
+      "Bash(podman system df:*)",
+      "Bash(podman build:*)",
+
+      "Bash(skopeo inspect:*)",
+      "Bash(skopeo list-tags:*)",
+
+      "Bash(buildah from:*)",
+
+      "Bash(awk:*)",
+      "Bash(xxd:*)",
+      "Bash(diff:*)",
+      "Bash(tree:*)",
+      "Bash(realpath:*)",
+      "Bash(dirname:*)",
+      "Bash(basename:*)",
+      "Bash(df:*)",
+      "Bash(free:*)",
+
+      "Bash(curl -sL:*)",
+      "Bash(curl -sI:*)",
+      "Bash(curl -sIL:*)",
+
+      "Bash(mkdir -p:*)",
+
+      "Bash(date:*)",
+      "Bash(echo:*)",
+      "Bash(printf:*)",
+      "Bash(hostname:*)",
+      "Bash(true:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf /var:*)",
+      "Bash(rm -fr /var:*)"
+    ],
+    "additionalDirectories": []
+  },
+  "env": {},
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/shellcheck-edit.sh" }
+        ]
+      }
+    ]
+  }
+}
