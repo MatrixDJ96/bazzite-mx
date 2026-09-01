@@ -1,0 +1,814 @@
+name: Reusable Build
+
+on:
+  workflow_call:
+    inputs:
+      matrix_include:
+        description: "JSON array of build matrix entries {image_name, base_image, stream_name}, one per flavour × stream (emitted by build.yml's plan job — the single source the per-stream gates count against)"
+        required: true
+        type: string
+      upstream_tag_stable:
+        description: "Immutable upstream stable tag (e.g. 44.20260430). If empty, the latest stable release is resolved at runtime."
+        required: false
+        type: string
+        default: ""
+      upstream_tag_testing:
+        description: "Immutable upstream testing tag (e.g. testing-44.20260430). If empty, the latest testing release is resolved at runtime."
+        required: false
+        type: string
+        default: ""
+      release_tag_stable:
+        description: "Downstream stable release tag used as the immutable image tag on GHCR (MAJOR.<build date>, plus .N for same-day rebuilds). Defaults to the upstream tag when empty."
+        required: false
+        type: string
+        default: ""
+      release_tag_testing:
+        description: "Downstream testing release tag (testing-MAJOR.<build date>, plus .N for same-day rebuilds). Defaults to the upstream tag when empty."
+        required: false
+        type: string
+        default: ""
+    outputs:
+      stable_ok:
+        description: "true when every stable-stream flavour promoted and verified end-to-end"
+        value: ${{ jobs.gate.outputs.stable_ok }}
+      testing_ok:
+        description: "true when every testing-stream flavour promoted and verified end-to-end"
+        value: ${{ jobs.gate.outputs.testing_ok }}
+    secrets:
+      SIGNING_SECRET:
+        description: "Cosign private key used to sign pushed images"
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+  REGISTRY_AUTH_FILE: /tmp/registry-auth/config.json
+  DOCKER_CONFIG: /tmp/registry-auth
+  # Guard for push/sign steps: only on push to main (not PR, not develop).
+  # `github.workflow` would resolve to the caller's workflow in reusable
+  # invocations, so we use a stable literal in the concurrency group below.
+  PUSH_ENABLED: ${{ github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+
+concurrency:
+  group: bazzite-mx-reusable-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.image_name }} (${{ matrix.stream_name }})
+    # 26.04: the ubuntu-24.04 image (20260816+) carries the 6.17-azure kernel with
+    # degraded IO — every rootful buildah commit cost 20-30 min there (measured
+    # 2026-09-01: labels 22-30 min, rechunk cleanup commit ~26 min) — and the
+    # copied-up overlay writeback loss (gotcha #34). Upstream bazzite builds on
+    # ubuntu-26.04; the #34 guards stay armed regardless of runner.
+    runs-on: ubuntu-26.04
+    # 90: on ubuntu-26.04 the sandbox build is ~10 min end-to-end (Build image
+    # 500 s, MEASURED run 33508793865, 2026-09-01, log since purged; the same
+    # ~10 min stands on run 33537087404, 10m27s) and a full main job lands
+    # around 35-40 min with rechunk and push — 90 is twice the expected worst.
+    # The old 180 existed for the 24.04 degraded-runner mode this switch removes.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      # ONE matrix spans flavours × streams (up to 6 jobs), planned by
+      # build.yml's plan job and passed in as JSON: every dimension exists
+      # because the BASE IMAGES differ, not the scripts. The sandbox builds
+      # the full matrix too — an NVIDIA-only or testing-only regression (a
+      # kmod against the wrong kernel, a renamed base .repo file) would
+      # otherwise surface only on main, after the sandbox said green (owner's
+      # instructions, 2026-09-01). On ubuntu-26.04 a sandbox job is ~10 min
+      # (MEASURED run 33537087404, 10m27s) and the jobs run in parallel.
+      matrix:
+        include: ${{ fromJSON(inputs.matrix_include) }}
+    steps:
+      # stream_name is a matrix dimension, so the per-stream tags arrive as
+      # two input pairs and each job picks its own here. Everything after
+      # this step reads STREAM_NAME / INPUT_UPSTREAM_TAG / INPUT_RELEASE_TAG
+      # from the job env.
+      - name: Select stream inputs
+        env:
+          STREAM_NAME: ${{ matrix.stream_name }}
+          UPSTREAM_TAG_STABLE: ${{ inputs.upstream_tag_stable }}
+          UPSTREAM_TAG_TESTING: ${{ inputs.upstream_tag_testing }}
+          RELEASE_TAG_STABLE: ${{ inputs.release_tag_stable }}
+          RELEASE_TAG_TESTING: ${{ inputs.release_tag_testing }}
+        run: |
+          set -euo pipefail
+          case "$STREAM_NAME" in
+            stable)  IN_UPSTREAM="$UPSTREAM_TAG_STABLE";  IN_RELEASE="$RELEASE_TAG_STABLE"  ;;
+            testing) IN_UPSTREAM="$UPSTREAM_TAG_TESTING"; IN_RELEASE="$RELEASE_TAG_TESTING" ;;
+            *)
+              echo "::error::unknown stream_name '$STREAM_NAME' in the build matrix (expected stable|testing)"
+              exit 1
+              ;;
+          esac
+          {
+            echo "STREAM_NAME=$STREAM_NAME"
+            echo "INPUT_UPSTREAM_TAG=$IN_UPSTREAM"
+            echo "INPUT_RELEASE_TAG=$IN_RELEASE"
+          } >> "$GITHUB_ENV"
+          echo "Stream: $STREAM_NAME (upstream tag: '${IN_UPSTREAM:-latest}', release tag: '${IN_RELEASE:-none}')"
+
+      - name: Prepare environment
+        env:
+          MATRIX_IMAGE_NAME: ${{ matrix.image_name }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >> "$GITHUB_ENV"
+          echo "IMAGE_VENDOR=${REPO_OWNER,,}" >> "$GITHUB_ENV"
+          echo "IMAGE_NAME=${MATRIX_IMAGE_NAME}" >> "$GITHUB_ENV"
+
+      - name: Record build date
+        id: date
+        run: |
+          set -euo pipefail
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve upstream tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Same resolver as the resolve jobs and the watcher (one owner of the
+          # "latest for the stream" rule); the sandbox has no resolve job, so
+          # this is where its upstream tag comes from. Runs after the checkout:
+          # the script lives in the repo, not on the runner.
+          UPSTREAM_TAG=$(./.github/scripts/resolve-upstream-tag.sh "$STREAM_NAME" "$INPUT_UPSTREAM_TAG")
+          echo "UPSTREAM_TAG=$UPSTREAM_TAG" >> "$GITHUB_ENV"
+          echo "Resolved upstream tag: $UPSTREAM_TAG"
+
+      - name: Free up runner disk space
+        uses: ublue-os/remove-unwanted-software@695eb75bc387dbcd9685a8e72d23439d8686cba6 # head of master (last tag: v9)
+
+      # continue-on-error stays: aurora runs the same action best-effort (its
+      # FIXME notes small runners can lack /mnt); the report step below makes a
+      # failed mount visible instead of silently building on the root disk.
+      - name: Mount BTRFS storage
+        uses: ublue-os/container-storage-action@dc1f4c8f17b672069e921f001132f7cf98a423a6 # head of main (the repo publishes no tags)
+        continue-on-error: true
+        with:
+          target-dir: /var/lib/containers
+          mount-opts: compress-force=zstd:2
+          loopback-free: '1'
+
+      - name: Report container storage state
+        run: |
+          findmnt -no FSTYPE,SOURCE,OPTIONS /var/lib/containers || echo "::warning::/var/lib/containers is NOT a dedicated mount (BTRFS mount failed?) — building on the root disk"
+          df -h /var/lib/containers /
+
+      - name: Resolve upstream digest
+        id: digest
+        env:
+          BASE_IMAGE: ${{ matrix.base_image }}
+        run: |
+          set -euo pipefail
+          DIGEST=$(skopeo inspect --no-tags "docker://ghcr.io/ublue-os/${BASE_IMAGE}:${UPSTREAM_TAG}" | jq -r .Digest)
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Upstream digest: $DIGEST"
+
+      - name: Resolve kernel coordinates
+        id: kernel
+        env:
+          BASE_IMAGE: ${{ matrix.base_image }}
+        run: ./.github/scripts/resolve-kernel-coords.sh "$BASE_IMAGE" "$UPSTREAM_TAG"
+
+      - name: Compute version tags
+        # STREAM_NAME and INPUT_RELEASE_TAG come from the job env, written by
+        # the Select stream inputs step.
+        run: |
+          set -euo pipefail
+          # STREAM_VERSION: upstream tag without the "<stream>-" prefix
+          # (stable tags from ublue-os/bazzite have no prefix; testing tags do)
+          STREAM_VERSION="${UPSTREAM_TAG#"${STREAM_NAME}"-}"
+          # FEDORA_MAJOR: leading numeric component of STREAM_VERSION
+          FEDORA_MAJOR="${STREAM_VERSION%%.*}"
+          # RELEASE_TAG: caller-provided downstream tag, or fall back to UPSTREAM_TAG.
+          # On develop/PR the resolve job is skipped so this is empty → mutable tag,
+          # but push/sign steps are also skipped, so the value is informational only.
+          RELEASE_TAG="${INPUT_RELEASE_TAG:-$UPSTREAM_TAG}"
+          echo "STREAM_VERSION=${STREAM_VERSION}" >> "$GITHUB_ENV"
+          echo "FEDORA_MAJOR=${FEDORA_MAJOR}" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
+          echo "Stream version: ${STREAM_VERSION}"
+          echo "Fedora major: ${FEDORA_MAJOR}"
+          echo "Release tag: ${RELEASE_TAG}"
+
+      - name: Compute OCI metadata
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: metadata
+        with:
+          tags: |
+            type=raw,value=latest,enable=${{ matrix.stream_name == 'stable' }}
+            type=raw,value=${{ matrix.stream_name }}
+            type=raw,value=${{ matrix.stream_name }}-${{ env.FEDORA_MAJOR }}
+            type=raw,value=${{ env.RELEASE_TAG }}
+          labels: |
+            org.opencontainers.image.title=${{ env.IMAGE_NAME }}
+            org.opencontainers.image.description=${{ github.event.repository.description }}
+            org.opencontainers.image.vendor=${{ env.IMAGE_VENDOR }}
+            # Our own release tag (build date), never the upstream tag: bootc
+            # status must name a release that exists on GitHub and GHCR.
+            org.opencontainers.image.version=${{ env.RELEASE_TAG }}
+            org.opencontainers.image.created=${{ steps.date.outputs.date }}
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}/tree/${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}/blob/${{ github.sha }}/Containerfile
+            org.opencontainers.image.documentation=https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/README.md
+            org.opencontainers.image.base.name=ghcr.io/ublue-os/${{ matrix.base_image }}:${{ env.UPSTREAM_TAG }}
+            org.opencontainers.image.base.digest=${{ steps.digest.outputs.digest }}
+            containers.bootc=1
+          sep-tags: " "
+
+      - name: Compose build args
+        env:
+          BASE_IMAGE: ${{ matrix.base_image }}
+          UPSTREAM_DIGEST: ${{ steps.digest.outputs.digest }}
+          KERNEL_VERSION: ${{ steps.kernel.outputs.kernel_version }}
+          KERNEL_FLAVOR: ${{ steps.kernel.outputs.kernel_flavor }}
+          FEDORA_VERSION: ${{ steps.kernel.outputs.fedora_version }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            "BASE_IMAGE=${BASE_IMAGE}" \
+            "BASE_TAG=${UPSTREAM_TAG}" \
+            "IMAGE_NAME=${IMAGE_NAME}" \
+            "IMAGE_VENDOR=${IMAGE_VENDOR}" \
+            "VERSION=${RELEASE_TAG}" \
+            "UPSTREAM_DIGEST=${UPSTREAM_DIGEST}" \
+            "UPSTREAM_TAG=${UPSTREAM_TAG}" \
+            "KERNEL_VERSION=${KERNEL_VERSION}" \
+            "KERNEL_FLAVOR=${KERNEL_FLAVOR}" \
+            "FEDORA_VERSION=${FEDORA_VERSION}" \
+            > build_args.txt
+
+      # dnf5's repo metadata for the ~20 repos this build touches: 370 MB in
+      # the final stage's /var/cache mount (MEASURED 2026-09-01 on the
+      # preflight build's /var/tmp/buildah-cache-1000). The Containerfile has
+      # always mounted type=cache there, but nothing carried it between jobs,
+      # so every one of the six matrix jobs refreshed and re-solved all of it.
+      # The RPMs themselves are NOT in here -- the base image's dnf.conf sets
+      # keepcache=0 -- so this buys the metadata round-trip, not the downloads.
+      # Keyed on the upstream tag: a new base means new metadata, and the old
+      # entry ages out of GitHub's LRU on its own.
+      - name: Restore DNF metadata cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /var/tmp/buildah-cache-*
+          key: ${{ runner.os }}-${{ runner.arch }}-buildah-${{ env.UPSTREAM_TAG }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-buildah-
+
+      # The restore unpacks as the runner user; rootful buildah owns
+      # /var/tmp/buildah-cache-0 as root:root 0700. Hand it back before the
+      # build so buildah finds the directory in the state it created it in
+      # (the ownership half of the pre-rootless pattern bazzite carried), and
+      # print the size: a restore that silently hit nothing looks exactly like
+      # a restore that worked.
+      - name: Hand restored cache to root
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dirs=(/var/tmp/buildah-cache-*)
+          if [ "${#dirs[@]}" -eq 0 ]; then
+            echo "cold start: no cache restored"
+            exit 0
+          fi
+          sudo chown -R 0:0 "${dirs[@]}"
+          # Root-owned 0700 after the chown: only root can size it (first warm
+          # restore proved a plain du dies on Permission denied under set -e).
+          sudo du -sh "${dirs[@]}"
+
+      # Build into a single repository-only reference (raw-img). OCI labels
+      # are stamped later, inside the Rechunk step's compose --label args,
+      # so they land directly on the chunked manifest.
+      - name: Build image
+        run: |
+          set -euo pipefail
+          sudo buildah build \
+            --retry 5 --retry-delay 60s \
+            --file Containerfile \
+            --build-arg-file build_args.txt \
+            --tag raw-img \
+            .
+
+      # Only one job writes the cache. Six jobs racing the same key would
+      # upload six near-identical copies against a 10 GB repository budget and
+      # evict each other (the reason bazzite restricts its own writer to a
+      # single image); every job still RESTORES. Sandbox runs never write, so
+      # a develop experiment cannot poison what main builds from.
+      - name: Prepare cache for saving
+        id: cache-save
+        if: env.PUSH_ENABLED == 'true' && matrix.image_name == 'bazzite-mx' && matrix.stream_name == 'stable'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dirs=(/var/tmp/buildah-cache-*)
+          if [ "${#dirs[@]}" -eq 0 ]; then
+            # Never silent: an absent cache directory means the Containerfile's
+            # type=cache mount stopped materialising, and the restore above
+            # would then be quietly restoring nothing forever.
+            echo "::warning::no /var/tmp/buildah-cache-* directory after the build — nothing to save"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # buildah runs under sudo, so the cache is root-owned and the tar
+          # actions/cache runs as the runner user cannot read it.
+          sudo chown -R "$(id -u):$(id -g)" "${dirs[@]}"
+          du -sh "${dirs[@]}"
+          echo "present=true" >> "$GITHUB_OUTPUT"
+
+      - name: Save DNF metadata cache
+        if: steps.cache-save.outputs.present == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /var/tmp/buildah-cache-*
+          key: ${{ runner.os }}-${{ runner.arch }}-buildah-${{ env.UPSTREAM_TAG }}
+
+      # Package versions for the release notes, read here because the image is
+      # already local: the release job's runner has no disk for a 16 GiB pull.
+      # One flavour suffices — the table covers the shared core; per-flavour
+      # kernels come from the ostree.linux labels in changelog.sh.
+      - name: Collect package versions
+        if: matrix.image_name == 'bazzite-mx' && env.PUSH_ENABLED == 'true'
+        run: |
+          set -euo pipefail
+          {
+            for p in plasma-desktop mesa-filesystem podman docker-ce distrobox bootc flatpak ostree rpm-ostree; do
+              # Capture-then-fallback: rpm -q prints "not installed" on stdout
+              # AND exits non-zero, so a bare `|| echo` would emit both lines.
+              # sort -u: a multilib package (mesa-filesystem i686+x86_64) resolves
+              # to two identical NAME VERSION-RELEASE lines and duplicates its row
+              out=$(sudo podman run --rm raw-img rpm -q --qf '%{NAME} %{VERSION}-%{RELEASE}\n' "$p") || out="$p (absent)"
+              printf '%s\n' "$out" | sort -u
+            done
+          } > package-versions.txt
+          cat package-versions.txt
+
+      - name: Upload package versions
+        if: matrix.image_name == 'bazzite-mx' && env.PUSH_ENABLED == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-versions-${{ matrix.stream_name }}
+          path: package-versions.txt
+          retention-days: 7
+
+      # Non-publishing builds (develop, PRs, workflow_dispatch of a branch)
+      # are the CI sandbox: they never rechunk, so they never reach the
+      # post-rechunk check below. Run the same script against raw-img there
+      # (~30s per job), so a write-site regression surfaces before it is
+      # merged to main. Gate on PUSH_ENABLED itself: a branch predicate
+      # (ref_name == 'develop' || pull_request) skips exactly the dispatch
+      # builds that branch validation runs. The read is less cold than the
+      # post-rechunk one — it catches the logical failures, not necessarily
+      # every torn tail.
+      - name: Check image integrity
+        if: env.PUSH_ENABLED != 'true'
+        run: |
+          set -euo pipefail
+          THIRD_PARTY_REPOS=$(grep -vE '^[[:space:]]*(#|$)' build_files/shared/third-party-repos.list)
+          sudo podman run --rm \
+              --env THIRD_PARTY_REPOS="$THIRD_PARTY_REPOS" \
+              --volume "$PWD/.github/scripts/check-image-integrity.sh:/tmp/check-image-integrity.sh:ro,Z" \
+              localhost/raw-img bash /tmp/check-image-integrity.sh
+
+      # Positive control of the check itself: a fresh container of the same
+      # image takes one lesion per section and each must be caught by its own
+      # net (the script's --self-test). A guard nobody has seen fail is not a
+      # guard; this keeps the proof on every sandbox build instead of in a
+      # comment.
+      - name: Self-test the integrity check
+        if: env.PUSH_ENABLED != 'true'
+        run: |
+          set -euo pipefail
+          THIRD_PARTY_REPOS=$(grep -vE '^[[:space:]]*(#|$)' build_files/shared/third-party-repos.list)
+          sudo podman run --rm \
+              --env THIRD_PARTY_REPOS="$THIRD_PARTY_REPOS" \
+              --volume "$PWD/.github/scripts/check-image-integrity.sh:/tmp/check-image-integrity.sh:ro,Z" \
+              localhost/raw-img bash /tmp/check-image-integrity.sh --self-test
+
+      # Semantic re-layering via bootc's native `rpm-ostree compose
+      # build-chunked-oci`: finer-grained chunks for better resumability,
+      # smaller incremental `bootc upgrade` pulls, and registry-side
+      # cross-image dedup, at ~13-15 min added per matrix job. Runs
+      # in-image (no external action pin) and integrates with the
+      # cosign-by-digest sign step that follows the push.
+      - name: Rechunk layers
+        id: rechunk
+        if: env.PUSH_ENABLED == 'true'
+        env:
+          IMAGE_LABELS: ${{ steps.metadata.outputs.labels }}
+        run: |
+          set -euo pipefail
+          container=$(sudo buildah from raw-img)
+          mnt=$(sudo buildah mount "$container")
+          sudo bash -c "rm -rf $mnt/run/.* $mnt/run/* $mnt/tmp/.* $mnt/tmp/*"
+          sudo buildah umount "$container"
+          sudo buildah commit --identity-label=false --rm "$container" raw-img
+
+          # OCI labels ride into compose as --label args (pattern from
+          # bazzite build.yml "Run Rechunker"): a separate buildah
+          # config+commit cycle costs a full image commit only to change
+          # config, and compose stamps the labels on the chunked manifest
+          # anyway. Manifest annotations are dropped with it — nothing
+          # downstream reads them (changelog.sh inspects Labels).
+          label_args=()
+          while IFS= read -r line; do
+            [ -n "$line" ] && label_args+=(--label "$line")
+          done <<< "$IMAGE_LABELS"
+
+          sudo podman run --rm --privileged \
+              --volume /var/lib/containers:/var/lib/containers \
+              localhost/raw-img \
+              rpm-ostree compose build-chunked-oci \
+              --bootc --max-layers 127 --format-version 2 \
+              "${label_args[@]}" \
+              --from localhost/raw-img \
+              --output containers-storage:localhost/chunked-img
+          sudo podman untag raw-img
+
+          # The label loop above first executes here on main (the sandbox
+          # never rechunks): assert the stamping actually landed, or a
+          # metadata-action shape change would publish unlabeled images.
+          base_label=$(sudo podman inspect localhost/chunked-img \
+              --format '{{ index .Config.Labels "org.opencontainers.image.base.name" }}')
+          [ -n "$base_label" ] || { echo "::error::chunked-img carries no org.opencontainers.image.base.name label (label stamping failed)"; exit 1; }
+
+          # 10-tests-mx.sh proves the build's own artefacts BEFORE rechunk, but
+          # through warm page cache: the 6.17-azure runner kernel loses
+          # writeback of writes into copied-up overlay files, so a torn tail is
+          # invisible to every in-build read (release 44.20260823 shipped a
+          # btree-damaged rpmdb, 44.20260826 a master justfile that killed
+          # every ujust). Re-prove every build-mutated artefact on the chunked
+          # image, whose read path surfaces the on-disk bytes.
+          # The enforced third-party repo list travels from the same file
+          # validate-repos.sh reads, so the cold check cannot drift from the
+          # warm one.
+          THIRD_PARTY_REPOS=$(grep -vE '^[[:space:]]*(#|$)' build_files/shared/third-party-repos.list)
+          sudo podman run --rm \
+              --env THIRD_PARTY_REPOS="$THIRD_PARTY_REPOS" \
+              --volume "$PWD/.github/scripts/check-image-integrity.sh:/tmp/check-image-integrity.sh:ro,Z" \
+              localhost/chunked-img bash /tmp/check-image-integrity.sh
+
+          echo "ref=containers-storage:localhost/chunked-img" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        if: env.PUSH_ENABLED == 'true'
+        env:
+          GH_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          # Rootless login: ubuntu-26.04's sudo is sudo-rs, whose -E drops the
+          # caller's env vars (REGISTRY_AUTH_FILE included), so a sudo login
+          # writes root's default auth path instead of the declared file. The
+          # runner user writes $REGISTRY_AUTH_FILE; root readers get the path
+          # via an explicit --authfile flag, never via env-through-sudo.
+          mkdir -p "$(dirname "$REGISTRY_AUTH_FILE")"
+          echo "$GH_REGISTRY_TOKEN" | podman login ghcr.io -u "$GH_REGISTRY_USER" --password-stdin
+
+      # Sign-before-publish: push to a staging tag first and sign that digest;
+      # the promote job copies it onto the release tags after the matrix gate,
+      # so no release tag ever points to an unsigned manifest (pattern from
+      # aurora reusable-build.yml, promotion moved behind the gate).
+      - name: Push staging tag
+        if: env.PUSH_ENABLED == 'true'
+        id: pre-push
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4.0.0
+        env:
+          OUTPUT_IMAGE: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}
+          SOURCE_REF: ${{ steps.rechunk.outputs.ref }}
+          STAGING_TAG: staging-${{ matrix.stream_name }}
+        with:
+          max_attempts: 3
+          retry_wait_seconds: 15
+          timeout_minutes: 10
+          command: |
+            set -euo pipefail
+            sudo skopeo copy "${SOURCE_REF}" "docker://${OUTPUT_IMAGE}:${STAGING_TAG}" \
+              --authfile "${REGISTRY_AUTH_FILE}" \
+              --digestfile /tmp/digestfile
+            digest=$(< /tmp/digestfile)
+            echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign
+        if: env.PUSH_ENABLED == 'true'
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.1.3'
+
+      - name: Sign container image
+        if: env.PUSH_ENABLED == 'true'
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          COSIGN_PASSWORD: ""
+          IMAGE_FULL: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ steps.pre-push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # cosign 3.x defaults --new-bundle-format and --use-signing-config
+          # ON; both are turned off so the signature keeps the v2-era layout
+          # every consumer of this image already trusts (pairing rule of
+          # divergence #23, pattern from bazzite-dx a0f3842). The verify job
+          # below, negative control included, is the proof.
+          # No sudo (same pattern as sign-image.yml): signing by digest talks
+          # only to the registry, and sudo-rs -E would drop both the key env
+          # var and REGISTRY_AUTH_FILE (gotcha #37).
+          cosign sign -y --key env://COSIGN_PRIVATE_KEY \
+            --new-bundle-format=false --use-signing-config=false \
+            "${IMAGE_FULL}@${DIGEST}"
+
+      # Release tags are NOT pushed here: this flavour hands its signed
+      # staging digest and tag list to the promote job, which copies them
+      # onto the release tags only after the whole matrix has succeeded —
+      # a half-failed matrix must not leave a green flavour's mutable
+      # aliases (or an orphan immutable release tag) on a build set that
+      # never validated as a whole.
+      - name: Write promotion manifest
+        if: env.PUSH_ENABLED == 'true'
+        env:
+          IMAGE_TAGS: ${{ steps.metadata.outputs.tags }}
+          STAGING_DIGEST: ${{ steps.pre-push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo "IMAGE_NAME=\"${IMAGE_NAME}\""
+            echo "DIGEST=\"${STAGING_DIGEST}\""
+            echo "RELEASE_TAG=\"${RELEASE_TAG}\""
+            echo "TAGS=\"${IMAGE_TAGS}\""
+          } > promote.env
+          cat promote.env
+
+      - name: Upload promotion manifest
+        if: env.PUSH_ENABLED == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: promote-${{ env.IMAGE_NAME }}-${{ matrix.stream_name }}
+          path: promote.env
+          retention-days: 7
+
+      - name: Report build summary
+        if: always()
+        env:
+          OUTPUT_IMAGE: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}
+          STAGING_DIGEST: ${{ steps.pre-push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [ -n "$STAGING_DIGEST" ]; then
+            {
+              echo "### Signed staging digest"
+              echo '```'
+              echo "${OUTPUT_IMAGE}@${STAGING_DIGEST}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          {
+            echo "### Disk usage"
+            echo '```'
+            df -h
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Alias/release-tag promotion is the PER-STREAM matrix gate in action: one
+  # promote job per stream, each counting the promote-*-<stream> manifests its
+  # own build jobs uploaded against the count planned in matrix_include (never
+  # a literal 3 — a flavour change must move the gate with it). A stream's
+  # mutable aliases and immutable release tag move together or not at all,
+  # while a broken sibling stream (a bad upstream testing base is upstream's
+  # doing, not ours) never blocks this one. A shortfall aborts loudly before
+  # any tag moves — never a silent skip. Tags are digest-copied from each
+  # flavour's signed staging manifest: registry-side blob reuse (no re-upload)
+  # and a byte-identical manifest, so every release tag points exactly at the
+  # digest cosign signed. Gate + promotion live in promote-release-tags.sh,
+  # shared by both stream jobs so the two halves cannot drift.
+  promote-stable:
+    name: Promote release tags (stable)
+    # !cancelled(): the gate must still run — and fail loudly on a shortfall —
+    # when a sibling stream's build job failed; a plain needs would skip it on
+    # any matrix failure. contains(): skip when the stream was never planned.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && contains(fromJSON(inputs.matrix_include).*.stream_name, 'stable') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [build]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # continue-on-error: with zero matching artifacts download-artifact
+      # throws, but the verdict (expected vs found, per flavour) belongs to
+      # the script's gate below, which reports the shortfall explicitly.
+      - name: Download promotion manifests
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: promote-*-stable
+          path: promote
+
+      - name: Login to GHCR
+        env:
+          GH_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$REGISTRY_AUTH_FILE")"
+          echo "$GH_REGISTRY_TOKEN" | skopeo login ghcr.io -u "$GH_REGISTRY_USER" --password-stdin
+
+      - name: Promote release tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MATRIX_INCLUDE: ${{ inputs.matrix_include }}
+        run: ./.github/scripts/promote-release-tags.sh stable
+
+  promote-testing:
+    name: Promote release tags (testing)
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && contains(fromJSON(inputs.matrix_include).*.stream_name, 'testing') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [build]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download promotion manifests
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: promote-*-testing
+          path: promote
+
+      - name: Login to GHCR
+        env:
+          GH_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$REGISTRY_AUTH_FILE")"
+          echo "$GH_REGISTRY_TOKEN" | skopeo login ghcr.io -u "$GH_REGISTRY_USER" --password-stdin
+
+      - name: Promote release tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MATRIX_INCLUDE: ${{ inputs.matrix_include }}
+        run: ./.github/scripts/promote-release-tags.sh testing
+
+  # Post-publication proof that every pushed image verifies against cosign.pub,
+  # with a negative control: a signature check that cannot fail proves nothing,
+  # so an image signed by a FOREIGN key (upstream's) must be rejected first
+  # (pattern from akmods verify-publication, trimmed of the policy pull). One
+  # job per stream, mirroring the promote gate; the image set comes from
+  # matrix_include via verify-published-signatures.sh, shared by both jobs.
+  verify-stable:
+    name: Verify published signatures (stable)
+    if: ${{ !cancelled() && needs.promote-stable.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: [promote-stable]
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.1.3'
+
+      # The freshly created GHCR packages are private until their one-time
+      # visibility flip, and even the public ones need no anonymity here:
+      # skopeo inspect and cosign verify both read $REGISTRY_AUTH_FILE, so
+      # the verification never depends on package visibility (gotcha #39).
+      - name: Login to GHCR
+        env:
+          GH_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$REGISTRY_AUTH_FILE")"
+          echo "$GH_REGISTRY_TOKEN" | skopeo login ghcr.io -u "$GH_REGISTRY_USER" --password-stdin
+
+      - name: Verify pushed digests
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          MATRIX_INCLUDE: ${{ inputs.matrix_include }}
+        run: ./.github/scripts/verify-published-signatures.sh stable
+
+  verify-testing:
+    name: Verify published signatures (testing)
+    if: ${{ !cancelled() && needs.promote-testing.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: [promote-testing]
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.1.3'
+
+      # The freshly created GHCR packages are private until their one-time
+      # visibility flip, and even the public ones need no anonymity here:
+      # skopeo inspect and cosign verify both read $REGISTRY_AUTH_FILE, so
+      # the verification never depends on package visibility (gotcha #39).
+      - name: Login to GHCR
+        env:
+          GH_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$REGISTRY_AUTH_FILE")"
+          echo "$GH_REGISTRY_TOKEN" | skopeo login ghcr.io -u "$GH_REGISTRY_USER" --password-stdin
+
+      - name: Verify pushed digests
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          MATRIX_INCLUDE: ${{ inputs.matrix_include }}
+        run: ./.github/scripts/verify-published-signatures.sh testing
+
+  # Single writer of the workflow's stable_ok/testing_ok outputs, which the
+  # caller's release jobs gate on instead of the callee's aggregate result
+  # (one broken stream must not sink the other's release). always(): an
+  # output mapped from a job that did not run reads as EMPTY at the caller,
+  # indistinguishable from failure — this job runs and succeeds in every
+  # context, so the outputs are always populated.
+  gate:
+    name: Report stream outcomes
+    if: always()
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    needs: [promote-stable, verify-stable, promote-testing, verify-testing]
+    outputs:
+      stable_ok: ${{ steps.decide.outputs.stable_ok }}
+      testing_ok: ${{ steps.decide.outputs.testing_ok }}
+    steps:
+      - name: Decide per-stream outcomes
+        id: decide
+        env:
+          JOBS: ${{ toJson(needs) }}
+        run: |
+          set -euo pipefail
+          echo "Job status:"
+          echo "$JOBS" | jq -r 'to_entries[] | " - \(.key): \(.value.result)"'
+          for stream in stable testing; do
+            promote=$(echo "$JOBS" | jq -r --arg j "promote-$stream" '.[$j].result')
+            verify=$(echo "$JOBS" | jq -r --arg j "verify-$stream" '.[$j].result')
+            if [ "$promote" = "success" ] && [ "$verify" = "success" ]; then
+              ok=true
+            else
+              ok=false
+            fi
+            echo "${stream}_ok=$ok" >> "$GITHUB_OUTPUT"
+            echo "$stream: ok=$ok (promote=$promote, verify=$verify)"
+          done
+
+  check:
+    name: Validate matrix
+    if: always()
+    # ubuntu-slim: this job is one jq pass over toJson(needs) and needs none of
+    # the full image's toolchain (pattern from aurora reusable-build.yml, whose
+    # identical check job runs there). promote and verify keep the full image --
+    # skopeo and cosign are not on slim.
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    needs: [build, promote-stable, verify-stable, promote-testing, verify-testing]
+    steps:
+      - name: Verify matrix results
+        env:
+          JOBS: ${{ toJson(needs) }}
+        run: |
+          set -euo pipefail
+          echo "Job status:"
+          echo "$JOBS" | jq -r 'to_entries[] | " - \(.key): \(.value.result)"'
+          for r in $(echo "$JOBS" | jq -r 'to_entries[] | .value.result'); do
+            if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+              echo "Status check not okay!"
+              exit 1
+            fi
+          done

@@ -1,0 +1,134 @@
+name: Watch Upstream
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: bazzite-mx-watch-upstream
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Detect upstream change
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      packages: read
+    env:
+      REGISTRY_AUTH_FILE: /tmp/registry-auth/config.json
+    outputs:
+      streams: ${{ steps.compare.outputs.streams }}
+      stable_tag: ${{ steps.compare.outputs.stable_tag }}
+      testing_tag: ${{ steps.compare.outputs.testing_tag }}
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      # The staleness probe reads our own images through $REGISTRY_AUTH_FILE,
+      # so a private package reads as "current", never as a 401 (gotcha #39).
+      - name: Login to GHCR
+        env:
+          GH_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$REGISTRY_AUTH_FILE")"
+          echo "$GH_REGISTRY_TOKEN" | skopeo login ghcr.io -u "$GH_REGISTRY_USER" --password-stdin
+
+      - name: Diff upstream tags
+        id: compare
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+
+          # One owner of "latest for the stream" (also the resolve jobs and
+          # the sandbox), so the watcher and the build can never disagree.
+          STABLE=$(./.github/scripts/resolve-upstream-tag.sh stable)
+          TESTING=$(./.github/scripts/resolve-upstream-tag.sh testing)
+
+          OWNER_LC=$(echo "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
+
+          # All three flavours track the same upstream tag (only BASE_IMAGE
+          # differs), so a stream is stale when ANY image's recorded base tag
+          # diverges from the latest upstream tag.
+          IMAGES=$(./.github/scripts/list-flavours.sh --names)
+
+          # Fail closed on probe errors: a registry blip must read as "cannot
+          # tell", never as "stale" — an empty reading would otherwise trigger
+          # a spurious full rebuild every time GHCR hiccups. Capturing the
+          # inspect output first keeps skopeo's exit status out of the jq
+          # pipeline, so a probe failure aborts the run (the next hourly cron
+          # retries); an image that inspects fine but carries no base-name
+          # label still reads as stale, which a rebuild repairs.
+          read_current_tag() {
+            local image=$1 stream=$2 inspected
+            inspected=$(skopeo inspect --retry-times 3 --no-tags \
+              "docker://ghcr.io/${OWNER_LC}/${image}:${stream}") || return 1
+            jq -r '.Labels["org.opencontainers.image.base.name"] // ""' <<< "$inspected" \
+              | awk -F: 'NF>1 {print $NF}'
+          }
+
+          stream_changed() {
+            local stream=$1 latest=$2 image current changed=false
+            for image in $IMAGES; do
+              if ! current=$(read_current_tag "$image" "$stream"); then
+                echo "::error::cannot inspect ${image}:${stream} - refusing to guess staleness" >&2
+                return 1
+              fi
+              echo "  ${image}:${stream} built on: ${current:-<none>}" >&2
+              if [ "$latest" != "$current" ]; then changed=true; fi
+            done
+            echo "$changed"
+          }
+
+          echo "Latest upstream: stable=$STABLE  testing=$TESTING"
+          STABLE_CHANGED=$(stream_changed stable "$STABLE")
+          TESTING_CHANGED=$(stream_changed testing "$TESTING")
+          echo "stable_changed=$STABLE_CHANGED  testing_changed=$TESTING_CHANGED"
+
+          # One build workflow covers both streams, so the trigger takes a
+          # stream SET rather than one boolean per stream. 'none' is the
+          # nothing-to-do verdict and the trigger job's only skip condition --
+          # composed here, where both readings are already in hand, instead of
+          # as a nested ternary in the job's `with:`.
+          if [ "$STABLE_CHANGED" = true ] && [ "$TESTING_CHANGED" = true ]; then
+            STREAMS=both
+          elif [ "$STABLE_CHANGED" = true ]; then
+            STREAMS=stable
+          elif [ "$TESTING_CHANGED" = true ]; then
+            STREAMS=testing
+          else
+            STREAMS=none
+          fi
+          echo "streams=$STREAMS"
+
+          {
+            echo "stable_tag=$STABLE"
+            echo "testing_tag=$TESTING"
+            echo "streams=$STREAMS"
+          } >> "$GITHUB_OUTPUT"
+
+  trigger:
+    name: Trigger build and release
+    needs: check
+    if: needs.check.outputs.streams != 'none'
+    uses: ./.github/workflows/build.yml
+    secrets:
+      SIGNING_SECRET: ${{ secrets.SIGNING_SECRET }}
+    permissions:
+      contents: write
+      packages: write
+    with:
+      streams: ${{ needs.check.outputs.streams }}
+      upstream_tag_stable: ${{ needs.check.outputs.stable_tag }}
+      upstream_tag_testing: ${{ needs.check.outputs.testing_tag }}

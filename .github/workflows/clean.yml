@@ -1,0 +1,58 @@
+name: Cleanup GHCR
+
+on:
+  schedule:
+    - cron: '15 0 * * 0' # 0015 UTC on Sundays
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Preview deletions only"
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: bazzite-mx-clean
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: Prune old GHCR versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - name: Checkout flavour list
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      # The package set is the flavour set (one owner: list-flavours.sh), so a
+      # flavour added to the matrix is pruned from day one.
+      - name: Resolve package list
+        id: flavours
+        run: |
+          set -euo pipefail
+          echo "packages=$(./.github/scripts/list-flavours.sh --names | paste -sd,)" >> "$GITHUB_OUTPUT"
+
+      - name: Prune package versions
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          packages: ${{ steps.flavours.outputs.packages }}
+          older-than: 90 days
+          delete-orphaned-images: true
+          keep-n-tagged: 7
+          keep-n-untagged: 7
+          # The moving aliases are re-pointed by every build, so they are
+          # never among the oldest versions — until a Fedora major bump
+          # leaves stable-44/testing-44 behind, where after 90 days they
+          # would fall with the version they sit on. Exempt exactly the
+          # aliases (regex, anchored): the dated release tags stay prunable.
+          use-regex: true
+          exclude-tags: ^(latest|stable|testing|stable-[0-9]+|testing-[0-9]+|staging-(stable|testing))$
+          dry-run: ${{ inputs.dry_run || false }}

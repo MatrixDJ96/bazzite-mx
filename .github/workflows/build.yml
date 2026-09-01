@@ -1,0 +1,307 @@
+name: Build Bazzite-MX
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - "docs/**"
+      - "site/**"
+      - ".claude/**"
+      - ".github/workflows/deploy-pages.yml"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - "docs/**"
+      - "site/**"
+      - ".claude/**"
+      - ".github/workflows/deploy-pages.yml"
+  workflow_dispatch:
+    inputs:
+      streams:
+        description: "Streams to build"
+        required: true
+        type: choice
+        options: [both, stable, testing]
+        default: both
+      upstream_tag_stable:
+        description: "Override the upstream stable tag (leave empty for latest)"
+        required: false
+        type: string
+        default: ""
+      upstream_tag_testing:
+        description: "Override the upstream testing tag (leave empty for latest)"
+        required: false
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      streams:
+        description: "Streams to build: both | stable | testing"
+        required: false
+        type: string
+        default: both
+      upstream_tag_stable:
+        description: "Override the upstream stable tag (leave empty for latest)"
+        required: false
+        type: string
+        default: ""
+      upstream_tag_testing:
+        description: "Override the upstream testing tag (leave empty for latest)"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      SIGNING_SECRET:
+        description: "Cosign private key, passed through to reusable-build"
+        required: false
+
+permissions: {}
+
+# One run covers both streams, so one group covers the whole workflow. A
+# literal, never ${{ github.workflow }}: in a workflow_call the latter resolves
+# to the CALLER's name and collides with the caller's own group (AGENTS.md
+# convention 8). Watch Upstream keeps its own group, so its trigger queues
+# behind an in-flight push run on this ref instead of racing it.
+concurrency:
+  group: bazzite-mx-build-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Resolve stream set
+    # ubuntu-slim: pure bash over the workflow inputs plus the flavour list,
+    # read through a sparse checkout of .github/scripts — no gh, no
+    # skopeo (same reasoning as the check job in reusable-build.yml).
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      stable: ${{ steps.streams.outputs.stable }}
+      testing: ${{ steps.streams.outputs.testing }}
+      release_context: ${{ steps.streams.outputs.release_context }}
+      matrix_include: ${{ steps.streams.outputs.matrix_include }}
+    steps:
+      - name: Checkout flavour list
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Select streams
+        id: streams
+        env:
+          INPUT_STREAMS: ${{ inputs.streams }}
+          # A release context is a push to the default branch, a dispatch of it
+          # or a Watch Upstream call: everything that may push, sign and
+          # release. develop and PRs are the sandbox.
+          RELEASE_CONTEXT: ${{ github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+        run: |
+          set -euo pipefail
+          STREAMS="${INPUT_STREAMS:-both}"
+          case "$STREAMS" in
+            both)    STABLE=true;  TESTING=true  ;;
+            stable)  STABLE=true;  TESTING=false ;;
+            testing) STABLE=false; TESTING=true  ;;
+            *)
+              echo "::error::unknown streams value '$STREAMS' (expected both|stable|testing)"
+              exit 1
+              ;;
+          esac
+          # ONE build matrix covers flavours × streams: both dimensions exist
+          # because the BASE IMAGES differ, not the scripts. The sandbox
+          # builds the testing stream too, for the same reason it builds all
+          # three flavours: testing-44.<date> is a different base (kernel,
+          # .repo set — the fedora-multimedia → negativo17-fedora-multimedia
+          # rename of 2026-08-31 broke a repo guard exactly there), so a
+          # stable-only sandbox is blind to it (owner's instruction,
+          # 2026-09-01; ~60 runner-min per develop push instead of ~30,
+          # wall-clock unchanged since the jobs run in parallel).
+          # This list is the single source the per-stream promote gates in
+          # reusable-build.yml derive their expected counts from.
+          STREAM_SET=()
+          if [ "$STABLE" = "true" ]; then STREAM_SET+=(stable); fi
+          if [ "$TESTING" = "true" ]; then STREAM_SET+=(testing); fi
+          MATRIX_INCLUDE=""
+          # The flavour set itself has one owner: .github/scripts/list-flavours.sh.
+          for STREAM in "${STREAM_SET[@]}"; do
+            while read -r IMAGE_NAME BASE_IMAGE; do
+              MATRIX_INCLUDE="${MATRIX_INCLUDE:+${MATRIX_INCLUDE},}{\"image_name\":\"${IMAGE_NAME}\",\"base_image\":\"${BASE_IMAGE}\",\"stream_name\":\"${STREAM}\"}"
+            done < <(./.github/scripts/list-flavours.sh)
+          done
+          MATRIX_INCLUDE="[${MATRIX_INCLUDE}]"
+          echo "Streams: $STREAMS (release context: $RELEASE_CONTEXT)"
+          echo "Matrix: $MATRIX_INCLUDE"
+          {
+            echo "stable=$STABLE"
+            echo "testing=$TESTING"
+            echo "release_context=$RELEASE_CONTEXT"
+            echo "matrix_include=$MATRIX_INCLUDE"
+          } >> "$GITHUB_OUTPUT"
+
+  validate-just:
+    name: Validate just syntax
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install just
+        run: |
+          set -euo pipefail
+          /home/linuxbrew/.linuxbrew/bin/brew install just
+          echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+      - name: Check just syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in system_files/usr/share/ublue-os/just/*.just; do
+            echo "::group::$f"
+            if ! just --justfile "$f" --list >/dev/null; then
+              echo "::error file=$f::just parse error"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$fail"
+
+  resolve-stable:
+    name: Resolve stable release tag
+    needs: [plan]
+    if: needs.plan.outputs.release_context == 'true' && needs.plan.outputs.stable == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    env:
+      REGISTRY_AUTH_FILE: /tmp/registry-auth/config.json
+    outputs:
+      upstream_tag: ${{ steps.compute.outputs.upstream_tag }}
+      release_tag: ${{ steps.compute.outputs.release_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The collision probe reads our own packages through $REGISTRY_AUTH_FILE
+      # (a not-yet-existing package answers a bare 403 anonymously), with the
+      # token never on a command line.
+      - name: Login to GHCR
+        env:
+          GH_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$REGISTRY_AUTH_FILE")"
+          echo "$GH_REGISTRY_TOKEN" | skopeo login ghcr.io -u "$GH_REGISTRY_USER" --password-stdin
+      - name: Compute release tags
+        id: compute
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_UPSTREAM_TAG: ${{ inputs.upstream_tag_stable }}
+          REPO_FULL: ${{ github.repository }}
+        # Tag schema and collision detection live in the shared resolver
+        # (single owner of the [testing-]MAJOR.<build date>[.N] schema).
+        run: ./.github/scripts/resolve-release-tag.sh stable "$INPUT_UPSTREAM_TAG"
+
+  resolve-testing:
+    name: Resolve testing release tag
+    needs: [plan]
+    if: needs.plan.outputs.release_context == 'true' && needs.plan.outputs.testing == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    env:
+      REGISTRY_AUTH_FILE: /tmp/registry-auth/config.json
+    outputs:
+      upstream_tag: ${{ steps.compute.outputs.upstream_tag }}
+      release_tag: ${{ steps.compute.outputs.release_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The collision probe reads our own packages through $REGISTRY_AUTH_FILE
+      # (a not-yet-existing package answers a bare 403 anonymously), with the
+      # token never on a command line.
+      - name: Login to GHCR
+        env:
+          GH_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$REGISTRY_AUTH_FILE")"
+          echo "$GH_REGISTRY_TOKEN" | skopeo login ghcr.io -u "$GH_REGISTRY_USER" --password-stdin
+      - name: Compute release tags
+        id: compute
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_UPSTREAM_TAG: ${{ inputs.upstream_tag_testing }}
+          REPO_FULL: ${{ github.repository }}
+        run: ./.github/scripts/resolve-release-tag.sh testing "$INPUT_UPSTREAM_TAG"
+
+  build:
+    name: Build matrix
+    needs: [plan, validate-just, resolve-stable, resolve-testing]
+    # !cancelled(): resolve-* skip on develop/PR (sandbox) and for unselected
+    # streams, and a skipped need would otherwise skip this job too. Both
+    # resolvers must be green-or-skipped: a FAILED resolver means that
+    # stream's tags are unknown, and building it anyway would hand promote an
+    # empty release tag.
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.validate-just.result == 'success' && (needs.resolve-stable.result == 'success' || needs.resolve-stable.result == 'skipped') && (needs.resolve-testing.result == 'success' || needs.resolve-testing.result == 'skipped') }}
+    uses: ./.github/workflows/reusable-build.yml
+    secrets:
+      SIGNING_SECRET: ${{ secrets.SIGNING_SECRET }}
+    permissions:
+      contents: read
+      packages: write
+    with:
+      matrix_include: ${{ needs.plan.outputs.matrix_include }}
+      upstream_tag_stable: ${{ needs.resolve-stable.outputs.upstream_tag || inputs.upstream_tag_stable || '' }}
+      upstream_tag_testing: ${{ needs.resolve-testing.outputs.upstream_tag || inputs.upstream_tag_testing || '' }}
+      release_tag_stable: ${{ needs.resolve-stable.outputs.release_tag || '' }}
+      release_tag_testing: ${{ needs.resolve-testing.outputs.release_tag || '' }}
+
+  # The release jobs gate on the callee's per-stream outputs, never on
+  # needs.build.result: the aggregate result of the single reusable call turns
+  # failure when EITHER stream fails, and a broken testing base (upstream's
+  # doing, not ours) must not sink the stable release. stable_ok/testing_ok
+  # are emitted by the always-running gate job in reusable-build.yml, so they
+  # are populated even when the callee as a whole reports failure.
+  release-stable:
+    name: Publish stable release
+    needs: [plan, resolve-stable, build]
+    if: ${{ !cancelled() && needs.plan.outputs.release_context == 'true' && needs.build.outputs.stable_ok == 'true' && needs.resolve-stable.result == 'success' }}
+    uses: ./.github/workflows/generate-release.yml
+    permissions:
+      contents: write
+      packages: read
+    with:
+      stream_name: stable
+      upstream_tag: ${{ needs.resolve-stable.outputs.upstream_tag }}
+      release_tag: ${{ needs.resolve-stable.outputs.release_tag }}
+
+  release-testing:
+    name: Publish testing pre-release
+    needs: [plan, resolve-testing, build]
+    if: ${{ !cancelled() && needs.plan.outputs.release_context == 'true' && needs.build.outputs.testing_ok == 'true' && needs.resolve-testing.result == 'success' }}
+    uses: ./.github/workflows/generate-release.yml
+    permissions:
+      contents: write
+      packages: read
+    with:
+      stream_name: testing
+      upstream_tag: ${{ needs.resolve-testing.outputs.upstream_tag }}
+      release_tag: ${{ needs.resolve-testing.outputs.release_tag }}

@@ -1,0 +1,246 @@
+name: Generate Release
+
+on:
+  workflow_call:
+    inputs:
+      stream_name:
+        description: "Upstream stream: stable or testing"
+        required: true
+        type: string
+      upstream_tag:
+        description: "Upstream Bazzite tag, e.g. 44.20260513"
+        required: true
+        type: string
+      release_tag:
+        description: "Downstream release tag ([testing-]MAJOR.<build date>, plus .N for same-day rebuilds)"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      stream_name:
+        description: "stable | testing"
+        type: choice
+        options: [stable, testing]
+        default: stable
+        required: true
+      upstream_tag:
+        description: "Upstream tag (empty = latest for stream)"
+        type: string
+        required: false
+        default: ""
+      release_tag:
+        description: "Downstream release tag (empty = release the newest unreleased GHCR build for the stream)"
+        type: string
+        required: false
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: bazzite-mx-release-${{ inputs.stream_name }}-${{ inputs.upstream_tag }}
+  cancel-in-progress: false
+
+jobs:
+  generate-release:
+    name: Compose changelog and publish release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: read
+    env:
+      REGISTRY_AUTH_FILE: /tmp/registry-auth/config.json
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # Every skopeo read below (recovery candidates, digest pinning, the
+      # changelog's kernel lookup) goes through $REGISTRY_AUTH_FILE, so the
+      # release never depends on package visibility (gotcha #39).
+      - name: Login to GHCR
+        env:
+          GH_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$REGISTRY_AUTH_FILE")"
+          echo "$GH_REGISTRY_TOKEN" | skopeo login ghcr.io -u "$GH_REGISTRY_USER" --password-stdin
+
+      - name: Resolve inputs
+        id: inputs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_STREAM_NAME: ${{ inputs.stream_name }}
+          INPUT_UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          REPO_FULL: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          STREAM="$INPUT_STREAM_NAME"
+          # Latest-for-the-stream + the 404-gated .N strip: same resolver as
+          # the resolve jobs in build.yml.
+          UP=$(./.github/scripts/resolve-upstream-tag.sh "$STREAM" "$INPUT_UPSTREAM_TAG")
+          OWNER_LC="${REPO_FULL%%/*}"; OWNER_LC="${OWNER_LC,,}"
+          mapfile -t IMAGES < <(./.github/scripts/list-flavours.sh --names)
+          # Downstream release tags of this stream (the schema of
+          # resolve-release-tag.sh); shared with the previous-release lookup.
+          if [ "$STREAM" = "stable" ]; then
+            RELEASE_PATTERN='^[0-9]+\.[0-9]+(\.[0-9]+)?$'
+          else
+            RELEASE_PATTERN='^testing-[0-9]+\.[0-9]+(\.[0-9]+)?$'
+          fi
+          RT="$INPUT_RELEASE_TAG"
+          if [ -n "$RT" ]; then
+            # Friendly gate on EVERY flavour: a tag missing on any image
+            # (typo, or a matrix that pushed only partially) would otherwise
+            # die as a cryptic skopeo 404 at the digest-pinning step.
+            for img in "${IMAGES[@]}"; do
+              if ! skopeo inspect --no-tags "docker://ghcr.io/${OWNER_LC}/${img}:${RT}" >/dev/null 2>&1; then
+                echo "ERROR: no GHCR image ${img} is tagged ${RT} — nothing to release for this tag."
+                exit 1
+              fi
+            done
+          else
+            # workflow_dispatch recovery: release the NEWEST GHCR build that
+            # carries a schema tag with no matching GitHub Release — works
+            # regardless of the day the orphaned build was pushed.
+            # gh exits 0 with empty output when the repo has no releases yet;
+            # a real API failure aborts via set -e. The first flavour's tags
+            # stand for the set: promote moves every flavour's tags together.
+            EXISTING=$(gh release list --repo "$REPO_FULL" --limit 200 --json tagName -q '.[].tagName')
+            CANDIDATES=$(skopeo list-tags "docker://ghcr.io/${OWNER_LC}/${IMAGES[0]}" \
+              | jq -r '.Tags[]' | grep -E "$RELEASE_PATTERN" || true)
+            if [ -n "$EXISTING" ] && [ -n "$CANDIDATES" ]; then
+              CANDIDATES=$(printf '%s\n' "$CANDIDATES" \
+                | grep -vxF -f <(printf '%s\n' "$EXISTING") || true)
+            fi
+            RT=$(printf '%s\n' "$CANDIDATES" | grep . | sort -V | tail -1 || true)
+            if [ -z "$RT" ]; then
+              echo "ERROR: no unreleased GHCR build found for stream ${STREAM} — every pushed build already has its release."
+              echo "To re-release an existing build, pass release_tag explicitly."
+              exit 1
+            fi
+          fi
+          {
+            echo "stream_name=$STREAM"
+            echo "upstream_tag=$UP"
+            echo "release_tag=$RT"
+            echo "release_pattern=$RELEASE_PATTERN"
+          } >> "$GITHUB_OUTPUT"
+          echo "Stream=$STREAM upstream=$UP release_tag=$RT"
+
+      - name: Find previous release
+        id: prev
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.inputs.outputs.release_tag }}
+          PATTERN: ${{ steps.inputs.outputs.release_pattern }}
+        run: |
+          set -euo pipefail
+          # Sort by publishedAt, not createdAt: a Release's createdAt is the
+          # target commit's date, and every upstream-rebuild release tags the
+          # same unchanged main HEAD, so all createdAt values tie and `last`
+          # degenerates to the oldest release. publishedAt is monotonic.
+          PREV=$(gh release list --repo "$GITHUB_REPOSITORY" --json tagName,publishedAt --limit 200 \
+            | jq -r --arg p "$PATTERN" --arg cur "$RELEASE_TAG" \
+                '[.[] | select(.tagName | test($p)) | select(.tagName != $cur)] | sort_by(.publishedAt) | last | .tagName // ""')
+          # Downstream tags carry the build date, so the upstream tag a release
+          # was built off is recoverable only from the release itself: its title
+          # records it as "<tag>: <Stream> (Bazzite <upstream_tag>)".
+          PREV_UPSTREAM=""
+          if [ -n "$PREV" ]; then
+            # Best-effort: images are already pushed and signed at this point,
+            # so a failed lookup degrades the changelog (compare link omitted)
+            # rather than failing the release job.
+            NAME=$(gh release view "$PREV" --repo "$GITHUB_REPOSITORY" --json name -q .name 2>/dev/null || true)
+            PREV_UPSTREAM=$(printf '%s' "$NAME" | sed -n 's/.*(Bazzite \(.*\))$/\1/p')
+          fi
+          # 404-gate the parsed tag against real upstream releases: a title
+          # edited by hand or off-format must not become a broken compare link.
+          if [ -n "$PREV_UPSTREAM" ] \
+             && ! gh release view "$PREV_UPSTREAM" --repo ublue-os/bazzite >/dev/null 2>&1; then
+            echo "::warning::previous release title cites unknown upstream tag ${PREV_UPSTREAM}; compare link omitted"
+            PREV_UPSTREAM=""
+          fi
+          {
+            echo "tag=$PREV"
+            echo "upstream=$PREV_UPSTREAM"
+          } >> "$GITHUB_OUTPUT"
+          echo "Previous release: ${PREV:-<none>} (upstream: ${PREV_UPSTREAM:-<unknown>})"
+
+      - name: Pin image digests
+        id: digests
+        env:
+          RELEASE_TAG: ${{ steps.inputs.outputs.release_tag }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          OWNER_LC="${OWNER,,}"
+          # Each digest is resolved into a variable first: a `$(…)` inside an
+          # echo cannot abort the step, and `jq -r` prints a bare "null" for a
+          # missing field — both would pin the release to an empty or "@null"
+          # reference. `jq -e` fails on null, and the pattern check refuses
+          # anything that is not a sha256 digest.
+          resolve() {
+            local digest
+            digest=$(skopeo inspect --retry-times 3 --no-tags \
+              "docker://ghcr.io/${OWNER_LC}/$1:${RELEASE_TAG}" | jq -er .Digest) || {
+              echo "::error::cannot resolve the digest of $1:${RELEASE_TAG}"
+              return 1
+            }
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+              echo "::error::unexpected digest for $1:${RELEASE_TAG}: '${digest}'"
+              return 1
+            }
+            echo "$digest"
+          }
+          # One "<image> <digest>" line per flavour, in list order, handed to
+          # changelog.sh as IMAGE_DIGESTS (a multi-line output).
+          DIGESTS=""
+          for img in $(./.github/scripts/list-flavours.sh --names); do
+            DIGESTS="${DIGESTS}${img} $(resolve "$img")"$'\n'
+          done
+          {
+            echo "digests<<EOF"
+            printf '%s' "$DIGESTS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # Present only when this run also built the images (workflow_call from
+      # build.yml): a standalone dispatch has no build in the run,
+      # so the download fails and the changelog omits the package rows.
+      - name: Download package versions
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: package-versions-${{ steps.inputs.outputs.stream_name }}
+
+      - name: Render changelog body
+        env:
+          PKG_VERSIONS_FILE: package-versions.txt
+          STREAM_NAME: ${{ steps.inputs.outputs.stream_name }}
+          UPSTREAM_TAG: ${{ steps.inputs.outputs.upstream_tag }}
+          RELEASE_TAG: ${{ steps.inputs.outputs.release_tag }}
+          PREV_TAG: ${{ steps.prev.outputs.tag }}
+          PREV_UPSTREAM: ${{ steps.prev.outputs.upstream }}
+          IMAGE_DIGESTS: ${{ steps.digests.outputs.digests }}
+        run: |
+          set -euo pipefail
+          ./.github/scripts/changelog.sh \
+            "$UPSTREAM_TAG" "$RELEASE_TAG" "$PREV_TAG" \
+            "$STREAM_NAME" "$PREV_UPSTREAM" > changelog.md
+          echo "--- preview ---"
+          head -60 changelog.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          name: "${{ format('{0}: {1} (Bazzite {2})', steps.inputs.outputs.release_tag, steps.inputs.outputs.stream_name == 'stable' && 'Stable' || 'Testing', steps.inputs.outputs.upstream_tag) }}"
+          tag_name: ${{ steps.inputs.outputs.release_tag }}
+          body_path: ./changelog.md
+          make_latest: ${{ steps.inputs.outputs.stream_name == 'stable' }}
+          prerelease: ${{ steps.inputs.outputs.stream_name != 'stable' }}
+          target_commitish: ${{ github.sha }}
