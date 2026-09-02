@@ -41,14 +41,14 @@ version; this file carries the reasons and the measured facts behind them.
   key rotation is then a reviewable diff plus a new table line, never a silent download at
   build time.
 - A package that unpacks under `/opt` needs `mkdir -p /var/opt` before its install (`/opt` is a
-  symlink to `var/opt`, absent in a build: cpio fails) and nothing else: `80-fix-opt.sh`
-  moves every `/var/opt/<name>` to `/usr/lib/opt/<name>` and writes the tmpfiles line that
-  recreates the link on the host. Paths baked into the application keep their `/opt/...`
-  form; the smoke test checks them with `readlink`, not `-x` (the link dangles in the build).
+  symlink to `var/opt`, absent in a build: cpio fails) and nothing else: `80-fix-opt.sh` moves
+  every `/var/opt/<name>` to `/usr/lib/opt/<name>` and writes the tmpfiles line that recreates
+  the link on the host. Paths baked into the application keep their `/opt/...` form; the smoke
+  test checks them with `readlink`, not `-x` (the link dangles in the build).
 - An out-of-tree kernel module is a `build_files/kmods/<name>/source.env` (URL, full COMMIT,
   KO_NAME, KO_BUILD_PATH, KO_VERSION) built by the kmod-builder stage against the base's own
-  `kernel-devel`; the pin is to a commit on purpose (decision 1.5g), the checkout is proven
-  to be that commit, and the staged `.ko` is asserted readable, stamped for the image's kernel
+  `kernel-devel`; the pin is to a commit on purpose (decision 1.5g), the checkout is proven to
+  be that commit, and the staged `.ko` is asserted readable, stamped for the image's kernel
   (vermagic; v1 gotcha #33: a mismatch never loads) and at the expected MODULE_VERSION. The
   modules are unsigned; the recipe that loads them says so when modprobe refuses them.
 - A package `%post` runs in the build, not on the host: what it does is read
@@ -66,38 +66,38 @@ version; this file carries the reasons and the measured facts behind them.
 - A recipe that replaces one of Bazzite's ships in a file with the same name under
   `system_files/usr/share/ublue-os/just/` (decision 1.5f: same name, upstream's recipe
   removed). The base justfile imports the path, so nothing else changes; the base's file must
-  hold only the recipes we replace (`84-bazzite-virt.just` and `82-bazzite-sunshine.just`:
-  one each, measured 2026-09-02 with `just --summary`), and `70-justfile.sh` refuses the
-  build when the base's recipe set (recorded by `00-prep.sh` before the copy) differs from
-  ours. When the base file holds other recipes too, the recipe is listed in `OVERRIDES` of
-  `70-justfile.sh`, which cuts it out of the base file and proves the rest unchanged.
-- Our own recipes live in `95-bazzite-mx.just`, imported last. With
-  `allow-duplicate-recipes` and duplicate names across imports the earlier import wins
-  (just manual, "Imports"; measured on just 1.57.0, 2026-09-02): a recipe of ours can never
-  shadow a base recipe from there, and the build fails on any name defined in two files.
+  hold only the recipes we replace (`84-bazzite-virt.just` and `82-bazzite-sunshine.just`: one
+  each, measured 2026-09-02 with `just --summary`), and `70-justfile.sh` refuses the build when
+  the base's recipe set (recorded by `00-prep.sh` before the copy) differs from ours. When the
+  base file holds other recipes too, the recipe is listed in `OVERRIDES` of `70-justfile.sh`,
+  which cuts it out of the base file and proves the rest unchanged.
+- Our own recipes live in `95-bazzite-mx.just`, imported last. With `allow-duplicate-recipes`
+  and duplicate names across imports the earlier import wins (just manual, "Imports"; measured
+  on just 1.57.0, 2026-09-02): a recipe of ours can never shadow a base recipe from there, and
+  the build fails on any name defined in two files.
 - A recipe that needs more than a few lines of logic calls a helper under
   `system_files/usr/libexec/bazzite-mx-<x>`, the recipe staying a thin front (help, not as
   root, `sudo` where root is needed, the call). The helper takes fixture knobs (`ROOT=`,
-  `FIXTURE=`, a `file://` feed) so the smoke test runs the real code positive and known-bad
-  in the build, and ships a `--self-test` when it has pure functions worth pinning.
-- Recipes are `just --unstable --fmt --check` clean and start with `source /usr/lib/ujust/ujust.sh`
-  (colours, `Choose`). A `help` action comes before the "not as root" check so the smoke test
-  can run the recipe body in the build.
+  `FIXTURE=`, a `file://` feed) so the smoke test runs the real code positive and known-bad in
+  the build, and ships a `--self-test` when it has pure functions worth pinning.
+- Recipes are `just --unstable --fmt --check` clean and start with
+  `source /usr/lib/ujust/ujust.sh` (colours, `Choose`). A `help` action comes before the "not
+  as root" check so the smoke test can run the recipe body in the build.
 - What the image already does (a unit enabled, a package installed, a module option) is not
-  redone by a recipe: the recipe reports it (`status`) and does only what needs the host
-  (an opt-in module, a per-user choice).
+  redone by a recipe: the recipe reports it (`status`) and does only what needs the host (an
+  opt-in module, a per-user choice).
 
 ## Boot hooks
 
-Scripts under `system_files/usr/share/ublue-os/system-setup.hooks.d/` run as root at every
-boot through `ublue-system-setup.service` (`ublue-setup-services`, after `rpm-ostreed`, before
-user sessions). The dispatcher runs `bash <script>` and ignores the exit status, so:
+Scripts under `system_files/usr/share/ublue-os/system-setup.hooks.d/` run as root at every boot
+through `ublue-system-setup.service` (`ublue-setup-services`, after `rpm-ostreed`, before user
+sessions). The dispatcher runs `bash <script>` and ignores the exit status, so:
 
 - a hook converges on every boot (check, then change only what differs) instead of stamping a
   version with libsetup's `version-script`, which records the run before the body executes and
   never repeats a failed one nor reaches a user created later;
-- a hook that cannot do its job prints one `ERROR:` line to stderr and exits 1: the journal line
-  is its only signal;
+- a hook that cannot do its job prints one `ERROR:` line to stderr and exits 1: the journal
+  line is its only signal;
 - a hook takes a fixture prefix (`usermod --prefix`, files under a temporary tree) so its smoke
   test exercises the real script, positive and known-bad, without touching the image.
 
@@ -105,9 +105,7 @@ User hooks (`user-setup.hooks.d/`, `ublue-user-setup.service`, every graphical s
 the same three rules; their "check" must be cheap enough for every login (read a file, never
 spawn the application: the VS Code hook reads `extensions.json`), and their fixture is `HOME`
 plus a stub binary first in `PATH`.
-- Writes to files the base image ships end on a fresh inode (`mv`, `install`, `sed -i`,
-  `rsync`) where it costs nothing; whether the runner kernel still loses in-place writeback (v1
-  gotcha #34) is decided by the experiment recorded in `docs/gotchas.md`.
+
 
 ## Tests
 
@@ -140,7 +138,23 @@ seen red on a lesion before its first green counts.
   `jq`, `curl` work (it has no container engine, no Homebrew and shellcheck 0.9.0).
 - `runner.temp` is not available in a job-level `env:`; steps read `$RUNNER_TEMP`.
 - A dispatch of a workflow that exists only on a branch goes by file name:
-  `gh workflow run build.yml --ref <branch>`.
+  `gh workflow run build.yml --ref <branch>`; `-f rechunk=true` runs the main profile there.
+- `ubuntu-26.04` is also the only runner whose kernel keeps in-place writeback intact
+  (`gotchas.md` § Torn writeback): a runner change is a change to that measurement.
+- Two profiles, one reusable workflow: what `main` and a release run differ in from the sandbox
+  is an input (`rechunk`, later `publish`), never a second copy of the steps (aurora
+  `reusable-build.yml`: `publish` as an input, steps with `if: inputs.publish`).
+- Every check CI runs on an image is a script under `.github/scripts/` with a `--self-test` the
+  `lint` job runs; the workflow calls the script, it does not restate the checks.
+- One labels file per build (`image-labels.sh`), passed to `podman build` and again to
+  `build-chunked-oci`: a composed image inherits no config, and a `podman build` without labels
+  keeps the base's (`gotchas.md`).
+- Values an expression computes reach a step through `env:`, never inline in `run:` (an input
+  or a label with a quote would break the script; GitHub docs, "Security hardening for GitHub
+  Actions", read 2026-09-02).
+- A secret proves itself before it is needed: the main profile signs the chunked manifest with
+  `SIGNING_SECRET` and verifies with `cosign.pub`, so a rotated or mispasted key fails on a
+  push to `main`, not in the release run.
 
 ## Commits
 

@@ -54,8 +54,8 @@ for ko in msi-ec acpi_ec ntfs; do
     [ "$resolved" = "$file" ] || { echo "modprobe $ko resolves to $resolved, not $file"; exit 1; }
     echo "$ko: $file, vermagic $KVER"
 done
-# NTFSPLUS opt-in (55-ntfsplus.sh): the type ntfs blacklisted, no generic
-# mount.ntfs helper left to hijack it.
+# NTFSPLUS opt-in (55-ntfsplus.sh): no generic mount.ntfs helper may survive
+# to hijack the blacklisted type.
 [ "$(grep -vE '^\s*(#|$)' /usr/lib/modprobe.d/bazzite-mx-ntfsplus.conf)" = "blacklist ntfs" ] || { echo "bazzite-mx-ntfsplus.conf is not 'blacklist ntfs'"; exit 1; }
 for h in /usr/bin/mount.ntfs /usr/sbin/mount.ntfs; do
     [ ! -e "$h" ] && [ ! -L "$h" ] || { echo "$h still present"; exit 1; }

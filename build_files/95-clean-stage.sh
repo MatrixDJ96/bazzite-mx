@@ -44,18 +44,20 @@ relocate_accounts /etc/group /usr/lib/group /etc/gshadow \
 wheel:x:10:'
 rm -f /etc/.pwd.lock /etc/passwd- /etc/group- /etc/shadow- /etc/gshadow- /etc/subuid- /etc/subgid-
 
-# The rpmdb rpm-ostree reads must be the one dnf5 wrote (hardlink, not
-# symlink: aurora clean-stage.sh, rpm-ostree#4554).
+# The rpmdb rpm-ostree reads must be the one dnf5 wrote, and a hardlink
+# rather than a symlink (github.com/coreos/rpm-ostree/issues/4554).
 for f in rpmdb.sqlite rpmdb.sqlite-shm rpmdb.sqlite-wal; do
     if [ -f "/usr/share/rpm/$f" ] && [ -f "/usr/lib/sysimage/rpm-ostree-base-db/$f" ]; then
         ln -f "/usr/share/rpm/$f" "/usr/lib/sysimage/rpm-ostree-base-db/$f"
     fi
 done
 
-# Nothing build-time survives under /var, /run, /tmp, /boot. /var/cache and
-# /var/log are cache mounts during the build (Containerfile) and cannot be
-# removed here (aurora clean-stage.sh: "things we can't delete here are mounts").
+# Every build-time directory under /var goes. cache and log are the build's
+# own mounts, which find cannot delete anyway.
 find /var/* -maxdepth 0 -type d ! -name cache ! -name log -exec rm -rf {} +
+# The /run entries buildah binds for the RUN (resolv.conf, secrets,
+# .containerenv) are mounts too: they stay out of the image because the
+# Containerfile makes /run a tmpfs.
 find /run -mindepth 1 \
     ! -path '/run/systemd' \
     ! -path '/run/systemd/resolve' \

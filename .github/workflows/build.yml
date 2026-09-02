@@ -1,18 +1,24 @@
-# Sandbox build: every push to main or develop, every PR, builds both flavours
-# and lints them. Nothing is pushed to GHCR and no release is made from here
-# (owner's decision 1.5d: releases come only from release.yml, dispatched by
-# hand, by the weekly trigger or by the upstream watcher).
-name: Build Bazzite-MX
+# Lint, then the three flavours through reusable-build.yml. Nothing here
+# reaches GHCR and no release comes from a push (docs/workflow.md).
+name: Build
 
 on:
   push:
     branches: [main, develop]
     paths-ignore:
       - "**.md"
+      - docs/**
       - site/**
+      - .claude/**
+      - LICENSE
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      rechunk:
+        description: "Run the main profile (chunked image, probe, test signature) on this ref"
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -30,10 +36,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      # shellcheck 0.11.0 is preinstalled on ubuntu-26.04 (ubuntu-slim carries
-      # 0.9.0: not used). shfmt and yamllint come from Fedora 44 so the CI, the
-      # image and the local hook format with the same shfmt release.
       - name: Run shellcheck
         run: |
           set -euo pipefail
@@ -58,34 +63,43 @@ jobs:
             echo "yamllint ok"
           '
 
-      - name: Prove the resolver fails closed
-        run: ./.github/scripts/resolve-base.sh --self-test
-
-  build:
-    name: Build ${{ matrix.flavour }}
-    needs: lint
-    runs-on: ubuntu-26.04
-    timeout-minutes: 60
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        flavour: [bazzite, bazzite-nvidia-open]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Resolve base image
-        id: base
-        run: ./.github/scripts/resolve-base.sh "${{ matrix.flavour }}"
-
-      - name: Build image
+      # On the host a syntax error is only a journal warning and the script is
+      # still marked performed (plasma-workspace, shellcorona.cpp).
+      - name: Check the Plasma scripts parse
         run: |
           set -euo pipefail
-          podman build \
-            --build-arg BASE_IMAGE="${{ steps.base.outputs.base_image }}" \
-            --build-arg IMAGE_NAME="${{ steps.base.outputs.image_name }}" \
-            --tag "localhost/bazzite-mx:${{ matrix.flavour }}" \
-            .
-          podman image inspect --format 'built {{.Id}} size {{.Size}}' "localhost/bazzite-mx:${{ matrix.flavour }}"
+          node --version
+          mapfile -t scripts < <(git ls-files '*.js')
+          for f in "${scripts[@]}"; do node --check "$f"; done
+          echo "node --check ok: ${#scripts[@]} scripts"
+
+      # From the runner's Linuxbrew, not a third-party action.
+      - name: Install just from Homebrew
+        run: |
+          set -euo pipefail
+          /home/linuxbrew/.linuxbrew/bin/brew install just
+          echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+
+      - name: Check the recipe formatting
+        run: |
+          set -euo pipefail
+          just --version
+          mapfile -t files < <(git ls-files '*.just')
+          for f in "${files[@]}"; do just --unstable --fmt --check --justfile "$f"; done
+          echo "just --fmt --check ok: ${#files[@]} files"
+
+      - name: Prove the CI scripts fail closed
+        run: |
+          set -euo pipefail
+          for s in resolve-base image-labels check-image; do "./.github/scripts/$s.sh" --self-test; done
+
+  build:
+    name: Build
+    needs: lint
+    permissions:
+      contents: read
+    uses: ./.github/workflows/reusable-build.yml
+    with:
+      rechunk: ${{ github.ref == 'refs/heads/main' || inputs.rechunk == true }}
+    secrets:
+      SIGNING_SECRET: ${{ secrets.SIGNING_SECRET }}

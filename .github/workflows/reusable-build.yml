@@ -1,0 +1,155 @@
+# Reusable build of both flavours, called by build.yml (sandbox and main
+# profiles). The inputs pick the profile: `rechunk` composes the chunked OCI
+# image a host would pull, probes it and proves the signing key; without it
+# the run stops at the sandbox image and its probe. Nothing here pushes to
+# GHCR (decision 1.5d); the release workflow arrives with its own inputs.
+# No concurrency group in a callee: it would inherit the caller's context
+# and collide with the caller's own group (AGENTS.md rule 8).
+name: Reusable Build
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: "Tag the image is versioned with; empty for a sandbox build (<base version>.dev)"
+        type: string
+        default: ""
+      rechunk:
+        description: "Compose the chunked image, probe it and prove the signing key (main profile)"
+        type: boolean
+        default: false
+    secrets:
+      SIGNING_SECRET:
+        description: "cosign private key; with rechunk, a test signature proves it pairs with cosign.pub"
+        required: false
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build ${{ matrix.flavour }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        flavour: [bazzite, bazzite-nvidia-open, bazzite-nvidia]
+    env:
+      FLAVOUR: ${{ matrix.flavour }}
+      IMAGE: localhost/bazzite-mx:${{ matrix.flavour }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve base image
+        id: base
+        run: |
+          set -euo pipefail
+          ./.github/scripts/resolve-base.sh "$FLAVOUR" | tee "$RUNNER_TEMP/base.env"
+
+      # One labels file for the build and for the compose step: a composed
+      # image inherits no config and would keep the base's labels.
+      - name: Write the image labels
+        id: labels
+        run: |
+          set -euo pipefail
+          ./.github/scripts/image-labels.sh "$RUNNER_TEMP/base.env" "$RELEASE_TAG" "$GITHUB_SHA" | tee "$RUNNER_TEMP/labels.txt"
+          echo "version=$(sed -n 's/^org\.opencontainers\.image\.version=//p' "$RUNNER_TEMP/labels.txt")" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        env:
+          BASE_IMAGE: ${{ steps.base.outputs.base_image }}
+          IMAGE_NAME: ${{ steps.base.outputs.image_name }}
+          VERSION: ${{ steps.labels.outputs.version }}
+        run: |
+          set -euo pipefail
+          mapfile -t label_args < <(sed 's/^/--label=/' "$RUNNER_TEMP/labels.txt")
+          podman build \
+            --build-arg BASE_IMAGE="$BASE_IMAGE" \
+            --build-arg IMAGE_NAME="$IMAGE_NAME" \
+            --build-arg VERSION="$VERSION" \
+            "${label_args[@]}" \
+            --tag "$IMAGE" \
+            .
+          podman image inspect --format 'built {{.Id}} size {{.Size}}' "$IMAGE"
+
+      - name: Check the sandbox image
+        if: ${{ !inputs.rechunk }}
+        run: ./.github/scripts/check-image.sh "$IMAGE" "$RUNNER_TEMP/labels.txt"
+
+      # The raw image and the base are removed before the pull, which keeps the
+      # three copies inside the runner's disk; the df lines measure the margin.
+      - name: Compose the chunked image
+        if: inputs.rechunk
+        id: rechunk
+        run: |
+          set -euo pipefail
+          df -h --output=size,used,avail,target / | tail -n1 | sed 's/^/disk before compose: /'
+          out=$(mktemp -d "$RUNNER_TEMP/rechunk-XXXXXX")
+          mapfile -t label_args < <(sed 's/^/--label=/' "$RUNNER_TEMP/labels.txt")
+          podman run --rm --pull=never --privileged \
+            --mount=type=image,src="$IMAGE",target=/rpm-ostree \
+            --volume "$out:/run/out:Z" \
+            --entrypoint /usr/bin/rpm-ostree \
+            "$IMAGE" \
+            compose build-chunked-oci --bootc --max-layers 127 --format-version 2 \
+            "${label_args[@]}" \
+            --rootfs /rpm-ostree --output oci-archive:/run/out/chunked.oci
+          ls -l --block-size=M "$out/chunked.oci" | sed 's/^/archive: /'
+          podman rmi -f "$IMAGE"
+          podman image prune -af > /dev/null
+          df -h --output=size,used,avail,target / | tail -n1 | sed 's/^/disk before pull: /'
+          chunked=$(podman pull "oci-archive:$out/chunked.oci")
+          rm -rf "$out"
+          df -h --output=size,used,avail,target / | tail -n1 | sed 's/^/disk after pull: /'
+          podman tag "$chunked" "$IMAGE-chunked"
+          podman image inspect --format 'chunked {{.Id}} size {{.Size}} layers {{len .RootFS.Layers}}' "$IMAGE-chunked"
+          echo "image=$IMAGE-chunked" >> "$GITHUB_OUTPUT"
+
+      - name: Check the chunked image
+        if: inputs.rechunk
+        env:
+          CHUNKED: ${{ steps.rechunk.outputs.image }}
+        run: ./.github/scripts/check-image.sh "$CHUNKED" "$RUNNER_TEMP/labels.txt"
+
+      # Installed in the job's temp directory: the instances of a self-hosted
+      # runner share one home, and two jobs installing into it at once hit
+      # "text file busy" (docs/gotchas.md).
+      - name: Install cosign
+        if: inputs.rechunk
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+          install-dir: ${{ runner.temp }}/cosign
+
+      # The digest comes from podman: skopeo on containers-storage needs a user
+      # namespace the runner denies (docs/gotchas.md).
+      - name: Prove the signing key
+        if: inputs.rechunk
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          COSIGN_PASSWORD: ""
+          CHUNKED: ${{ steps.rechunk.outputs.image }}
+        run: |
+          set -euo pipefail
+          [ -n "$COSIGN_PRIVATE_KEY" ] || { echo "SIGNING_SECRET is empty: the caller did not pass it" >&2; exit 1; }
+          cd "$RUNNER_TEMP"
+          podman image inspect --format '{{.Digest}} {{.Id}}' "$CHUNKED" > manifest.json
+          grep -qE '^sha256:[0-9a-f]{64} ' manifest.json || { echo "no digest for $CHUNKED" >&2; exit 1; }
+          cosign sign-blob -y --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --use-signing-config=false \
+            --bundle manifest.bundle.json manifest.json
+          cosign verify-blob --key "$GITHUB_WORKSPACE/cosign.pub" --bundle manifest.bundle.json \
+            --insecure-ignore-tlog manifest.json
+          cp manifest.json tampered.json
+          echo tampered >> tampered.json
+          if cosign verify-blob --key "$GITHUB_WORKSPACE/cosign.pub" --bundle manifest.bundle.json \
+            --insecure-ignore-tlog tampered.json 2> /dev/null; then
+            echo "verify-blob accepted a tampered manifest" >&2
+            exit 1
+          fi
+          echo "signing key ok: signature verified with cosign.pub, tampered copy refused"

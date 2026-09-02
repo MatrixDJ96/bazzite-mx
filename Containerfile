@@ -27,14 +27,15 @@ ARG IMAGE_NAME
 ARG IMAGE_VENDOR
 ARG VERSION
 
-# The staged modules are bound at /kmods, a root-level mount point buildah
-# removes after the RUN (like /ctx). Not under /tmp, /var or /run: clean-stage
-# sweeps those with find -delete, which fails on a read-only bind mount
-# (measured 2026-09-02).
+# /kmods is a root-level mount point, never under /tmp, /var or /run:
+# clean-stage sweeps those with find -delete, which fails on a read-only bind
+# mount. /run is a tmpfs because buildah binds the host's resolv.conf under it
+# and the path would otherwise stay in the image (docs/gotchas.md).
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=bind,from=kmod-builder,source=/out,target=/kmods \
     --mount=type=cache,dst=/var/cache \
     --mount=type=cache,dst=/var/log \
+    --mount=type=tmpfs,dst=/run \
     --mount=type=tmpfs,dst=/tmp \
     /ctx/build_files/build.sh
 

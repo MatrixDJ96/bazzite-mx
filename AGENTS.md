@@ -4,8 +4,8 @@ Canonical, tool-agnostic instructions for any coding agent working on this repo.
 
 ## What this is
 
-`bazzite-mx` is a personal bootc image built on Bazzite (KDE, `stable` stream). Three flavours,
-`bazzite-mx`, `bazzite-mx-nvidia-open` and `bazzite-mx-nvidia`, differ only in `BASE_IMAGE`. The image is the system
+`bazzite-mx` is a personal bootc image built on Bazzite (KDE, `stable` stream). Two flavours,
+`bazzite-mx` and `bazzite-mx-nvidia-open`, differ only in `BASE_IMAGE`. The image is the system
 layer; apps are Flatpak, CLI tools are Fedora RPMs or Homebrew, mutable userspace is distrobox.
 A divergence from Bazzite enters the image only when (1) upstream does not cover it, (2) it
 needs the image layer, (3) a host of the fleet uses it, (4) it ships a smoke test and cites its
@@ -23,31 +23,19 @@ build_files/lib/            env.sh (paths, sourced first), log.sh, repos.sh (ins
 build_files/NN-<feature>.sh one script per feature (00 prep … 90 validate-repos, 95 clean-stage)
 build_files/tests/          run.sh (runner + pairing guard), lib.sh (check_pkg, check_unit_state, check_desktop_file, check_just_fmt,
                             check_recipe_help) and one NN-<feature>.sh test per script
-build_files/kmods/          build-kmods.sh (kmod-builder stage, --self-test) and <name>/source.env per module (URL, pinned COMMIT, KO_BUILD_ARGS when kbuild needs a symbol forced)
-system_files/               copied over / by 01-system-files.sh, one tree for the three flavours: vendored .repo files and
+build_files/kmods/          build-kmods.sh (kmod-builder stage, --self-test) and <name>/source.env per module (URL, pinned COMMIT)
+system_files/               copied over / by 01-system-files.sh, one tree for both flavours: vendored .repo files and
                             vendor keys (etc/), modules-load, setup hooks, ujust recipes, their helpers and the host.sh they share (usr/),
                             see docs/architecture.md
 cosign.pub                  the public key the image trusts for ghcr.io/matrixdj96 (11-image-signing.sh)
-site/index.html             the landing page (one file: images, switch commands, signature check), published by deploy-pages.yml
-.github/scripts/            resolve-base.sh (base digest + kernel), image-labels.sh (the labels file), check-image.sh (probe of the built image),
-                            release-tag.sh (the release tag), gate-release.sh (verify by digest, tag, promote), changelog.sh (release notes),
-                            refresh-pins.sh (pin refresh), watch-upstream.sh (the watcher's verdict and dispatch decision),
-                            check-site.sh (the landing page), install-oras.sh (the ORAS CLI from its release, checksum
-                            verified), lib.sh (coordinates, fail/err/emit, read_env, TAG_SHAPE: sourced by all); each one
-                            owner, each --self-test (run by the lint job)
-.github/workflows/          build.yml (lint, then reusable-build.yml: sandbox profile on develop/PR, main profile on main or dispatch `rechunk`),
-                            reusable-build.yml (the three flavours; publish only from release.yml), release.yml (dispatch only: version, build,
-                            gate, release), promote.yml (move :stable), sign-image.yml (recovery signer),
-                            trigger-release.yml (weekly cron → release.yml), watch-upstream.yml (6-hourly cron: base digest vs our :stable →
-                            release.yml), clean.yml (GHCR retention, dispatch with dry_run), deploy-pages.yml (site/ to
-                            GitHub Pages on a push to main)
+.github/scripts/            resolve-base.sh (base digest + kernel), image-labels.sh (the labels file), check-image.sh (probe of the built image); each one owner, each --self-test
+.github/workflows/          build.yml (lint, then reusable-build.yml: sandbox profile on develop/PR, main profile on main or dispatch `rechunk`), reusable-build.yml (both flavours; no push, no release)
 .claude/                    Claude Code: settings.json, hooks/lint-edit.sh, commands/preflight.md
-docs/                       architecture.md (build flow, state, gates, CI), conventions.md (bash, tests, CI, commits), divergences.md (what changes over Bazzite, why),
-                            gotchas.md (measured facts), migration.md (moving a host to v2), workflow.md (branches, the release run, cutover, repo settings, pins)
+docs/                       architecture.md (build flow, state, gates, CI), conventions.md (bash, tests, CI, commits), divergences.md (what changes over Bazzite, why), gotchas.md (measured facts), migration.md (moving a host to v2)
 ```
 
-Every feature arrived as one verified commit (script + test + docs) and a new one arrives the
-same way. What the image changes over Bazzite, and why, is `docs/divergences.md`. Read
+The remaining features and the release pipeline arrive one feature per commit; this file grows
+with them. What the image changes over Bazzite, and why, is `docs/divergences.md`. Read
 `docs/architecture.md` before adding a script and `docs/conventions.md` before writing one.
 
 ## Rules
@@ -78,8 +66,7 @@ same way. What the image changes over Bazzite, and why, is `docs/divergences.md`
    chunked image a host would pull, its probe and a test signature with the repo's key, and
    takes its own explicit OK from the owner; that profile is proven first on the branch with
    `gh workflow run build.yml --ref <branch> -f rechunk=true`. Releases never come from a push
-   (decision 1.5d): `release.yml` is dispatch-only, and its dispatch, like `promote.yml`'s,
-   takes the owner's OK (`docs/workflow.md`).
+   (decision 1.5d).
 6. **Conventional Commits**, one commit per verified feature (script + test + doc together).
    Never `--force`, `--no-verify` or `--amend` without an explicit ask.
 7. **Cite the source of every choice**: the upstream file and line, the manual page, the URL
@@ -88,12 +75,9 @@ same way. What the image changes over Bazzite, and why, is `docs/divergences.md`
    object; env vars `SCREAMING_SNAKE_CASE`; outputs `snake_case`, the same key everywhere;
    concurrency groups literal `bazzite-mx-<phase>[-<key>]`, never `${{ github.workflow }}` (a
    `workflow_call` callee inherits the caller's name and deadlocks on its own group).
-9. **Runners and pins**: `ubuntu-26.04` for anything that needs podman, skopeo or Homebrew;
-   `ubuntu-slim` only for jobs that use `gh`, `jq`, `curl`. Every third-party `uses:` is pinned
-   to a commit SHA with the version in a trailing comment (the repo's own reusable workflow is
-   called by path), every installed binary to a version input.
-   `./.github/scripts/refresh-pins.sh --check` opens every round that touches `.github/`
-   (`docs/workflow.md` § Keeping the pins fresh); no bot refreshes them.
+9. **Runners**: `ubuntu-26.04` for anything that needs podman, skopeo or Homebrew;
+   `ubuntu-slim` only for jobs that use `gh`, `jq`, `curl`. Every `uses:` is pinned to a commit
+   SHA with the version in a trailing comment.
 
 ## Cheatsheet
 
@@ -101,8 +85,7 @@ same way. What the image changes over Bazzite, and why, is `docs/divergences.md`
 # Resolve the base and write the labels the way CI does
 ./.github/scripts/resolve-base.sh bazzite | tee /var/tmp/bazzite-mx-base.env   # base_image=... kernel_version=...
 ./.github/scripts/image-labels.sh /var/tmp/bazzite-mx-base.env "" "$(git rev-parse HEAD)" > /var/tmp/bazzite-mx-labels.txt
-for s in ./.github/scripts/*.sh; do "$s" --self-test; done                        # every CI script proves it fails closed
-./.github/scripts/check-site.sh site                                            # the landing page, links included
+for s in resolve-base image-labels check-image; do ./.github/scripts/$s.sh --self-test; done   # each prints "self-test ok"
 
 # Probe a built image the way CI does (labels, /run and /tmp, lint, packages, modules, version)
 ./.github/scripts/check-image.sh localhost/bazzite-mx:preflight /var/tmp/bazzite-mx-labels.txt
@@ -110,16 +93,9 @@ for s in ./.github/scripts/*.sh; do "$s" --self-test; done                      
 # Run the main profile (chunked image, probe, test signature) on a branch
 gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref develop -f rechunk=true
 
-# Pins: the table (exit 0 always), then the rewrite of the stale actions and binaries
-./.github/scripts/refresh-pins.sh --check
-./.github/scripts/refresh-pins.sh --apply
-
-# A release (owner's OK first; :stable moves only with promote_stable AND vars.PROMOTE_STABLE)
-gh workflow run release.yml --repo MatrixDJ96/bazzite-mx --ref main -f reason=manual
-
-# Lint like CI: the .sh files and the extensionless libexec helpers
-scripts=$({ git ls-files '*.sh'; git grep -l '^#!/usr/bin/env bash'; } | sort -u | tr '\n' ' ')
-shellcheck -x -P SCRIPTDIR --severity=warning $scripts
+# Lint like CI
+scripts=$({ git ls-files '*.sh'; git grep -l '^#!/usr/bin/env bash'; } | sort -u | tr '\n' ' ')   # .sh files and the libexec helpers
+shellcheck -x -P SCRIPTDIR --severity=warning $scripts                          # -x -P: follow the sourced libraries
 podman run --rm -v "$PWD:/repo:ro,z" -w /repo quay.io/fedora/fedora:44 \
   bash -c "dnf -q install -y shfmt yamllint >/dev/null; shfmt -d -i 4 -ci -bn -sr $scripts; yamllint --strict ."
 
