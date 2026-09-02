@@ -38,6 +38,7 @@ digest with `.github/scripts/resolve-base.sh`, which also reads the base's kerne
 | `32-cli-rpms.sh` | gh, glab, ShellCheck, shfmt and the system-administration list, all Fedora |
 | `33-mise.sh` | mise from the vendored `jdxcode/mise` COPR (key asserted); activation and default runtimes come from system_files |
 | `40-desktop-apps.sh` | Firefox and gparted from Fedora, `deny org.mozilla.firefox/*` appended to the base's Flatpak filter, 1Password from the vendored repo (key asserted, `/var/opt` created first, the `.repo` its %post rewrites put back, polkit actions and groups checked) |
+| `41-sunshine.sh` | Sunshine from the vendored COPR `lizardbyte/stable` (key asserted): KMS capabilities, udev and modules-load files checked, user unit disabled for everyone, Bazzite's Portal announcement removed, recipe `82-bazzite-sunshine.just` (replacing the base's) checked |
 | `80-fix-opt.sh` | every `/var/opt/<name>` an RPM unpacked moves to `/usr/lib/opt/<name>`, with a generated `usr/lib/tmpfiles.d/bazzite-mx-opt.conf` (`L+` per name) that recreates the `/var/opt` link at boot; checks before the first move, `--self-test` |
 | `90-validate-repos.sh` | repository gate: vendored files present, identical and disabled; base files untouched; additions disabled; `--self-test` |
 | `95-clean-stage.sh` | dnf.conf restored, dnf history removed, accounts relocated to `/usr/lib`, rpmdb hardlinked, `/var` `/run` `/tmp` `/boot` swept (aurora `clean-stage.sh`, bazzite `finalize`, `cleanup`) |
