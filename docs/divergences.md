@@ -301,3 +301,50 @@ out in favour of XDG Portal Capture", which the RPM supports too.
   branches (no Deck image in the fleet), the "Fix Error 503" switch that writes
   `KWIN_WAYLAND_NO_PERMISSION_CHECKS=1` into the user's environment (a KWin permission
   bypass; returns as its own step if a host needs it).
+
+## KDE defaults (`45-kde-defaults.sh`)
+
+Criteria 1, 3, 4 (criterion 2 by form: per-user defaults reach existing accounts only from
+the image); decision 1.5c, from bazzite-63 ee64b63, b0c5576 and 82293fc, rewritten. Not
+carried over from bazzite-63 (decision 1.5c): the Segoe fonts, the Konsole pwsh profile.
+
+- **Form**: Plasma update scripts under
+  `/usr/share/plasma/shells/org.kde.plasma.desktop/contents/updates/`, the mechanism Plasma
+  itself and Bazzite (`bazzite-pins.js`) use for one-shot per-user defaults: "when
+  plasmashell is started, it will check for scripts with a .js suffix in the current shell
+  package under the updates directory ... executed serially in the alphabetical order of the
+  file names", recorded in `~/.config/plasmashellrc` `[Updates] performed` (KDE developer
+  docs, Plasma scripting; plasma-workspace `shell/scripting/scriptengine.cpp:260-301`, read
+  2026-09-02). They run for new accounts after the default layout and for existing accounts
+  at their next plasmashell start (`shellcorona.cpp`, `processUpdateScripts`). bazzite-63
+  ran the same JavaScript from `/etc/xdg/autostart` entries with a per-user stamp file and a
+  60-second wait for plasmashell on the session bus; the update-script form needs neither.
+  A JavaScript error is only a `qCWarning` in the journal and the script is still marked
+  performed (`shellcorona.cpp:1153-1155`; refutation 2.9), so the files are checked with
+  `node --check` before a commit and by the CI lint job (no JavaScript engine in the image),
+  and their effect is proven on the hub with an existing account in phase 4.
+- **Clock seconds** (`bazzite-mx-clock-seconds.js`): every digital clock on a panel or
+  desktop gets `showSeconds=2` (always) when it still has the upstream default (1, tooltip
+  only); a clock the user set to "never" (0) is left alone. Values as in the base's own
+  `digitalclock_migrate_showseconds_setting.js`.
+- **A panel per screen** (`bazzite-mx-panels.js`): for every screen from 1 to
+  `screenCount-1` without any panel, a bottom panel copying the primary panel's height,
+  floating, hiding, alignment and length mode, and its widgets except
+  `org.kde.plasma.systemtray` (a second tray applet spawns a duplicate tray containment),
+  with the task manager set to `showOnlyCurrentScreen` and the primary's pinned launchers;
+  falls back to the default panel's widget list when no primary panel is found. A screen
+  that already carries a panel is skipped, so an existing multi-screen layout is never
+  changed (refutation 2.9). `Panel.screen` is writable in Plasma 6 (`shell/scripting/panel.h:30`).
+  A first login with one screen adds nothing and the script is still marked performed:
+  `ujust setup-panels` evaluates the same file through `org.kde.PlasmaShell.evaluateScript`,
+  which returns the script's `print` output (`shellcorona.cpp`, `evaluateScript`).
+- **Ctrl+C / Ctrl+V** (skel `~/.local/share/kxmlgui5/konsole/sessionui.rc`, skel
+  `~/.config/powershell/profile.ps1`): Konsole gets `edit_copy` on `Ctrl+C; Ctrl+Shift+C`;
+  Konsole disables the action while nothing is selected, so Ctrl+C still interrupts the
+  shell. The file's `version="1"` is below Konsole's `sessionui.rc` (`version="36"`, master
+  2026-09-02), so KXmlGui merges only its `ActionProperties` into the application's layout;
+  KF6 still reads `GenericDataLocation/kxmlgui5/<component>/` (`kxmlguiclient.cpp:160`).
+  PowerShell is not in the image (decision 1.5c keeps the Konsole pwsh profile out); the
+  profile applies to a pwsh the user installs and binds Ctrl+C to copy-selection-or-cancel
+  and Ctrl+V to paste through `wl-copy`/`wl-paste` (wl-clipboard 2.2.1 is in the base,
+  measured 2026-09-02; PSReadLine's own clipboard functions need xclip on Linux).

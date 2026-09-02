@@ -39,6 +39,7 @@ digest with `.github/scripts/resolve-base.sh`, which also reads the base's kerne
 | `33-mise.sh` | mise from the vendored `jdxcode/mise` COPR (key asserted); activation and default runtimes come from system_files |
 | `40-desktop-apps.sh` | Firefox and gparted from Fedora, `deny org.mozilla.firefox/*` appended to the base's Flatpak filter, 1Password from the vendored repo (key asserted, `/var/opt` created first, the `.repo` its %post rewrites put back, polkit actions and groups checked) |
 | `41-sunshine.sh` | Sunshine from the vendored COPR `lizardbyte/stable` (key asserted): KMS capabilities, udev and modules-load files checked, user unit disabled for everyone, Bazzite's Portal announcement removed, recipe `82-bazzite-sunshine.just` (replacing the base's) checked |
+| `45-kde-defaults.sh` | KDE defaults from system_files: two Plasma update scripts (clock seconds, a panel per screen), skel Konsole shortcut file and PowerShell profile, the `setup-panels` recipe; the script proves the files landed where their consumers read them and are well formed |
 | `80-fix-opt.sh` | every `/var/opt/<name>` an RPM unpacked moves to `/usr/lib/opt/<name>`, with a generated `usr/lib/tmpfiles.d/bazzite-mx-opt.conf` (`L+` per name) that recreates the `/var/opt` link at boot; checks before the first move, `--self-test` |
 | `90-validate-repos.sh` | repository gate: vendored files present, identical and disabled; base files untouched; additions disabled; `--self-test` |
 | `95-clean-stage.sh` | dnf.conf restored, dnf history removed, accounts relocated to `/usr/lib`, rpmdb hardlinked, `/var` `/run` `/tmp` `/boot` swept (aurora `clean-stage.sh`, bazzite `finalize`, `cleanup`) |
@@ -46,7 +47,7 @@ digest with `.github/scripts/resolve-base.sh`, which also reads the base's kerne
 | `tests/lib.sh` | the checks the tests share, one `OK:`/`FAIL:` line each: `check_pkg`, `check_unit_state [--global]`, `check_desktop_file`, `check_just_fmt`, `check_recipe_help`; brings `lib/just.sh` |
 | `tests/NN-x.sh` | one smoke test per build script, same stem |
 
-Numbering: `00-09` preparation, `10-19` identity and trust, `20-49` package installation,
+Numbering: `00-09` preparation, `10-19` identity and trust, `20-49` package installation and desktop defaults,
 `50-59` kernel modules, `60-69` services, `70-79` justfile, `80-89` fix-ups (`/opt` relocation), `90-99` gates and
 cleanup. The order is the file name; nothing else states it.
 
@@ -64,7 +65,8 @@ One tree, copied over `/` by `01-system-files.sh`. What lives where:
 | `usr/lib/tmpfiles.d/bazzite-mx-*.conf` | `/var` directories packages ship and clean-stage removes; a host recreates them at boot (`bazzite-mx-opt.conf` is not in system_files: `80-fix-opt.sh` generates it from what sits under `/var/opt`) |
 | `usr/libexec/` | helpers recipes call (`bazzite-dx-kvmfr-setup`, bazzite-dx's file byte for byte) |
 | `usr/share/ublue-os/just/*.just` | `ujust` recipes; a file with a base file's name replaces that file (the base justfile already imports it), a new file is imported by the justfile feature |
-| `etc/skel/.config/` | per-user defaults a new account starts from (VS Code `update.mode`, mise runtimes); hooks seed them for existing accounts where it matters |
+| `usr/share/plasma/shells/org.kde.plasma.desktop/contents/updates/bazzite-mx-*.js` | Plasma update scripts: plasmashell runs each once per user at start, in file-name order, and records it in `~/.config/plasmashellrc` (`[Updates] performed`); the way Plasma and Bazzite (`bazzite-pins.js`) ship one-shot per-user defaults |
+| `etc/skel/.config/`, `etc/skel/.local/share/` | per-user defaults a new account starts from (VS Code `update.mode`, mise runtimes, PowerShell profile, Konsole `kxmlgui5/konsole/sessionui.rc`); hooks seed them for existing accounts where it matters |
 | `etc/profile.d/*.sh` | shell activation (`mise.sh`, interactive bash) |
 | `usr/share/ublue-os/user-setup.hooks.d/*.sh` | per-user hooks run by `ublue-user-setup.service` in every graphical session; same rules as the system hooks below |
 | `usr/share/ublue-os/system-setup.hooks.d/*.sh` | root hooks run by `ublue-system-setup.service` at every boot; each converges on its own (no version stamp) and prints an `ERROR:` line and exits 1 when it cannot |
