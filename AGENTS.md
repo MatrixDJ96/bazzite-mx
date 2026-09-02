@@ -21,6 +21,8 @@ build_files/build.sh        orchestrator: NN-<feature>.sh in version order
 build_files/lib/            env.sh (paths, sourced first), log.sh, repos.sh (install_from_repo, copr_install_isolated)
 build_files/NN-<feature>.sh one script per feature (00 prep … 90 validate-repos, 95 clean-stage)
 build_files/tests/          run.sh (runner + pairing guard) and one NN-<feature>.sh test per script
+system_files/               copied over / by 01-system-files.sh (etc/, usr/), one tree for both flavours
+cosign.pub                  the public key the image trusts for ghcr.io/matrixdj96 (11-image-signing.sh)
 .github/scripts/            resolve-base.sh (base digest + kernel, one owner, --self-test)
 .github/workflows/          build.yml (sandbox: lint + both flavours, no push, no release)
 .claude/                    Claude Code: settings.json, hooks/lint-edit.sh, commands/preflight.md

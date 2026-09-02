@@ -18,6 +18,7 @@ Default flavour: `bazzite`; pass `bazzite-nvidia-open` as `$1` for the other one
    ```bash
    podman build --pull=newer \
      --build-arg BASE_IMAGE="$base_image" \
+     --build-arg IMAGE_NAME="$image_name" \
      --tag localhost/bazzite-mx:preflight . 2>&1 | tee /var/tmp/bazzite-mx-preflight.log
    BUILD_EXIT=${PIPESTATUS[0]}
    echo "BUILD_EXIT=$BUILD_EXIT" >> /var/tmp/bazzite-mx-preflight.log
