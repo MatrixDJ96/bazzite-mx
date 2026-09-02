@@ -60,3 +60,49 @@ Criteria 1, 2, 3, 4; decision 1.5f. Bazzite ships podman only; the developer hos
 - Also from Fedora, in the same script: `podman-compose`, `podman-machine`, `podman-tui`
   (bazzite-dx `20-install-apps.sh:15-16`) and `bcvk` (bootc images as VMs; aurora's
   replacement for the archived podman-bootc, commit 7e31b429).
+
+## Virtualization and quickemu (`22-virtualization.sh`)
+
+Criteria 1, 2, 3, 4; decision 1.5f, quickemu added by the owner (2026-09-02). Bazzite ships
+`edk2-ovmf` and the `kvmfr` module (`install-kernel-akmods`) but no libvirt, QEMU or
+virt-manager: its `setup-virtualization` recipe installs the virt-manager Flatpak and enables
+the monolithic `libvirtd` per host. Here (pattern bazzite-dx `20-install-apps.sh:29-39`, aurora
+`dx/00-dx.sh:40-66,106,127`, rewritten):
+
+- Packages from Fedora, explicit list, weak dependencies off: `libvirt libvirt-daemon-kvm
+  libvirt-nss qemu-kvm qemu-img qemu-char-spice qemu-device-display-virtio-{gpu,vga}
+  qemu-device-usb-redirect virt-manager virt-viewer virt-install swtpm swtpm-tools
+  guestfs-tools waypipe quickemu`. `libvirt-nss` ships the `libvirt_guest` NSS module; the
+  image does not add it to `nsswitch.conf` (a host's choice).
+- Daemons: modular, from Fedora 44's preset (`90-default.preset` enables `virtqemud.service`
+  and the `virt*d` sockets; "New distributions are likely to use the modular mode",
+  https://libvirt.org/daemons.html, read 2026-09-02). `libvirtd.service` stays disabled and
+  the build asserts it; v1 enabled both.
+- `ublue-os-libvirt-workarounds` 1.1 (COPR `ublue-os/packages`): `restorecon` of
+  `/var/{lib,log}/libvirt` at boot, tmpfiles for `/var/log/libvirt`, sysusers for `libvirt`.
+- `/var` directories: the packages ship `/var/lib/libvirt/*`, `/var/lib/swtpm-localca` (tss),
+  `/var/log/swtpm/...`; the image ships no `/var` content, so
+  `usr/lib/tmpfiles.d/bazzite-mx-virt.conf` lists them with the packaged owner and mode
+  (`rpm -qlv`, 2026-09-02). On the v1 host `rpm-ostree-autovar.conf` carries no libvirt line
+  (measured 2026-09-02): the autovar mechanism does not recover directories a build removed.
+- KVM: `usr/lib/modprobe.d/bazzite-mx-kvm.conf` sets `ignore_msrs=1 report_ignored_msrs=0`,
+  the values Bazzite's recipe adds as kernel arguments; `kvm` is a module in the ogc kernel
+  (`CONFIG_KVM=m`), so the option applies without a karg.
+- quickemu 4.9.9 (Fedora; https://github.com/quickemu-project/quickemu/wiki/01-Installation:
+  "sudo dnf install quickemu"). It requires the `qemu` meta package, which pulls `qemu-user`
+  and the system emulators of every architecture: +131 MiB of packages (506 vs 375 MiB for
+  the list above, measured 2026-09-02 in `fedora:44`). `qemu-user-binfmt` and
+  `qemu-user-static` are not pulled (asserted in the build; decision 1.5a). It also requires
+  `mesa-demos`, which the base's `exclude=mesa-*` on the Fedora repositories
+  (`/etc/dnf/repos.override.d/99-config_manager.repo`, Mesa comes from Terra) filters out: the
+  build lifts that exclude for the one package and asserts that no other `mesa-*` package
+  changed (measured 2026-09-02: one package, Terra's Mesa untouched).
+- Recipe `setup-virtualization` (file `84-bazzite-virt.just`, replacing Bazzite's): `status`
+  (daemon, `/dev/kvm`, group, `virsh`, kvm options, kvmfr, quickemu) and `kvmfr` (runs
+  bazzite-dx's `bazzite-dx-kvmfr-setup`, commit a0f3842, plus the two bold codes it prints but
+  never set). Not carried over
+  from bazzite-dx's version: VFIO on/off, SPICE USB hot-plug udev rule, the `setfacl` on
+  `$HOME`, the VFIO-Tools libvirt hook download; each returns as its own recipe if a host
+  needs it.
+- The `libvirt` group is granted to wheel members by the boot hook, like `docker`: Fedora's
+  `50-libvirt.rules` gives that group `org.libvirt.unix.manage` without a password.

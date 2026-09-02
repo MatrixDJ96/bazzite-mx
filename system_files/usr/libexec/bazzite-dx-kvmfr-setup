@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+# Set up the kvmfr module for Looking Glass on this host: a note in modprobe.d,
+# the static-size kernel argument, the udev rule for /dev/kvmfr0, the device in
+# QEMU's cgroup list, its SELinux context and policy, and the module loaded
+# once. The kvmfr half of `ujust setup-virtualization`: bazzite-dx's helper
+# (commit a0f3842) in the form of docs/conventions.md, same steps in the same
+# order, same text.
+#
+# Usage: bazzite-dx-kvmfr-setup
+#   Interactive: a prompt to confirm before the first change, one to
+#   acknowledge the SELinux policy, one at the end. Root steps run through
+#   sudo; the kernel argument goes through rpm-ostree, which asks on its own.
+# Exit status: 0 done, or cancelled at the first prompt; the status of the
+#   failing step otherwise.
+# Writes: /etc/modprobe.d/kvmfr.conf, /etc/udev/rules.d/99-kvmfr.rules,
+#   /etc/libvirt/qemu.conf (cgroup_device_acl), the SELinux fcontext of
+#   /dev/kvmfr0, the policy module kvmfr built under ~/.config/selinux_te/,
+#   the kernel argument kvmfr.static_size_mb=128.
+set -euo pipefail
+
+# Urllink and Choose, and the readonly bold codes b and n the closing note
+# prints (docs/gotchas.md § `ujust.sh` declares its colour and formatting
+# names readonly).
+source /usr/lib/ujust/ujust.sh
+
+STATIC_SIZE_MB=128
+MODPROBE_NOTE=/etc/modprobe.d/kvmfr.conf
+UDEV_RULE=/etc/udev/rules.d/99-kvmfr.rules
+QEMU_CONF=/etc/libvirt/qemu.conf
+POLICY_DIR=$HOME/.config/selinux_te
+POLICY_SOURCE=$POLICY_DIR/kvmfr.te
+
+# The image this helper speaks for, from its own file name: bazzite-dx ships
+# it as bazzite-dx-kvmfr-setup, and the issue tracker it names is that image's.
+IMAGE_NAME=$(basename "$0" | sed -E 's/(-dx|)-kvmfr-setup//')
+if [ "$IMAGE_NAME" == "bazzite" ]; then
+    IMAGE_NAME="bazzite-dx"
+fi
+
+# --- messages -----------------------------------------------------------------
+
+# The disclaimer bazzite-dx requires, and where to report an issue first.
+print_disclaimer() {
+    local module_link looking_glass_link guide_link discord_link tracker_link
+
+    module_link=$(Urllink "https://looking-glass.io/docs/rc/ivshmem_kvmfr/#libvirt" "This module")
+    looking_glass_link=$(Urllink "https://looking-glass.io" "Looking Glass")
+    guide_link=$(Urllink \
+        "https://docs.bazzite.gg/Advanced/looking-glass/#compiling-looking-glass-client" \
+        "follow the guide here")
+    discord_link=$(Urllink "https://discord.gg/WEu6BdFEtp" "Universal Blue Discord")
+    tracker_link=$(Urllink "https://github.com/ublue-os/${IMAGE_NAME,,}/issues" \
+        "${IMAGE_NAME^} Github issue tracker")
+
+    echo "$module_link along with $looking_glass_link is very experimental and not recommended" \
+        "for production use!"
+    echo "The ublue team packages the kvmfr module only because it has to be supplied with the" \
+        "system image while using an atomic desktop."
+    echo "If you do plan to use Looking Glass, please $guide_link on how to compile it for your" \
+        "system."
+    echo "To use the kvmfr module after enabling it, just add and edit the xml for libvirt from" \
+        "the documentation in the first link."
+    echo "Since we package the kvmfr module please open kvmfr related issues you have on" \
+        "${IMAGE_NAME^} and tag @HikariKnight"
+    echo "in the $discord_link or the $tracker_link."
+    echo "~ @HikariKnight"
+}
+
+print_closing_notes() {
+    local size_link documentation_link
+
+    size_link=$(Urllink "https://looking-glass.io/docs/rc/install_libvirt/#determining-memory" \
+        "static size is set to ${STATIC_SIZE_MB}mb by default")
+    documentation_link=$(Urllink "https://looking-glass.io/docs/rc/ivshmem_kvmfr/#libvirt" \
+        "Please read official documentation for kvmfr for how to use it")
+
+    echo ""
+    echo "Kvmfr0 $size_link"
+    echo "this will work with up to 4K SDR resolutiion, as most dummy plugs go up to 4K"
+    echo "some games will try use the adapters max resolution on first boot and cause issues if" \
+        "the value is too low."
+    echo "Most ghost display adapters max out at 4k, hence the default value of" \
+        "${STATIC_SIZE_MB}mb."
+    echo ""
+    echo "If you need to change it to a different value"
+    echo "you can read how to do that in $MODPROBE_NOTE"
+    echo "$documentation_link"
+    echo ""
+}
+
+# --- module, kernel argument and device ---------------------------------------
+
+# The file carries no option: the static size is a kernel argument, and the
+# file tells the reader where to change it.
+write_modprobe_note() {
+    echo "Setting up kvmfr module so it loads next boot"
+
+    if [ -f "$MODPROBE_NOTE" ]; then
+        echo "Re-creating dummy kvmfr modprobe file"
+        sudo rm "$MODPROBE_NOTE"
+    fi
+
+    sudo bash -c "cat << KVMFR_MODPROBE > $MODPROBE_NOTE
+# This is a dummy file and changing it does nothing
+# If you want to change the kvmfr static_size_mb
+# Run \"rpm-ostree kargs --replace=kvmfr.static_size_mb=oldvalue=newvalue\"
+# Default value set by us is $STATIC_SIZE_MB which is enough for 4k SDR
+# Find the current value by running \"rpm-ostree kargs\"
+KVMFR_MODPROBE"
+}
+
+add_static_size_kernel_argument() {
+    rpm-ostree kargs --append-if-missing="kvmfr.static_size_mb=$STATIC_SIZE_MB"
+}
+
+# Looking Glass's rule, the group qemu's as Fedora names it.
+write_udev_rule() {
+    echo "Adding udev rule for /dev/kvmfr0"
+
+    sudo bash -c "cat << KVMFR_UDEV > $UDEV_RULE
+SUBSYSTEM==\"kvmfr\", GROUP=\"qemu\", MODE=\"0660\", TAG+=\"uaccess\"
+KVMFR_UDEV"
+}
+
+# Uncomments libvirt's default list with /dev/kvmfr0 appended. The match is
+# the whole commented block as libvirt ships it: on a libvirt whose list
+# differs the edit changes nothing (docs/gotchas.md § The kvmfr helper's
+# qemu.conf edit matches nothing on this base).
+add_device_to_qemu_cgroup_acl() {
+    echo "Adding /dev/kvmfr0 to qemu cgroup_device_acl"
+
+    sudo perl -0777 -pi -e 's/
+#cgroup_device_acl = \[
+#    "\/dev\/null", "\/dev\/full", "\/dev\/zero",
+#    "\/dev\/random", "\/dev\/urandom",
+#    "\/dev\/ptmx", "\/dev\/kvm",
+#    "\/dev\/userfaultfd"
+#\]
+/
+cgroup_device_acl = \[
+    "\/dev\/null", "\/dev\/full", "\/dev\/zero",
+    "\/dev\/random", "\/dev\/urandom",
+    "\/dev\/ptmx", "\/dev\/kvm",
+    "\/dev\/userfaultfd", "\/dev\/kvmfr0"
+\]
+/' "$QEMU_CONF"
+}
+
+load_module_now() {
+    echo "Loading kvmfr module so you do not have to reboot to use it the first time"
+    sudo modprobe kvmfr static_size_mb=$STATIC_SIZE_MB
+}
+
+# --- SELinux ------------------------------------------------------------------
+
+# The context the shared-memory file used to carry: the simplest one that works.
+set_device_context() {
+    echo "Adding SELinux context record for /dev/kvmfr0"
+    sudo semanage fcontext -a -t svirt_tmpfs_t /dev/kvmfr0
+}
+
+# No virt context grants access to kvmfr, so the policy is written here; it
+# stays under the user's config, where the closing message points.
+write_policy_source() {
+    echo "Adding SELinux access rules for /dev/kvmfr0"
+
+    mkdir -p "$POLICY_DIR/mod" "$POLICY_DIR/pp"
+
+    if [ -f "$POLICY_SOURCE" ]; then
+        echo "Re-creating kvmfr selinux type enforcement rules"
+        rm "$POLICY_SOURCE"
+    fi
+
+    cat << KVMFR_SELINUX > "$POLICY_SOURCE"
+module kvmfr 1.0;
+require {
+    type device_t;
+    type svirt_t;
+    class chr_file { open read write map };
+}
+#============= svirt_t ==============
+allow svirt_t device_t:chr_file { open read write map };
+KVMFR_SELINUX
+}
+
+show_policy_source() {
+    echo "This is the type enforcement we wrote for SELinux and you can find it in $POLICY_SOURCE"
+    echo "#======= start of kvmfr.te ======="
+    cat "$POLICY_SOURCE"
+    echo "#======== end of kvmfr.te ========"
+}
+
+# .te -> .mod -> .pp, then semodule loads the package.
+install_policy() {
+    checkmodule -M -m -o "$POLICY_DIR/mod/kvmfr.mod" "$POLICY_SOURCE"
+    semodule_package -o "$POLICY_DIR/pp/kvmfr.pp" -m "$POLICY_DIR/mod/kvmfr.mod"
+    sudo semodule -i "$POLICY_DIR/pp/kvmfr.pp"
+}
+
+# --- main ---------------------------------------------------------------------
+
+main() {
+    local confirm
+
+    print_disclaimer
+    confirm=$(Choose Ok Cancel)
+    if [ "$confirm" == "Cancel" ]; then
+        exit 0
+    fi
+
+    write_modprobe_note
+    add_static_size_kernel_argument
+    write_udev_rule
+    add_device_to_qemu_cgroup_acl
+    set_device_context
+
+    write_policy_source
+    show_policy_source
+    confirm=$(Choose OK)
+    install_policy
+
+    load_module_now
+    print_closing_notes
+
+    if [ -e "/dev/kvmfr0" ]; then
+        sudo chown "$USER:qemu" /dev/kvmfr0
+        # shellcheck disable=SC2154  # b and n: readonly names of ujust.sh's libformatting.sh
+        echo "${b}NOTE: You can start using kvmfr right now without rebooting${n}"
+    else
+        echo "Please reboot in order to fully load the kvmfr module."
+    fi
+
+    confirm=$(Choose OK)
+}
+
+main "$@"

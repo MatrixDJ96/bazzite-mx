@@ -49,6 +49,21 @@ version; this file carries the reasons and the measured facts behind them.
   writeback (`docs/gotchas.md` § Torn writeback: measured clean in 4 of 4 arms, reproduced on
   `ubuntu-24.04`), so no cold sweep and no helper exist; CI is pinned to that runner for it.
 
+## ujust recipes
+
+- A recipe that replaces one of Bazzite's ships in a file with the same name under
+  `system_files/usr/share/ublue-os/just/` (decision 1.5f: same name, upstream's recipe
+  removed). The base justfile imports the path, so nothing else changes; the base's file must
+  hold only the recipes we replace (`84-bazzite-virt.just`: one, measured 2026-09-02 with
+  `just --summary`), and a drift guard against the base's snapshot arrives with the justfile
+  feature.
+- Recipes are `just --unstable --fmt --check` clean and start with `source /usr/lib/ujust/ujust.sh`
+  (colours, `Choose`). A `help` action comes before the "not as root" check so the smoke test
+  can run the recipe body in the build.
+- What the image already does (a unit enabled, a package installed, a module option) is not
+  redone by a recipe: the recipe reports it (`status`) and does only what needs the host
+  (an opt-in module, a per-user choice).
+
 ## Boot hooks
 
 Scripts under `system_files/usr/share/ublue-os/system-setup.hooks.d/` run as root at every

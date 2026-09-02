@@ -1,68 +1,116 @@
 #!/usr/bin/env bash
-# bazzite-mx system-setup hook: every wheel member gets the groups of the
-# services this image ships (GROUPS_TARGET below). Converges on every boot:
-# no version stamp, no state file; a user created after the first boot is
-# picked up at the next one. bazzite-dx gates the same work behind
-# libsetup's version-script (privileged-setup.hooks.d/20-dx.sh:5), which
-# records the run BEFORE the body executes and so never repeats a failed
-# run nor reaches a later user.
+# Every wheel member gets the groups of the services this image ships, docker
+# and libvirt. Root, from ublue-system-setup.service, on every boot: no state
+# file, so a user created later is picked up at the next boot.
 #
-# Runs as root from ublue-system-setup.service (ublue-setup-services 0.1.8:
-# After=rpm-ostreed.service, Before=systemd-user-sessions.service). The
-# dispatcher invokes `bash <script>` and reads no exit status, so a failure
-# is printed loudly: the journal line is the only signal it leaves.
-#
-# The groups themselves exist in /usr/lib/group (package %post at build,
-# relocated there by 95-clean-stage.sh) and NSS resolves them
-# (nsswitch.conf: files, altfiles), but usermod edits /etc/group only, so the
-# line is copied over first (bazzite-dx 20-dx.sh:8-14 does the same).
-#
-# Fixture mode, used by build_files/tests/21-container-runtime.sh:
-# BAZZITE_MX_GROUPS_PREFIX names a tree with etc/passwd, etc/group and
-# usr/lib/group; usermod --prefix (shadow-utils 4.19) edits that tree.
+# Usage: 10-bazzite-mx-groups.sh        (root; ublue-system-setup runs it)
+#   BAZZITE_MX_GROUPS_PREFIX=<dir> names the tree the smoke test builds
+#   (etc/passwd, etc/group, usr/lib/group), which usermod --prefix edits.
+# Output: `bazzite-mx-groups: …` lines, the last one the count of wheel users
+#   and the groups (tests/21-container-runtime.sh reads it).
+# Exit status: 0 done; 1 a target group exists in neither group file, the
+#   groups named in a `bazzite-mx-groups: ERROR: …` line on stderr.
 set -euo pipefail
 
-GROUPS_TARGET=(docker)
+# tests/22-virtualization.sh reads this line for libvirt.
+GROUPS_TARGET=(docker libvirt)
+
 PREFIX=${BAZZITE_MX_GROUPS_PREFIX:-}
 ETC_GROUP=$PREFIX/etc/group
 LIB_GROUP=$PREFIX/usr/lib/group
-usermod_opts=()
-[ -z "$PREFIX" ] || usermod_opts=(--prefix "$PREFIX")
 
-# Members of a group as listed in /etc/group (human users live there).
+USERMOD_OPTIONS=()
+if [ -n "$PREFIX" ]; then
+    USERMOD_OPTIONS=(--prefix "$PREFIX")
+fi
+
+# Filled by copy_groups_to_etc: the target groups found in neither file.
+MISSING_GROUPS=()
+
+# --- the group files ----------------------------------------------------------
+
+# members_of <group>: one member per line, as /etc/group lists them (human
+# users live there).
 members_of() {
-    awk -F: -v g="$1" '$1 == g { n = split($4, m, ","); for (i = 1; i <= n; i++) if (m[i] != "") print m[i] }' "$ETC_GROUP"
+    local group=$1
+
+    awk -F: -v group="$group" '
+        $1 == group {
+            count = split($4, members, ",")
+            for (i = 1; i <= count; i++) {
+                if (members[i] != "") {
+                    print members[i]
+                }
+            }
+        }' "$ETC_GROUP"
+}
+
+group_in_etc() {
+    local group=$1
+
+    grep -q "^${group}:" "$ETC_GROUP"
 }
 
 # The groups exist in /usr/lib/group and NSS resolves them, but usermod edits
 # /etc/group only: the line is copied over first.
-missing=()
-for g in "${GROUPS_TARGET[@]}"; do
-    if grep -q "^${g}:" "$ETC_GROUP"; then
-        continue
-    fi
-    if line=$(grep "^${g}:" "$LIB_GROUP"); then
-        echo "bazzite-mx-groups: copying $g from $LIB_GROUP to $ETC_GROUP"
-        echo "$line" >> "$ETC_GROUP"
-    else
-        missing+=("$g")
-    fi
-done
+copy_groups_to_etc() {
+    local group line
 
-mapfile -t wheel < <(members_of wheel)
-for user in "${wheel[@]}"; do
-    for g in "${GROUPS_TARGET[@]}"; do
-        grep -q "^${g}:" "$ETC_GROUP" || continue
-        if members_of "$g" | grep -qx "$user"; then
+    for group in "${GROUPS_TARGET[@]}"; do
+        if group_in_etc "$group"; then
             continue
         fi
-        echo "bazzite-mx-groups: adding $user to $g"
-        usermod "${usermod_opts[@]}" -aG "$g" "$user"
-    done
-done
 
-if [ ${#missing[@]} -gt 0 ]; then
-    echo "bazzite-mx-groups: ERROR: group(s) ${missing[*]} exist in neither $ETC_GROUP nor $LIB_GROUP; no wheel user was added to them" >&2
-    exit 1
-fi
-echo "bazzite-mx-groups: ${#wheel[@]} wheel user(s) in ${GROUPS_TARGET[*]}"
+        if line=$(grep "^${group}:" "$LIB_GROUP"); then
+            echo "bazzite-mx-groups: copying $group from $LIB_GROUP to $ETC_GROUP"
+            echo "$line" >> "$ETC_GROUP"
+        else
+            MISSING_GROUPS+=("$group")
+        fi
+    done
+}
+
+# --- the wheel users ----------------------------------------------------------
+
+# add_wheel_users_to_groups <user>...: each user joins every target group
+# present in /etc/group that does not list them yet.
+add_wheel_users_to_groups() {
+    local user group members
+
+    for user in "$@"; do
+        for group in "${GROUPS_TARGET[@]}"; do
+            if ! group_in_etc "$group"; then
+                continue
+            fi
+
+            members=$(members_of "$group")
+            if grep -qx "$user" <<< "$members"; then
+                continue
+            fi
+
+            echo "bazzite-mx-groups: adding $user to $group"
+            usermod "${USERMOD_OPTIONS[@]}" -aG "$group" "$user"
+        done
+    done
+}
+
+# --- main ---------------------------------------------------------------------
+
+main() {
+    local wheel_users
+
+    copy_groups_to_etc
+
+    mapfile -t wheel_users < <(members_of wheel)
+    add_wheel_users_to_groups "${wheel_users[@]}"
+
+    if [ ${#MISSING_GROUPS[@]} -gt 0 ]; then
+        echo "bazzite-mx-groups: ERROR: group(s) ${MISSING_GROUPS[*]} exist in neither $ETC_GROUP" \
+            "nor $LIB_GROUP; no wheel user was added to them" >&2
+        exit 1
+    fi
+
+    echo "bazzite-mx-groups: ${#wheel_users[@]} wheel user(s) in ${GROUPS_TARGET[*]}"
+}
+
+main "$@"
