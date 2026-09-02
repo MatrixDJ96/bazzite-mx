@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Install, bazzite-mx</title>
+<meta name="description" content="Bringing a Bazzite host onto bazzite-mx step by step, and re-checking a host that already runs it." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23162032'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='monospace' font-size='28' font-weight='700' fill='%23f2f5f9'%3EMX%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header>
+  <p class="kicker">ghcr.io/matrixdj96</p>
+  <h1>Install</h1>
+  <p class="lead">A Bazzite host reaches the signed origin through <code>ujust migrate</code>. A
+    host already on the image is re-checked with <code>ujust verify-host</code>, which names every
+    defect and the recipe that fixes it.</p>
+</header>
+<nav aria-label="Site">
+  <ul>
+    <li><a href="index.html">Home</a></li>
+    <li><a href="images.html">Images</a></li>
+    <li><a href="install.html" aria-current="page">Install</a></li>
+    <li><a href="changes.html">What changes</a></li>
+    <li><a href="verify.html">Verify</a></li>
+    <li><a href="recipes.html">Recipes</a></li>
+    <li><a href="faq.html">FAQ</a></li>
+  </ul>
+</nav>
+<main>
+  <section id="new">
+    <h2>A Bazzite host that has never run the image</h2>
+    <ol class="steps">
+      <li>
+        <p>Rebase once through the unsigned transport. On an NVIDIA machine name
+          <code>bazzite-mx-nvidia-open</code> or <code>bazzite-mx-nvidia</code> instead.</p>
+<pre tabindex="0"><code>sudo rpm-ostree rebase ostree-unverified-registry:ghcr.io/matrixdj96/bazzite-mx:stable</code></pre>
+        <p>The rebase keeps whatever the host had layered; the migration's step 3 removes it.
+          When it fails on a
+          local package the image also ships, drop that request in the same transaction:</p>
+<pre tabindex="0"><code>rpm-ostree status --json | jq '.deployments[0]["requested-local-packages"]'
+sudo rpm-ostree upgrade --uninstall=&lt;name&gt;-&lt;version&gt;-&lt;release&gt;.&lt;arch&gt;</code></pre>
+      </li>
+      <li>
+        <p>Reboot into the new deployment.</p>
+<pre tabindex="0"><code>systemctl reboot</code></pre>
+      </li>
+      <li>
+        <p>Run the migration from a terminal: without one nothing is confirmed and the run
+          stops. <code>plan</code> is read-only.</p>
+<pre tabindex="0"><code>ujust migrate           # plan
+ujust migrate apply     # every step asks first</code></pre>
+        <p>Both print the plan, then stop on a pending deployment. They also stop on a booted
+          image whose policy has no <code>ghcr.io/matrixdj96</code> scope, which means step 1 has not
+          run. A
+          local <code>policy.json</code> shadowing the image's is named in that abort, and
+          <code>apply</code> offers to restore it. Then, each step behind its own confirmation and
+          skipped when already done:</p>
+        <div class="scroll" tabindex="0" role="region" aria-label="Table, scrolls sideways on narrow screens">
+        <table>
+          <tr><th>Step</th><th>What it does</th></tr>
+          <tr><td>0</td><td>restores <code>policy.json</code> and <code>registries.d</code> from the image, backup kept</td></tr>
+          <tr><td>2</td><td>backs up the status and <code>fstab</code>, pins the booted deployment, stops <code>uupd.timer</code> for the run</td></tr>
+          <tr><td>3</td><td><code>rpm-ostree uninstall --all</code>, dry run shown first: layered, local and inactive requests alike</td></tr>
+          <tr><td>4</td><td><code>rpm-ostree initramfs --disable</code>, so the image's initramfs boots</td></tr>
+          <tr><td>5</td><td><code>rpm-ostree rebase</code> onto <code>ostree-image-signed:docker://ghcr.io/matrixdj96/&lt;image&gt;:stable</code></td></tr>
+          <tr><td>6</td><td>rewrites the <code>ntfs</code> rows of <code>fstab</code> to <code>ntfs3</code>, type column only, after proving the driver loadable</td></tr>
+          <tr><td>6b</td><td>moves leftover ntfsplus files and a host's own modules-load file for <code>msi-ec</code> into the backup, and deletes ntfsplus kernel arguments</td></tr>
+          <tr><td>7</td><td>prints what stays with each user, then <code>rpm-ostree status</code></td></tr>
+        </table>
+        </div>
+        <p>Declining step 3, 4 or 5 aborts the run; declining 6 or 6b only skips it. Step 6 is
+          skipped on a host that opted into NTFSPLUS. The three rpm-ostree steps land in one
+          pending deployment.</p>
+      </li>
+      <li>
+        <p>Reboot, then check the host. Every line is <code>OK:</code>, or names its fix.</p>
+<pre tabindex="0"><code>systemctl reboot
+ujust verify-host</code></pre>
+      </li>
+    </ol>
+    <h3>What stays with you</h3>
+    <p>Nothing is uninstalled from Flatpak. The Firefox RPM reads <code>~/.mozilla</code> and the
+      Flatpak keeps its profile in <code>~/.var/app</code>, so copy it before the first RPM start.
+      Teams is a Flatpak you install yourself.</p>
+<pre tabindex="0"><code>[ -d ~/.mozilla ] || cp -a ~/.var/app/org.mozilla.firefox/.mozilla ~/
+flatpak uninstall org.mozilla.firefox          # when you are done with it
+flatpak install flathub com.github.IsmaelMartinez.teams_for_linux</code></pre>
+    <p>Rollback at any point before the unpin: <code>rpm-ostree rollback &amp;&amp; systemctl reboot</code>.
+      After a day of use, unpin the old deployment with <code>sudo ostree admin pin -u &lt;index&gt;</code>.
+      <code>rpm-ostree status</code> prints that index.</p>
+  </section>
+
+  <section id="already">
+    <h2>A host already on the image</h2>
+    <p><code>ujust verify-host</code> is the whole procedure: one <code>OK:</code>,
+      <code>FAIL:</code>, <code>SKIP:</code> or <code>INFO:</code> line per check, exit 1 on any
+      <code>FAIL:</code>. The lines a host is most likely to see:</p>
+    <div class="scroll" tabindex="0" role="region" aria-label="Table, scrolls sideways on narrow screens">
+    <table>
+      <tr><th>FAIL line</th><th>Fix</th></tr>
+      <tr><td><code>bootc status reports the booted deployment incompatible</code></td><td><code>ujust migrate</code>: an rpm-ostree group is left in the origin</td></tr>
+      <tr><td><code>origin is not ostree-image-signed:...</code></td><td><code>ujust migrate apply</code></td></tr>
+      <tr><td><code>origin tag is X, not stable</code></td><td><code>ujust migrate apply stable</code>: a dated tag never updates</td></tr>
+      <tr><td><code>rpm-ostree mutations in the origin: ...</code></td><td><code>ujust migrate</code>, which runs <code>rpm-ostree uninstall --all</code></td></tr>
+      <tr><td><code>policy.json has no sigstoreSigned scope</code></td><td><code>ostree admin config-diff</code>, then <code>ujust migrate apply</code></td></tr>
+      <tr><td><code>MSI host: msi_ec not loaded</code></td><td><code>ujust setup-msi enable</code></td></tr>
+      <tr><td><code>NVIDIA GPU present but the image is bazzite-mx</code></td><td>rebase to <code>bazzite-mx-nvidia-open</code>, or <code>bazzite-mx-nvidia</code> for the closed driver</td></tr>
+      <tr><td><code>fstab: &lt;target&gt; uses type ntfs without the ntfsplus opt-in</code></td><td><code>ujust setup-ntfsplus enable</code>, or <code>ujust migrate</code> for <code>ntfs3</code></td></tr>
+      <tr><td><code>fstab: &lt;target&gt; is &lt;type&gt; but not mounted</code></td><td>a dirty NTFS volume is the usual reason: a full shutdown on Windows, or <code>ntfsfix -d</code></td></tr>
+    </table>
+    </div>
+    <p>The complete map, one row per line, is in
+      <a href="https://github.com/MatrixDJ96/bazzite-mx/blob/main/docs/migration.md">docs/migration.md</a>.
+      An <code>INFO:</code> line is not a failure: the Firefox Flatpak still installed, the
+      <code>ntfs</code> driver not registered yet, <code>fstab</code> rows left on <code>ntfs-3g</code>.</p>
+  </section>
+</main>
+<footer>
+  <p>A single-maintainer image, built in the open, not affiliated with Bazzite or Universal
+    Blue. Rebase at your own risk. Source under Apache-2.0.</p>
+</footer>
+</body>
+</html>

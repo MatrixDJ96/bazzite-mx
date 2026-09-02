@@ -29,7 +29,9 @@
       "Bash(./.github/scripts/refresh-pins.sh --check)",
       "Bash(./.github/scripts/refresh-pins.sh --self-test)",
       "Bash(./.github/scripts/watch-upstream.sh check:*)",
-      "Bash(./.github/scripts/watch-upstream.sh --self-test)"
+      "Bash(./.github/scripts/watch-upstream.sh --self-test)",
+      "Bash(./.github/scripts/check-site.sh:*)",
+      "Bash(./.github/scripts/install-oras.sh:*)"
     ],
     "deny": [
       "Bash(git push --force:*)",

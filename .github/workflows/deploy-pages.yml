@@ -1,0 +1,54 @@
+# site/ to GitHub Pages, on a push to main that touches the site, its check
+# or this file, and on a dispatch. One deployment at a time and none
+# cancelled: an interrupted one would leave nothing to roll back to
+# (docs/workflow.md § The site).
+name: Deploy Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - .github/scripts/check-site.sh
+      - .github/workflows/deploy-pages.yml
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: bazzite-mx-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # First, so a page that drifted or does not parse is never uploaded.
+      - name: Check Site
+        run: ./.github/scripts/check-site.sh site
+
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

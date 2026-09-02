@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>bazzite-mx</title>
+<meta name="description" content="A personal bootc image on Bazzite: the three images, how to move a host onto one and how to verify what it pulls." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23162032'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='monospace' font-size='28' font-weight='700' fill='%23f2f5f9'%3EMX%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header>
+  <p class="kicker">ghcr.io/matrixdj96</p>
+  <h1>bazzite-mx</h1>
+  <p class="lead">A personal <a href="https://bootc-dev.github.io/bootc/">bootc</a> image on
+    <a href="https://bazzite.gg">Bazzite</a>, KDE desktop, <code>stable</code> stream: kernel
+    modules, services, vendor repositories, signing trust and the <code>ujust</code> recipes.</p>
+</header>
+<nav aria-label="Site">
+  <ul>
+    <li><a href="index.html" aria-current="page">Home</a></li>
+    <li><a href="images.html">Images</a></li>
+    <li><a href="install.html">Install</a></li>
+    <li><a href="changes.html">What changes</a></li>
+    <li><a href="verify.html">Verify</a></li>
+    <li><a href="recipes.html">Recipes</a></li>
+    <li><a href="faq.html">FAQ</a></li>
+  </ul>
+</nav>
+<main>
+  <section id="images">
+    <h2>Three images, one recipe</h2>
+    <p>Only the base image differs. Pick the one your graphics stack needs.</p>
+    <ul class="board">
+      <li><span class="ref">ghcr.io/matrixdj96/bazzite-mx:stable</span><span class="base">on ghcr.io/ublue-os/bazzite:stable</span><span class="for">AMD or Intel graphics</span></li>
+      <li><span class="ref">ghcr.io/matrixdj96/bazzite-mx-nvidia-open:stable</span><span class="base">on ghcr.io/ublue-os/bazzite-nvidia-open:stable</span><span class="for">NVIDIA, open kernel modules (Turing and newer)</span></li>
+      <li><span class="ref">ghcr.io/matrixdj96/bazzite-mx-nvidia:stable</span><span class="base">on ghcr.io/ublue-os/bazzite-nvidia:stable</span><span class="for">NVIDIA, closed driver</span></li>
+    </ul>
+    <p>Follow <code>:stable</code>. The <a href="images.html">images page</a> has the other tags, the update command and the rollback.</p>
+  </section>
+
+  <section id="start">
+    <h2>Start here</h2>
+    <p>Five commands from a Bazzite host. The first rebase is unsigned: stock Bazzite trusts
+      nothing under <code>ghcr.io/matrixdj96</code>. <code>ujust migrate</code> moves the host onto
+      the signed origin, asking before every change.</p>
+<pre tabindex="0"><code>sudo rpm-ostree rebase ostree-unverified-registry:ghcr.io/matrixdj96/bazzite-mx:stable
+systemctl reboot
+ujust migrate apply
+systemctl reboot
+ujust verify-host</code></pre>
+    <p>On an NVIDIA machine name <code>bazzite-mx-nvidia-open</code> instead, or
+      <code>bazzite-mx-nvidia</code> for the closed driver. Step by step: <a href="install.html">install</a>.</p>
+  </section>
+
+  <section id="verify">
+    <h2>Verify an image</h2>
+    <p>Every published image is signed by digest with
+      <a href="https://raw.githubusercontent.com/MatrixDJ96/bazzite-mx/main/cosign.pub">cosign.pub</a>,
+      the key the image itself trusts, and attested by the workflow run that built it. The
+      <a href="verify.html">verify page</a> has both commands, the SBOM, the release gate and the
+      checks a migrated host makes on its own.</p>
+  </section>
+</main>
+<footer>
+  <p>A single-maintainer image, built in the open, not affiliated with Bazzite or Universal
+    Blue. Rebase at your own risk. Source under Apache-2.0:
+    <a href="https://github.com/MatrixDJ96/bazzite-mx">MatrixDJ96/bazzite-mx</a>.</p>
+</footer>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Recipes, bazzite-mx</title>
+<meta name="description" content="The ujust recipes bazzite-mx adds to Bazzite's, and the three it replaces, with their options." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23162032'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='monospace' font-size='28' font-weight='700' fill='%23f2f5f9'%3EMX%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header>
+  <p class="kicker">ghcr.io/matrixdj96</p>
+  <h1>Recipes</h1>
+  <p class="lead">Nine <code>ujust</code> recipes come from this image, three of them in place of
+    a Bazzite recipe of the same name. Each answers <code>ujust &lt;name&gt; help</code>, and none
+    runs as root: they call <code>sudo</code> where a step needs it.</p>
+</header>
+<nav aria-label="Site">
+  <ul>
+    <li><a href="index.html">Home</a></li>
+    <li><a href="images.html">Images</a></li>
+    <li><a href="install.html">Install</a></li>
+    <li><a href="changes.html">What changes</a></li>
+    <li><a href="verify.html">Verify</a></li>
+    <li><a href="recipes.html" aria-current="page">Recipes</a></li>
+    <li><a href="faq.html">FAQ</a></li>
+  </ul>
+</nav>
+<main>
+  <section id="own">
+    <h2>Added by the image</h2>
+    <dl class="recipes">
+      <dt>ujust migrate [plan|apply] [TAG]</dt>
+      <dd>Brings this host to the state the image expects, one confirmation per step, the reboot
+        left to you. <code>plan</code> is read-only and the default; <code>TAG</code> defaults to
+        <code>stable</code>. Step by step: <a href="install.html">install</a>.</dd>
+      <dt>ujust verify-host</dt>
+      <dd>Checks the host against what the image expects and prints one line per check, exiting 1
+        on any <code>FAIL:</code>. Every failing line names its fix
+        (<a href="install.html">install</a>).</dd>
+      <dt>ujust setup-ntfsplus [status|enable|disable]</dt>
+      <dd>Uses the NTFSPLUS driver for this host's NTFS volumes. <code>enable</code> proves the
+        driver on a loop image, switches the <code>fstab</code> rows from <code>ntfs3</code> to
+        <code>ntfs</code> and remounts what is not busy; <code>disable</code> is the reverse.</dd>
+      <dt>ujust setup-msi [status|enable|disable]</dt>
+      <dd>Only on an MSI system. <code>enable</code> loads <code>msi-ec</code> and
+        <code>acpi_ec</code> now and at boot and installs MControlCenter; <code>disable</code>
+        undoes both. The modules are unsigned, so Secure Boot has to be off.</dd>
+      <dt>ujust setup-panels</dt>
+      <dd>Runs the image's Plasma panel script again in the running session, for a login that had
+        one screen or a screen added later. Every screen without a panel gets one.</dd>
+      <dt>ujust setup-dev [status|install]</dt>
+      <dd><code>install</code> seeds <code>~/.config/mise/config.toml</code> from the image's
+        default when you have none, then runs <code>mise install</code> for this user. A project's
+        own <code>mise.toml</code> wins over the global config.</dd>
+    </dl>
+  </section>
+
+  <section id="replaced">
+    <h2>In place of Bazzite's</h2>
+    <dl class="recipes">
+      <dt>ujust setup-virtualization [status|kvmfr]</dt>
+      <dd>Bazzite's version installs the virt-manager Flatpak, enables the monolithic libvirt
+        daemon and adds kernel arguments. All of that is in the image here, so <code>status</code>
+        reports what the host has and <code>kvmfr</code> sets up the module for Looking Glass.</dd>
+      <dt>ujust setup-sunshine [status|enable|disable|portal|virtual-monitor]</dt>
+      <dd>Bazzite's version installs a Flatpak or a Homebrew build per host. Sunshine is an RPM of
+        the image here, so <code>enable</code> and <code>disable</code> switch the user unit.
+        <code>portal</code> opens the management page and <code>virtual-monitor</code> adds a KWin
+        virtual display per stream.</dd>
+      <dt>ujust install-jetbrains-toolbox [install|status|latest]</dt>
+      <dd>Bazzite's version installs a Homebrew cask. This one downloads the newest Toolbox build
+        from JetBrains' release feed, verifies its sha256 against the feed, unpacks it under
+        <code>~/.local/share/JetBrains/ToolboxApp</code> and starts it once.</dd>
+    </dl>
+    <p>What each recipe does under the hood, with its sources, is in
+      <a href="https://github.com/MatrixDJ96/bazzite-mx/blob/main/docs/divergences.md">docs/divergences.md</a>.</p>
+  </section>
+</main>
+<footer>
+  <p>A single-maintainer image, built in the open, not affiliated with Bazzite or Universal
+    Blue. Rebase at your own risk. Source under Apache-2.0.</p>
+</footer>
+</body>
+</html>

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>What changes, bazzite-mx</title>
+<meta name="description" content="What bazzite-mx changes over Bazzite, area by area, and the rule that admits a change." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23162032'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='monospace' font-size='28' font-weight='700' fill='%23f2f5f9'%3EMX%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header>
+  <p class="kicker">ghcr.io/matrixdj96</p>
+  <h1>What changes</h1>
+  <p class="lead">A change enters the image on four conditions. Bazzite must not cover it
+    already. It must need the image layer, be used by a machine that runs the image, and ship a
+    smoke test with its source cited.</p>
+</header>
+<nav aria-label="Site">
+  <ul>
+    <li><a href="index.html">Home</a></li>
+    <li><a href="images.html">Images</a></li>
+    <li><a href="install.html">Install</a></li>
+    <li><a href="changes.html" aria-current="page">What changes</a></li>
+    <li><a href="verify.html">Verify</a></li>
+    <li><a href="recipes.html">Recipes</a></li>
+    <li><a href="faq.html">FAQ</a></li>
+  </ul>
+</nav>
+<main>
+  <section id="trust">
+    <h2>Signing trust for these images</h2>
+    <p>Bazzite verifies <code>ghcr.io/ublue-os/*</code> and says nothing about downstream images.
+      This image installs its own key and a policy scope for <code>ghcr.io/matrixdj96</code>, so a
+      host checks every pull of it (<a href="verify.html">verify</a>).</p>
+  </section>
+  <section id="hooks">
+    <h2>Setup hooks at boot and at login</h2>
+    <p>The base ships no hook dispatcher. <code>ublue-setup-services</code> from the Universal
+      Blue COPR runs system hooks at boot and user hooks at login. That is how wheel members get
+      the <code>docker</code> and <code>libvirt</code> groups, and how each account gets its editor
+      extensions. A hook converges instead of stamping a version, so an account created later is
+      picked up at the next boot.</p>
+  </section>
+  <section id="docker">
+    <h2>Docker CE next to Podman</h2>
+    <p>Bazzite ships Podman only. The image adds Docker CE with the buildx and compose plugins
+      from Docker's own repository, and leaves both sockets enabled. It loads
+      <code>iptable_nat</code> for docker-in-docker and brings Fedora's
+      <code>podman-compose</code>, <code>podman-machine</code>, <code>podman-tui</code> and
+      <code>bcvk</code>. The <code>docker</code> group is root-equivalent: wheel members get it
+      at boot, and <code>gpasswd -d &lt;user&gt; docker</code> takes it away.</p>
+  </section>
+  <section id="virt">
+    <h2>Virtualization in the image</h2>
+    <p>Bazzite installs the virt-manager Flatpak and enables the monolithic libvirt daemon per
+      host. Here libvirt with the modular daemons, QEMU/KVM, virt-manager, virt-viewer, swtpm and
+      quickemu are in the image. The Flatpak is denied through the base's filter, and the
+      <code>libvirt</code> group is granted to wheel at boot. That leaves
+      <code>ujust setup-virtualization</code> the status report and the opt-in
+      <code>kvmfr</code> module for Looking Glass.</p>
+  </section>
+  <section id="dev">
+    <h2>Editor and runtimes</h2>
+    <p>Visual Studio Code is Microsoft's RPM, so it follows the image and its updater is off in
+      the seeded settings. A login hook installs the containers, remote containers and remote SSH
+      extensions for any account that lacks them.</p>
+    <p><code>mise</code> comes from the COPR its documentation names and is activated for
+      interactive bash. Its seeded config names node lts, python 3.14, java temurin-21 and dotnet
+      10, which <code>ujust setup-dev install</code> provisions per user.</p>
+  </section>
+  <section id="cli">
+    <h2>Command-line and git tools</h2>
+    <p><code>gh</code>, <code>glab</code>, ShellCheck and shfmt are in the image. So is a
+      system-administration set: <code>android-tools</code>, <code>bcc</code> and its tools,
+      <code>bpftop</code>, <code>bpftrace</code>, <code>ccache</code>, <code>flatpak-builder</code>,
+      <code>iotop-c</code>, <code>nicstat</code>, <code>numactl</code>, <code>ripgrep</code>,
+      <code>sysprof</code> and <code>trace-cmd</code>. All from Fedora, none in the base.</p>
+    <p>GitKraken is an RPM from the vendor's own URL rather than a Flatpak, next to
+      <code>git-credential-libsecret</code>. That RPM carries no OpenPGP signature, so the build
+      checks its payload digests before installing it.</p>
+  </section>
+  <section id="desktop">
+    <h2>Desktop applications</h2>
+    <p>Firefox returns as an RPM, because 1Password's browser integration goes through a host
+      binary a sandboxed Firefox cannot reach. Its Flatpak is denied through the base's filter, and
+      one already installed stays until you remove it. gparted comes from Fedora.</p>
+    <p>1Password is installed at build time, which is what keeps <code>bootc status</code>
+      compatible where layering it on the host would not. Teams is not preinstalled: the migration
+      recipe prints the Flatpak install command instead.</p>
+  </section>
+  <section id="sunshine">
+    <h2>Sunshine as an RPM</h2>
+    <p>Bazzite dropped its Sunshine RPM for the Flatpak, which cannot do KMS capture. The RPM from
+      the LizardByte COPR is in the image with the capabilities, udev rules and user unit its
+      package ships. That unit is disabled for every user, so streaming is opt-in through
+      <code>ujust setup-sunshine enable</code>.</p>
+  </section>
+  <section id="kde">
+    <h2>KDE defaults</h2>
+    <p>Two Plasma update scripts reach existing accounts at their next login as well as new ones.
+      The clock shows seconds, and every screen without a panel gets a bottom panel like the
+      primary one. Seeded Konsole and PowerShell files give new accounts Windows-style Ctrl+C and
+      Ctrl+V, while Ctrl+C still interrupts the shell when nothing is selected.</p>
+  </section>
+  <section id="msi">
+    <h2>MSI laptop: kernel modules and MControlCenter</h2>
+    <p>Fan curves, shift modes, keyboard backlight and battery thresholds of an MSI laptop are
+      reachable only through its embedded controller. The image builds the out-of-tree
+      <code>msi-ec</code> and <code>acpi_ec</code> modules against its own kernel, unsigned.
+      Nothing loads them until
+      <code>ujust setup-msi enable</code>, which is gated on the DMI vendor and also installs
+      MControlCenter under <code>/usr/local</code>.</p>
+  </section>
+  <section id="ntfsplus">
+    <h2>NTFSPLUS as a per-host opt-in</h2>
+    <p>The in-kernel <code>ntfs3</code> is the default for NTFS volumes, and
+      <code>ujust migrate</code> moves <code>fstab</code> rows onto it. NTFSPLUS is the
+      from-scratch NTFS driver of Linux 7.1 that the ogc kernel leaves disabled. It ships
+      blacklisted until <code>ujust setup-ntfsplus enable</code> proves it on a loop image and
+      switches the rows. The generic <code>mount.ntfs</code> helpers are removed, so the type
+      <code>ntfs</code> reaches the kernel rather than FUSE, and <code>ntfs-3g</code> stays an
+      explicit type.</p>
+  </section>
+  <section id="recipes">
+    <h2>Recipes and the build</h2>
+    <p>Nine <code>ujust</code> recipes come from this image, three of them in place of a Bazzite
+      recipe of the same name (<a href="recipes.html">recipes</a>). Every feature is one build
+      script with one smoke test that runs offline, and the build ends with
+      <code>bootc container lint --fatal-warnings</code>. Every guard has to fail on known-bad
+      input before its first all-clear counts. Each change above is written up with its sources in
+      <a href="https://github.com/MatrixDJ96/bazzite-mx/blob/main/docs/divergences.md">docs/divergences.md</a>.</p>
+  </section>
+</main>
+<footer>
+  <p>A single-maintainer image, built in the open, not affiliated with Bazzite or Universal
+    Blue. Rebase at your own risk. Source under Apache-2.0.</p>
+</footer>
+</body>
+</html>

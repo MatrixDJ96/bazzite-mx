@@ -128,22 +128,31 @@ jobs:
         run: |
           set -euo pipefail
           just --version
-          mapfile -t files < <(git ls-files '*.just')
-          for f in "${files[@]}"; do just --unstable --fmt --check --justfile "$f"; done
-          echo "just --fmt --check ok: ${#files[@]} files"
 
-      - name: Prove the CI scripts fail closed
-        run: |
-          set -euo pipefail
-          for s in resolve-base image-labels check-image release-tag gate-release changelog refresh-pins watch-upstream; do
-            "./.github/scripts/$s.sh" --self-test
+          mapfile -t files < <(git ls-files '*.just')
+          for f in "${files[@]}"; do
+            just --unstable --fmt --check --justfile "$f"
           done
 
-  # The callee's job declares the permissions its publishing steps need and
-  # a caller may only maintain or reduce them (GitHub docs, reusable
-  # workflows), so the same set is granted here; no step of a sandbox or
-  # main run uses the write half (every publishing step is behind
-  # `if: inputs.publish`, and `publish` is never passed from here).
+          echo "just --fmt --check ok: ${#files[@]} files"
+
+      - name: Check Site
+        run: ./.github/scripts/check-site.sh site
+
+      # Every guard is shown refusing known-bad input before the build trusts
+      # it (docs/conventions.md § Positive control).
+      - name: Run Self-Tests
+        run: |
+          set -euo pipefail
+
+          for s in ./.github/scripts/*.sh; do
+            "$s" --self-test
+          done
+
+          ./build_files/tests/run.sh --self-test
+
+  # A caller may only maintain or reduce the callee's permissions (GitHub docs,
+  # reusable workflows), so the publishing set is granted here and left unused.
   build:
     name: Build
     needs: lint
