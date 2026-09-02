@@ -18,6 +18,10 @@ declare -A KEY_FPR=(
     # "jdxcode_mise (None) <jdxcode#mise@copr.fedorahosted.org>"
     # download.copr.fedorainfracloud.org/results/jdxcode/mise/pubkey.gpg
     ["/etc/pki/rpm-gpg/RPM-GPG-KEY-copr-jdxcode-mise"]=9504792D1F9CCA1514FD1DEC8497A816C83E991C
+
+    # "Code signing for 1Password <codesign@1password.com>"
+    # downloads.1password.com/linux/keys/1password.asc
+    ["/etc/pki/rpm-gpg/RPM-GPG-KEY-1password"]=3FEF9748469ADBE15DA7CA80AC2D62742012EA22
 )
 
 # The primary key's fingerprint of an armored key file, 40 upper-case hex

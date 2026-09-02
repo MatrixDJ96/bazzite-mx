@@ -173,6 +173,8 @@ known-bad still red after it. The rules above add to the earlier bullets of this
   writes to an override file under `/etc/dnf/repos.override.d/` and leaves the repository file
   untouched (`man dnf5-config-manager`), so the state would sit in a file the gate's byte
   comparison never reads; its `dnf5 repolist` comparison is what fails the build on it.
+  1Password forces the rule: its `%post` rewrites the vendored file with `enabled=1`, the build
+  puts the vendored copy back, and the gate proves it.
 - Nothing is pinned to a release for vendor RPMs and GitHub releases: the build resolves the
   latest, and a pin enters only against an observed problem, with the observation cited. One
   exception: the base image is pinned to the digest CI resolved (`resolve-base.sh`), so the
@@ -184,6 +186,12 @@ known-bad still red after it. The rules above add to the earlier bullets of this
   reviewable diff and never a download at build time. The one exception is the base's own
   `ublue-os/packages` COPR file, used as the base ships it, its key read over https as
   bazzite-dx reads it.
+- A package that unpacks under `/opt` needs `mkdir -p /var/opt` before its install: `/opt` is a
+  symlink to `var/opt` and the directory does not exist in a build. Nothing else is needed,
+  because `80-fix-opt.sh` moves every `/var/opt/<name>` to `/usr/lib/opt/<name>` and writes one
+  tmpfiles `L+` line per name to recreate the link on the host. Paths baked into the
+  application keep their `/opt/...` form, so its smoke test checks them with `readlink` and not
+  with `-x`: the link dangles in the build.
 - A package `%post` runs in the build, not on the host. Read it with `rpm -qp --scripts` before
   the package enters a script, and handle every effect that belongs to a host explicitly. A
   `groupadd` in a `%post` lands in `/etc/group`; `95-clean-stage.sh` relocates the accounts to
@@ -276,7 +284,7 @@ Where each one runs:
 | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.github/scripts/*.sh`                                    | `lint` job, `build.yml`                                                                                                                                   |
 | `check-form.sh`                                           | `lint` job, `build.yml`, which then runs the check itself over the whole shell catalogue; `.claude/hooks/lint-edit.sh` runs it on every edited shell file |
-| `90-validate-repos.sh`                                    | the test RUN, called by its paired test                                                                                                                   |
+| `80-fix-opt.sh`, `90-validate-repos.sh`                   | the test RUN, called by their paired test                                                                                                                 |
 | `tests/run.sh`                                            | `lint` job, `build.yml`, after the CI scripts                                                                                                             |
 
 ## CI
