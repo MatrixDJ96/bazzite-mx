@@ -16,14 +16,20 @@ source.
 ## Layout
 
 ```
-Containerfile               one recipe; BASE_IMAGE is the only variable; last step: bootc container lint
+Containerfile               one recipe; BASE_IMAGE is the only variable; RUN build, RUN tests, RUN lint
+build_files/build.sh        orchestrator: NN-<feature>.sh in version order
+build_files/lib/            env.sh (paths, sourced first), log.sh, repos.sh (install_from_repo, copr_install_isolated)
+build_files/NN-<feature>.sh one script per feature (00 prep … 90 validate-repos, 95 clean-stage)
+build_files/tests/          run.sh (runner + pairing guard) and one NN-<feature>.sh test per script
 .github/scripts/            resolve-base.sh (base digest + kernel, one owner, --self-test)
 .github/workflows/          build.yml (sandbox: lint + both flavours, no push, no release)
 .claude/                    Claude Code: settings.json, hooks/lint-edit.sh, commands/preflight.md
+docs/                       architecture.md (build flow, state, gates), conventions.md (bash, tests, CI, commits)
 ```
 
-Build scripts (`build_files/`), system files (`system_files/`), tests and the release pipeline
-arrive one feature per commit; this file grows with them.
+System files (`system_files/`), the remaining features and the release pipeline arrive one
+feature per commit; this file grows with them. Read `docs/architecture.md` before adding a
+script and `docs/conventions.md` before writing one.
 
 ## Rules
 
@@ -33,8 +39,12 @@ arrive one feature per commit; this file grows with them.
    `quay.io/fedora/fedora:44` and the edit hook does the same when the host binary is another
    minor, so hook, CI and image agree.
 2. **Every check is proven on a known-bad input before its first green run**: a script that
-   guards something ships a `--self-test` that makes it fail (`resolve-base.sh --self-test` is
-   the pattern). A green check that was never seen red proves nothing.
+   guards something ships a `--self-test` that makes it fail (`resolve-base.sh`,
+   `90-validate-repos.sh`, `tests/run.sh`). A green check that was never seen red proves
+   nothing.
+2b. **Every build script has a smoke test with the same stem** under `build_files/tests/`;
+   `tests/run.sh` refuses the build otherwise. Tests print `OK:`/`FAIL:` lines and run offline
+   on the cleaned tree.
 3. **Nothing is pinned to a version** for RPMs from vendors or GitHub releases: the build
    resolves the latest release. A pin enters only against a measured problem, with the
    measurement cited. The base image is the exception in the other direction: CI resolves
