@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+# MSI laptop support for one host: the msi-ec and acpi_ec modules the image
+# ships and MControlCenter, the fan and battery GUI, installed from the
+# project's own binary tarball. The root half of `ujust setup-msi`.
+#
+#   status | enable | disable | latest | fetch <dir> | install <tarball> | remove
+set -euo pipefail
+
+MODULES=(msi-ec acpi_ec)
+MODULES_LOAD=/etc/modules-load.d/bazzite-mx-msi.conf
+REPO=dmitry-s93/MControlCenter
+# Fixture knobs for the smoke test: ROOT prefixes every installed path,
+# DMI_VENDOR_FILE replaces the DMI vendor node.
+ROOT=${ROOT:-}
+DMI_VENDOR_FILE=${DMI_VENDOR_FILE:-/sys/class/dmi/id/sys_vendor}
+# Upstream installs under /usr, which is the image here, so everything moves
+# to /usr/local and /etc: dbus-broker's launcher searches
+# /usr/local/share/dbus-1/system-services and /etc/dbus-1/system.d is an
+# <includedir> of system.conf. The helper goes to /usr/local/bin because
+# SELinux labels it bin_t, while /usr/local/libexec has no file_contexts
+# entry and falls to usr_t. Privilege model is upstream's: D-Bus activates
+# the helper as root and every local user may talk to it, no polkit.
+PREFIX=/usr/local
+DBUS_CONF_DIR=/etc/dbus-1/system.d
+VERSION_FILE=$PREFIX/share/mcontrolcenter/version
+DBUS_NAME=mcontrolcenter.helper
+# What the tarball must carry under <top>/app/ (upstream's scripts/install.sh).
+APP_FILES=(mcontrolcenter mcontrolcenter-helper mcontrolcenter-helper.conf mcontrolcenter.helper.service mcontrolcenter.desktop mcontrolcenter.svg)
+# Scratch for downloads and extraction, gone on every exit path.
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+need_root() {
+    [ "$(id -u)" -eq 0 ] || die "$1 needs root (ujust setup-msi runs it through sudo)"
+}
+
+is_msi() {
+    grep -qi 'micro-star' "$DMI_VENDOR_FILE" 2> /dev/null
+}
+
+installed_version() {
+    cat "$ROOT$VERSION_FILE" 2> /dev/null || true
+}
+
+# Installed files: cmd_remove reads the same list.
+installed_paths() {
+    printf '%s\n' \
+        "$PREFIX/bin/mcontrolcenter" \
+        "$PREFIX/bin/mcontrolcenter-helper" \
+        "$PREFIX/share/applications/mcontrolcenter.desktop" \
+        "$PREFIX/share/icons/hicolor/scalable/apps/mcontrolcenter.svg" \
+        "$PREFIX/share/dbus-1/system-services/$DBUS_NAME.service" \
+        "$DBUS_CONF_DIR/mcontrolcenter-helper.conf" \
+        "$VERSION_FILE"
+}
+
+# check_tarball <tarball>: prints the top directory (MControlCenter-<ver>-bin)
+# or fails naming what is missing.
+check_tarball() {
+    local tarball=$1 list top f
+    [ -s "$tarball" ] || die "$tarball missing or empty"
+    list=$(tar tzf "$tarball") || die "$tarball is not a gzip tarball"
+    top=$(head -n1 <<< "$list")
+    top=${top%%/*}
+    [[ $top =~ ^MControlCenter-[0-9][0-9.]*-bin$ ]] || die "$tarball: unexpected top directory '$top'"
+    for f in "${APP_FILES[@]}"; do
+        grep -qx "$top/app/$f" <<< "$list" || die "$tarball: $top/app/$f missing (layout changed upstream?)"
+    done
+    echo "$top"
+}
+
+# The running system bus reads the new service and policy files only after
+# ReloadConfig.
+dbus_reload() {
+    busctl --system call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig > /dev/null
+}
+
+dbus_activatable() {
+    local names
+    # Captured first: `busctl | grep -q` under pipefail reports a failure
+    # when grep stops reading before busctl is done (SIGPIPE).
+    names=$(busctl --system list --activatable --no-legend 2> /dev/null | awk '{ print $1 }') || return 1
+    grep -qx "$DBUS_NAME" <<< "$names"
+}
+
+cmd_latest() {
+    local json tag url
+    json=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest") || die "GitHub API: releases/latest of $REPO unreachable"
+    tag=$(jq -r '.tag_name' <<< "$json")
+    url=$(jq -r --arg name "MControlCenter-$tag-bin.tar.gz" '.assets[] | select(.name == $name) | .browser_download_url' <<< "$json")
+    [ -n "$tag" ] && [ "$tag" != null ] || die "GitHub API: no tag_name in the latest release"
+    [ -n "$url" ] || die "release $tag carries no MControlCenter-$tag-bin.tar.gz asset"
+    echo "$tag $url"
+}
+
+cmd_fetch() {
+    local dir=$1 tag url file
+    [ -d "$dir" ] || die "fetch: $dir is not a directory"
+    read -r tag url < <(cmd_latest)
+    file=$dir/MControlCenter-$tag-bin.tar.gz
+    curl -fsSL -o "$file" "$url" || die "download of $url failed"
+    echo "$file $(sha256sum "$file" | cut -d' ' -f1)"
+}
+
+cmd_install() {
+    local tarball=$1 top tmp app version service
+    top=$(check_tarball "$tarball")
+    version=${top#MControlCenter-}
+    version=${version%-bin}
+    tmp=$WORK/install
+    rm -rf "$tmp"
+    mkdir -p "$tmp"
+    tar xzf "$tarball" -C "$tmp"
+    app=$tmp/$top/app
+    install -Dm755 "$app/mcontrolcenter" "$ROOT$PREFIX/bin/mcontrolcenter"
+    install -Dm755 "$app/mcontrolcenter-helper" "$ROOT$PREFIX/bin/mcontrolcenter-helper"
+    install -Dm644 "$app/mcontrolcenter.desktop" "$ROOT$PREFIX/share/applications/mcontrolcenter.desktop"
+    install -Dm644 "$app/mcontrolcenter.svg" "$ROOT$PREFIX/share/icons/hicolor/scalable/apps/mcontrolcenter.svg"
+    install -Dm644 "$app/mcontrolcenter-helper.conf" "$ROOT$DBUS_CONF_DIR/mcontrolcenter-helper.conf"
+    # The activation file names the helper's path: rewritten to ours.
+    service=$ROOT$PREFIX/share/dbus-1/system-services/$DBUS_NAME.service
+    sed "s|^Exec=.*|Exec=$PREFIX/bin/mcontrolcenter-helper|" "$app/$DBUS_NAME.service" > "$tmp/service"
+    grep -qx "Exec=$PREFIX/bin/mcontrolcenter-helper" "$tmp/service" || die "$DBUS_NAME.service: Exec line not rewritten"
+    grep -qx "Name=$DBUS_NAME" "$tmp/service" || die "$DBUS_NAME.service: Name is not $DBUS_NAME (upstream changed the bus name?)"
+    install -Dm644 "$tmp/service" "$service"
+    printf '%s\n' "$version" > "$tmp/version"
+    install -Dm644 "$tmp/version" "$ROOT$VERSION_FILE"
+    if [ -z "$ROOT" ]; then
+        restorecon -R "$PREFIX/bin" "$PREFIX/share" "$DBUS_CONF_DIR"
+        dbus_reload
+        dbus_activatable || die "$DBUS_NAME is not activatable on the system bus after the reload"
+    fi
+    echo "MControlCenter $version installed under $ROOT$PREFIX (helper: $PREFIX/bin/mcontrolcenter-helper)"
+}
+
+cmd_remove() {
+    local p removed=0
+    while IFS= read -r p; do
+        if [ -e "$ROOT$p" ]; then
+            rm -f "$ROOT$p"
+            removed=$((removed + 1))
+        fi
+    done < <(installed_paths)
+    rmdir --ignore-fail-on-non-empty "$ROOT$PREFIX/share/mcontrolcenter" 2> /dev/null || true
+    if [ -z "$ROOT" ] && [ "$removed" -gt 0 ]; then
+        dbus_reload
+    fi
+    echo "MControlCenter: $removed file(s) removed"
+}
+
+module_state() {
+    local sys=${1//-/_}
+    if [ -d "/sys/module/$sys" ]; then
+        echo "loaded"
+    else
+        echo "not loaded"
+    fi
+}
+
+cmd_status() {
+    local m vendor
+    vendor=$(cat "$DMI_VENDOR_FILE" 2> /dev/null || echo unknown)
+    echo "system vendor: $vendor $(is_msi && echo '(MSI: setup-msi applies)' || echo '(not MSI: setup-msi does nothing here)')"
+    for m in "${MODULES[@]}"; do
+        echo "$m: $(module_state "$m"), file $(modinfo -n "$m" 2> /dev/null || echo 'not found by modprobe')"
+    done
+    if [ -f "$MODULES_LOAD" ]; then
+        echo "modules-load: $MODULES_LOAD ($(tr '\n' ' ' < "$MODULES_LOAD"))"
+    else
+        echo "modules-load: not enabled (no $MODULES_LOAD)"
+    fi
+    [ -e /dev/ec ] && echo "/dev/ec: present" || echo "/dev/ec: absent"
+    if [ -r /sys/devices/platform/msi-ec/fw_version ]; then
+        echo "EC firmware: $(cat /sys/devices/platform/msi-ec/fw_version)"
+    fi
+    if [ -n "$(installed_version)" ]; then
+        echo "MControlCenter: $(installed_version) under $ROOT$PREFIX, helper $(dbus_activatable && echo activatable || echo 'not activatable') on the system bus"
+    else
+        echo "MControlCenter: not installed"
+    fi
+}
+
+cmd_enable() {
+    local m tarball sha
+    need_root enable
+    is_msi || die "not an MSI system ($(cat "$DMI_VENDOR_FILE" 2> /dev/null || echo 'no DMI')): nothing to enable"
+    printf '%s\n' "${MODULES[@]}" > "$MODULES_LOAD.new"
+    mv -f "$MODULES_LOAD.new" "$MODULES_LOAD"
+    for m in "${MODULES[@]}"; do
+        if ! modprobe "$m"; then
+            rm -f "$MODULES_LOAD"
+            die "modprobe $m failed: the image's copy is unsigned, so Secure Boot must be off (bootctl status); dmesg has the kernel's reason"
+        fi
+    done
+    echo "modules loaded now and at boot ($MODULES_LOAD)"
+    mkdir -p "$WORK/fetch"
+    read -r tarball sha < <(cmd_fetch "$WORK/fetch")
+    echo "downloaded $(basename "$tarball") sha256 $sha"
+    cmd_install "$tarball"
+}
+
+cmd_disable() {
+    local m
+    need_root disable
+    rm -f "$MODULES_LOAD"
+    for m in "${MODULES[@]}"; do
+        modprobe -r "$m" 2> /dev/null || true
+    done
+    echo "modules unloaded, $MODULES_LOAD removed"
+    cmd_remove
+}
+
+case "${1:-}" in
+    status) cmd_status ;;
+    enable) cmd_enable ;;
+    disable) cmd_disable ;;
+    latest) cmd_latest ;;
+    fetch) cmd_fetch "${2:?fetch <dir>}" ;;
+    install) cmd_install "${2:?install <tarball>}" ;;
+    remove) cmd_remove ;;
+    *)
+        echo "usage: bazzite-mx-msi-setup status | enable | disable | latest | fetch <dir> | install <tarball> | remove" >&2
+        exit 1
+        ;;
+esac

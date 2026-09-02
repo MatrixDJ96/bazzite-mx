@@ -91,20 +91,9 @@ if [ "$(just --justfile "$RECIPE" --summary 2>&1)" = "setup-sunshine" ]; then
 else
     echo "FAIL: recipe summary: $(just --justfile "$RECIPE" --summary 2>&1)"
 fi
-tmp=$(mktemp -d)
-cp "$RECIPE" "$tmp/justfile"
-if just --unstable --fmt --check --justfile "$tmp/justfile" > /dev/null 2>&1; then
-    echo "OK: recipe file is just --fmt clean"
-else
-    echo "FAIL: just --fmt --check: $(just --unstable --fmt --check --justfile "$tmp/justfile" 2>&1 | head -n3)"
-fi
-rm -rf "$tmp"
-if just --justfile "$RECIPE" setup-sunshine help 2>&1 | grep -q '^Usage: ujust setup-sunshine'; then
-    echo "OK: setup-sunshine help runs"
-else
-    echo "FAIL: setup-sunshine help: $(just --justfile "$RECIPE" setup-sunshine help 2>&1 | head -n3)"
-fi
-if just --justfile /usr/share/ublue-os/justfile --summary 2>&1 | tr ' ' '\n' | grep -qx 'setup-sunshine'; then
+check_just_fmt "$RECIPE"
+check_recipe_help "$RECIPE" setup-sunshine
+if has_recipe /usr/share/ublue-os/justfile setup-sunshine; then
     echo "OK: base justfile still imports the recipe"
 else
     echo "FAIL: base justfile: $(just --justfile /usr/share/ublue-os/justfile --summary 2>&1 | head -n2)"

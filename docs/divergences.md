@@ -348,3 +348,70 @@ carried over from bazzite-63 (decision 1.5c): the Segoe fonts, the Konsole pwsh 
   profile applies to a pwsh the user installs and binds Ctrl+C to copy-selection-or-cancel
   and Ctrl+V to paste through `wl-copy`/`wl-paste` (wl-clipboard 2.2.1 is in the base,
   measured 2026-09-02; PSReadLine's own clipboard functions need xclip on Linux).
+
+## MSI laptop: kernel modules and MControlCenter (`50-kmods.sh`, `bazzite-mx-msi-setup`, `setup-msi`)
+
+Criteria 1, 2, 3, 4; decisions 1.5a (readopt msi-ec, acpi_ec, `setup-msi`), 1.5g (commit
+pin, vermagic verified), owner's decision of 2026-09-02 (MControlCenter outside the image,
+installed per host). The fleet's laptop is an MSI (llaptop-matrix, RTX 4070).
+
+- **msi-ec** (BeardOverflow/msi-ec, main `d7fbbd88`, 2026-09-02): the ogc kernel builds
+  its in-tree copy (`CONFIG_MSI_EC=m`) but that copy prints no version and lags the project;
+  the out-of-tree 0.13 lands in `/usr/lib/modules/<kver>/updates/msi-ec.ko`, which depmod
+  searches before `kernel/` ("For backward compatibility add 'updates' to the head of the
+  search list", kmod `tools/depmod.c:913-917`; the base ships no `depmod.d`), so
+  `modprobe msi-ec` resolves to it and the in-tree file stays untouched. The build asserts the
+  resolution.
+- **acpi_ec** (saidsay-so/acpi_ec, master `e83e5a61`, the v1.0.4 driver): a character device
+  `/dev/ec` (root only) that MControlCenter uses for fan speeds and curves when
+  `/sys/kernel/debug/ec/ec0/io` is absent (`src/helper/readwrite.cpp:24-26`), and it is
+  absent: the ogc kernel leaves `CONFIG_ACPI_EC_DEBUGFS` unset (measured 2026-09-02), so no
+  `ec_sys` exists to load.
+- **Builder**: the base image itself, not the akmods carrier (design 2.3 planned the carrier):
+  Bazzite installs `kernel-devel` for its kernel and versionlocks it
+  (`build_files/install-kernel-akmods:30-32`), and gcc, make, binutils, elfutils-libelf-devel
+  and git-core are in the base (measured 2026-09-02 on 7.2.1-ogc4.1; both modules build in
+  9 s). The kernel's build system is called directly (`make -C /usr/src/kernels/<kver> M=`),
+  not the modules' own `make`, which targets `/lib/modules/$(uname -r)/build` — the runner's
+  kernel, not the image's (msi-ec `Makefile:17`, acpi_ec `Makefile:14`). Debug sections are
+  stripped the way `make modules_install INSTALL_MOD_STRIP=1` strips (`scripts/Makefile.modinst:76-85`,
+  `--strip-debug`; 561 KB → 98 KB for msi-ec), and the `.ko` ships uncompressed like the base's
+  in-tree modules (`CONFIG_MODULE_COMPRESS_ALL` unset; v1 shipped `.ko.xz` with the crc32
+  constraint of the in-kernel decompressor, which no longer has a reason here).
+- **Unsigned**: `CONFIG_MODULE_SIG=y`, `CONFIG_MODULE_SIG_ALL=y`, no `CONFIG_MODULE_SIG_FORCE`
+  (measured): the modules load with a taint when Secure Boot is off and are refused by
+  lockdown when it is on; the recipe prints that reason when modprobe fails. The laptop runs
+  with Secure Boot disabled (`bootctl status`, 2026-09-04, refutation 3b) and both modules
+  were loaded by the image's `modules-load.d` file on its first v2 boot; MOK enrolment stays
+  out of scope.
+- **Not loaded by the image**: no modules-load file ships; every other host of the fleet
+  never touches the modules. `ujust setup-msi enable`, gated on DMI vendor `Micro-Star`,
+  writes `/etc/modules-load.d/bazzite-mx-msi.conf` and loads them now. Bazzite's own vendor
+  tools load at runtime on DMI as well (`usr/libexec/hwsupport/*`), but as RPMs in the image;
+  the per-host install of MControlCenter is the owner's choice against that model.
+- **MControlCenter** (dmitry-s93/MControlCenter, latest release resolved at run time through
+  the GitHub API, no pin — "Regola RPM"; 0.5.1 of 2025-07-18 today, tarball
+  `MControlCenter-0.5.1-bin.tar.gz`, sha256 `704849b9…41b0`, measured 2026-09-02). Not on
+  Flathub. Upstream's `scripts/install.sh` puts the GUI in `/usr/bin`, the helper in
+  `/usr/libexec`, the D-Bus policy in `/usr/share/dbus-1/system.d`, the activation file in
+  `/usr/share/dbus-1/system-services`; on a bootc host `/usr` is the image, so
+  `bazzite-mx-msi-setup install` puts everything under `/usr/local` (`/var/usrlocal`) and
+  `/etc/dbus-1/system.d`: dbus-broker's launcher searches
+  `/usr/local/share/dbus-1/system-services` for system services
+  (bus1/dbus-broker `src/launch/launcher.c:957-965`) and `/etc/dbus-1/system.d` is an
+  `<includedir>` of `system.conf` (dbus 1.16.2). The helper goes to `/usr/local/bin`, not
+  `libexec`: SELinux labels `/usr/local/bin` `bin_t` like `/usr/libexec`, while
+  `/usr/local/libexec` has no file_contexts entry and falls to `usr_t` (`matchpathcon` on the
+  host of record, 2026-09-02); the activation file's `Exec=` is rewritten to that path and
+  asserted. Privilege model, upstream's: D-Bus activation runs the helper as root
+  (`User=root`), the policy lets every local user send to it, no polkit (`src/helper/
+  mcontrolcenter.helper.service`, `mcontrolcenter-helper.conf`): any local user of the laptop
+  can drive the embedded controller through it, accepted as in v1 on a single-user machine.
+  After the install the script reloads the bus (`org.freedesktop.DBus.ReloadConfig`) and
+  asserts the name is activatable. The install and remove paths run in the smoke test on a
+  fixture root with a synthetic tarball of the release layout (positive, and two known-bad
+  tarballs refused before anything lands); the real tarball was run through the same code
+  on the host of record before the commit; the D-Bus activation of a root helper from
+  `/usr/local/bin` is proven on the laptop in phase 4.
+- v1 layered `mcontrolcenter` from the COPR `teackot/msi` with rpm-ostree, which is what makes
+  `bootc status` report `incompatible` (decision 1.7); nothing is layered here.

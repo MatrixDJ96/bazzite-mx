@@ -79,16 +79,5 @@ if has_recipe "$RECIPES" setup-panels; then
 else
     echo "FAIL: recipe summary: $(just --justfile "$RECIPES" --summary 2>&1)"
 fi
-tmp=$(mktemp -d)
-cp "$RECIPES" "$tmp/justfile"
-if just --unstable --fmt --check --justfile "$tmp/justfile" > /dev/null 2>&1; then
-    echo "OK: recipe file is just --fmt clean"
-else
-    echo "FAIL: just --fmt --check: $(just --unstable --fmt --check --justfile "$tmp/justfile" 2>&1 | head -n3)"
-fi
-rm -rf "$tmp"
-if just --justfile "$RECIPES" setup-panels help 2>&1 | grep -q '^Usage: ujust setup-panels'; then
-    echo "OK: setup-panels help runs"
-else
-    echo "FAIL: setup-panels help: $(just --justfile "$RECIPES" setup-panels help 2>&1 | head -n3)"
-fi
+check_just_fmt "$RECIPES"
+check_recipe_help "$RECIPES" setup-panels
