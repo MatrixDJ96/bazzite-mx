@@ -18,10 +18,11 @@ source.
 ```
 Containerfile               one recipe; BASE_IMAGE is the only variable; RUN build, RUN tests, RUN lint
 build_files/build.sh        orchestrator: NN-<feature>.sh in version order
-build_files/lib/            env.sh (paths, sourced first), log.sh, repos.sh (install_from_repo, copr_install_isolated)
+build_files/lib/            env.sh (paths, sourced first), log.sh, repos.sh (install_from_repo, copr_install_isolated), gpg.sh (assert_key_fingerprint)
 build_files/NN-<feature>.sh one script per feature (00 prep … 90 validate-repos, 95 clean-stage)
 build_files/tests/          run.sh (runner + pairing guard) and one NN-<feature>.sh test per script
-system_files/               copied over / by 01-system-files.sh (etc/, usr/), one tree for both flavours
+system_files/               copied over / by 01-system-files.sh, one tree for both flavours: vendored .repo files and
+                            vendor keys (etc/), modules-load and setup hooks (usr/), see docs/architecture.md
 cosign.pub                  the public key the image trusts for ghcr.io/matrixdj96 (11-image-signing.sh)
 .github/scripts/            resolve-base.sh (base digest + kernel, one owner, --self-test)
 .github/workflows/          build.yml (sandbox: lint + both flavours, no push, no release)
@@ -29,8 +30,8 @@ cosign.pub                  the public key the image trusts for ghcr.io/matrixdj
 docs/                       architecture.md (build flow, state, gates), conventions.md (bash, tests, CI, commits)
 ```
 
-System files (`system_files/`), the remaining features and the release pipeline arrive one
-feature per commit; this file grows with them. Read `docs/architecture.md` before adding a
+The remaining features and the release pipeline arrive one feature per commit; this file
+grows with them. What the image changes over Bazzite, and why, is `docs/divergences.md`. Read `docs/architecture.md` before adding a
 script and `docs/conventions.md` before writing one.
 
 ## Rules
@@ -50,7 +51,10 @@ script and `docs/conventions.md` before writing one.
 3. **Nothing is pinned to a version** for RPMs from vendors or GitHub releases: the build
    resolves the latest release. A pin enters only against a measured problem, with the
    measurement cited. The base image is the exception in the other direction: CI resolves
-   `:stable` to a digest and the build pins to that digest (`resolve-base.sh`).
+   `:stable` to a digest and the build pins to that digest (`resolve-base.sh`). Vendor
+   signing keys are pinned on purpose: the key ships in `system_files/etc/pki/rpm-gpg/`, the
+   `.repo` reads it with `gpgkey=file://`, and the feature script asserts its fingerprint
+   before the first install (`assert_key_fingerprint`).
 4. **Pre-flight locally** (`/preflight`, `.claude/commands/preflight.md`) before any push.
    Capture the build's exit status through `PIPESTATUS`, never `tee`'s.
 5. **Push to `develop` first, always.** The sandbox (`build.yml`) lints and builds both

@@ -33,6 +33,35 @@ version; this file carries the reasons and the measured facts behind them.
 - Nothing is pinned to a release for vendor RPMs and GitHub releases: the build resolves the
   latest. The base image is pinned to the digest CI resolved, and the two kernel modules are
   pinned to a commit (decision 1.5g: reproducibility of the module).
+- A vendor's signing key is pinned, on purpose: the armored key ships under
+  `system_files/etc/pki/rpm-gpg/RPM-GPG-KEY-<vendor>`, the `.repo` reads it with
+  `gpgkey=file://`, and the feature script calls `assert_key_fingerprint` with the fingerprint
+  measured on the vendor's published key before the install. A key rotation is then a
+  reviewable diff plus a new fingerprint, never a silent download at build time. Where the
+  vendor's file changes: docs/divergences.md names the URL each key was read from.
+- A package `%post` runs in the build, not on the host: what it does is read
+  (`rpm -qp --scripts`) before the package enters a script, and every effect that belongs to a
+  host (a group in `/etc/group`, a unit enabled) is handled explicitly. `groupadd` in a `%post`
+  lands in `/etc/group`; `95-clean-stage.sh` relocates it to `/usr/lib/group`, where NSS
+  (`altfiles`) reads it; membership for humans is a boot hook's job.
+- Writes to files the base image ships end on a fresh inode (`mv`, `install`, `sed -i`,
+  `rsync`) where it costs nothing. The runner kernel of `ubuntu-26.04` does not lose in-place
+  writeback (`docs/gotchas.md` § Torn writeback: measured clean in 4 of 4 arms, reproduced on
+  `ubuntu-24.04`), so no cold sweep and no helper exist; CI is pinned to that runner for it.
+
+## Boot hooks
+
+Scripts under `system_files/usr/share/ublue-os/system-setup.hooks.d/` run as root at every
+boot through `ublue-system-setup.service` (`ublue-setup-services`, after `rpm-ostreed`, before
+user sessions). The dispatcher runs `bash <script>` and ignores the exit status, so:
+
+- a hook converges on every boot (check, then change only what differs) instead of stamping a
+  version with libsetup's `version-script`, which records the run before the body executes and
+  never repeats a failed one nor reaches a user created later;
+- a hook that cannot do its job prints one `ERROR:` line to stderr and exits 1: the journal line
+  is its only signal;
+- a hook takes a fixture prefix (`usermod --prefix`, files under a temporary tree) so its smoke
+  test exercises the real script, positive and known-bad, without touching the image.
 - Writes to files the base image ships end on a fresh inode (`mv`, `install`, `sed -i`,
   `rsync`) where it costs nothing; whether the runner kernel still loses in-place writeback (v1
   gotcha #34) is decided by the experiment recorded in `docs/gotchas.md`.
