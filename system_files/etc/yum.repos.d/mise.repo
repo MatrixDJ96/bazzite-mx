@@ -1,0 +1,13 @@
+# mise from the COPR jdxcode/mise (https://mise.jdx.dev/installing-mise.html), the section
+# `dnf5 copr enable` writes, with enabled=0 (33-mise.sh enables it for one transaction) and the
+# project key read from the copy under /etc/pki/rpm-gpg.
+[copr:copr.fedorainfracloud.org:jdxcode:mise]
+name=Copr repo for mise owned by jdxcode
+baseurl=https://download.copr.fedorainfracloud.org/results/jdxcode/mise/fedora-$releasever-$basearch/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-copr-jdxcode-mise
+repo_gpgcheck=0
+enabled=0
+enabled_metadata=1

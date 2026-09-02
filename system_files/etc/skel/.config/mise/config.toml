@@ -1,0 +1,7 @@
+# Default per-user development runtimes; `mise install` provisions them under $HOME and a
+# project's own mise.toml overrides them.
+[tools]
+node = "lts"
+python = "3.14"
+java = "temurin-21"
+dotnet = "10"

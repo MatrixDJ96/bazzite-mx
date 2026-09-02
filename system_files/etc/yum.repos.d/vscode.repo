@@ -1,0 +1,11 @@
+# Visual Studio Code: the stanza https://code.visualstudio.com/docs/setup/linux writes, with
+# enabled=0 (30-ide.sh enables it for one transaction) and the key read from the copy under
+# /etc/pki/rpm-gpg. gpgcheck stays on: the packages are signed with that key.
+[code]
+name=Visual Studio Code
+baseurl=https://packages.microsoft.com/yumrepos/vscode
+enabled=0
+autorefresh=1
+type=rpm-md
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-microsoft

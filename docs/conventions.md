@@ -77,6 +77,11 @@ user sessions). The dispatcher runs `bash <script>` and ignores the exit status,
   is its only signal;
 - a hook takes a fixture prefix (`usermod --prefix`, files under a temporary tree) so its smoke
   test exercises the real script, positive and known-bad, without touching the image.
+
+User hooks (`user-setup.hooks.d/`, `ublue-user-setup.service`, every graphical session) follow
+the same three rules; their "check" must be cheap enough for every login (read a file, never
+spawn the application: the VS Code hook reads `extensions.json`), and their fixture is `HOME`
+plus a stub binary first in `PATH`.
 - Writes to files the base image ships end on a fresh inode (`mv`, `install`, `sed -i`,
   `rsync`) where it costs nothing; whether the runner kernel still loses in-place writeback (v1
   gotcha #34) is decided by the experiment recorded in `docs/gotchas.md`.

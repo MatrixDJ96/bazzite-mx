@@ -33,6 +33,10 @@ digest with `.github/scripts/resolve-base.sh`, which also reads the base's kerne
 | `20-setup-services.sh` | hook framework `ublue-setup-services` (COPR `ublue-os/packages`): `ublue-system-setup.service` runs `system_files/usr/share/ublue-os/system-setup.hooks.d/*` as root at boot, before user sessions; the user unit is enabled by its first consumer |
 | `21-container-runtime.sh` | Docker CE (five packages, vendored stable repo, key asserted), podman-compose/machine/tui and bcvk from Fedora, `docker.socket` + `podman.socket` enabled; the `docker` group the %post creates is relocated by clean-stage and granted to wheel users at boot by the hook `10-bazzite-mx-groups.sh` |
 | `22-virtualization.sh` | libvirt (modular daemons from the Fedora preset, `libvirtd.service` never enabled), QEMU/KVM, virt-manager, swtpm, guestfs-tools, waypipe, quickemu; `ublue-os-libvirt-workarounds` (COPR); asserts binfmt stays out and that the recipe file parses |
+| `30-ide.sh` | VS Code from the vendored Microsoft repo (key asserted); enables `ublue-user-setup.service` for every user, the first user hook being the extensions one |
+| `31-git-tools.sh` | GitKraken from the vendor's fixed URL (latest release, unsigned RPM: TLS + payload digests, `--no-gpgchecks` for that file only), git-credential-libsecret |
+| `32-cli-rpms.sh` | gh, glab, ShellCheck, shfmt and the system-administration list, all Fedora |
+| `33-mise.sh` | mise from the vendored `jdxcode/mise` COPR (key asserted); activation and default runtimes come from system_files |
 | `90-validate-repos.sh` | repository gate: vendored files present, identical and disabled; base files untouched; additions disabled; `--self-test` |
 | `95-clean-stage.sh` | dnf.conf restored, dnf history removed, accounts relocated to `/usr/lib`, rpmdb hardlinked, `/var` `/run` `/tmp` `/boot` swept (aurora `clean-stage.sh`, bazzite `finalize`, `cleanup`) |
 | `tests/run.sh` | test runner: pairing guard (every `NN-x.sh` has `tests/NN-x.sh` and vice versa), `OK:`/`FAIL:` protocol, `--self-test` |
@@ -57,6 +61,9 @@ One tree, copied over `/` by `01-system-files.sh`. What lives where:
 | `usr/lib/tmpfiles.d/bazzite-mx-*.conf` | `/var` directories packages ship and clean-stage removes; a host recreates them at boot |
 | `usr/libexec/` | helpers recipes call (`bazzite-dx-kvmfr-setup`, bazzite-dx's file byte for byte) |
 | `usr/share/ublue-os/just/*.just` | `ujust` recipes; a file with a base file's name replaces that file (the base justfile already imports it), a new file is imported by the justfile feature |
+| `etc/skel/.config/` | per-user defaults a new account starts from (VS Code `update.mode`, mise runtimes); hooks seed them for existing accounts where it matters |
+| `etc/profile.d/*.sh` | shell activation (`mise.sh`, interactive bash) |
+| `usr/share/ublue-os/user-setup.hooks.d/*.sh` | per-user hooks run by `ublue-user-setup.service` in every graphical session; same rules as the system hooks below |
 | `usr/share/ublue-os/system-setup.hooks.d/*.sh` | root hooks run by `ublue-system-setup.service` at every boot; each converges on its own (no version stamp) and prints an `ERROR:` line and exits 1 when it cannot |
 
 ## State of a build
