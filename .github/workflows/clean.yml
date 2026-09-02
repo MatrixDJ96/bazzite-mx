@@ -1,0 +1,43 @@
+# GHCR retention: prunes the old versions of the three packages every Sunday,
+# or on a dispatch that lists and deletes nothing unless told otherwise. A
+# dated tag is prunable because its GitHub Release outlives it
+# (docs/workflow.md § GHCR retention).
+name: Clean
+
+on:
+  schedule:
+    - cron: "15 0 * * 0" # 00:15 UTC on Sundays
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List what would be deleted and delete nothing"
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: bazzite-mx-clean
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: Prune
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
+    permissions:
+      packages: write
+    steps:
+      - name: Prune Old Versions
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          packages: bazzite-mx,bazzite-mx-nvidia-open,bazzite-mx-nvidia
+          older-than: 90 days
+          keep-n-tagged: 7
+          keep-n-untagged: 7
+          delete-orphaned-images: true
+          use-regex: true
+          exclude-tags: ^(stable|staging)$
+          validate: true
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}

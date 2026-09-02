@@ -79,9 +79,10 @@ gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref <branch> -f rechunk
 ## Boundaries
 
 - A push goes to `develop` first, whose sandbox builds the three flavours and publishes
-  nothing; a push to `main`, a dispatch of `release.yml`, `promote.yml` or `sign-image.yml`, a
-  GHCR write or delete and a repository setting take the owner's OK
-  (`docs/workflow.md` § What takes the owner's OK).
+  nothing; a push to `main`, a dispatch of `release.yml`, `promote.yml`, `sign-image.yml` or
+  `trigger-release.yml`, or one of `watch-upstream.yml` without `dry_run=true`, a GHCR write or
+  delete and a repository setting take the owner's OK (`docs/workflow.md` § What takes the
+  owner's OK).
 - A rewrite of `main` comes before the release it feeds, never after: the Release and the next
   changelog name the run's commit, and a commit folded away leaves them pointing at nothing.
 - `cosign.key` stays out of git (`.gitignore`); CI signs with the `SIGNING_SECRET` secret,
@@ -94,4 +95,5 @@ gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref <branch> -f rechunk
 - `docs/divergences.md` — what the image changes over Bazzite and why, one entry per feature.
 - `docs/gotchas.md` — a failure that looks familiar, by heading.
 - `docs/migration.md` — bringing a host onto the image; a `verify-host` `FAIL:` line.
-- `docs/workflow.md` — branches, releases, promotions, repository settings, the pin refresh.
+- `docs/workflow.md` — branches, releases, promotions, GHCR retention, repository settings, the
+  pin refresh.

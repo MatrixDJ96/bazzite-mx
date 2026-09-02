@@ -5,8 +5,8 @@ the repository settings the pipeline relies on, and the pin refresh. The build i
 [`architecture.md`](architecture.md).
 
 Contents: branches and profiles · run the lint job locally · probe a pre-flight image by hand ·
-the release run · promotions · recovery · repository settings · keeping the pins fresh ·
-what takes the owner's OK.
+the release run · the weekly trigger and the upstream watcher · GHCR retention · promotions ·
+recovery · repository settings · keeping the pins fresh · what takes the owner's OK.
 
 ## Branches and profiles
 
@@ -148,6 +148,88 @@ revision folded away by a later rewrite of `main` leaves a Release pointing at a
 no longer shows and a changelog that falls back to the whole history (`changelog.sh`,
 `write_commits`). So a rewrite of `main` comes before the release it feeds, never after.
 
+## The weekly trigger and the upstream watcher
+
+Both live on `main`, because a `schedule` runs on the default branch only, and both dispatch
+`release.yml` with a `reason` and `promote_stable=true`. Neither dispatches while
+`PROMOTE_STABLE` is not `true`.
+
+| Workflow              | When                                                            | What it does                                                             |
+| --------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `trigger-release.yml` | `20 3 * * 2` (Tuesday 03:20 UTC), or a dispatch                 | dispatches `release.yml` with `reason=weekly`                            |
+| `watch-upstream.yml`  | `37 */6 * * *` (every 6 h at :37), or a dispatch with `dry_run` | compares the base digests with our `:stable`, then dispatches on `stale` |
+
+`trigger-release.yml` carries `if: vars.PROMOTE_STABLE == 'true'` on its job, so a skipped run
+shows why. `watch-upstream.sh decide` dispatches only when all four conditions hold:
+
+- the verdict is `stale`;
+- `PROMOTE_STABLE` is `true`;
+- no release run is queued or running;
+- no release with the same reason started in the last 24 hours.
+
+The reason it passes is `upstream:<12 hex per base>`.
+
+The watcher fails closed. A base that cannot be resolved, an image that cannot be inspected or
+a `:stable` without the label make the run red and dispatch nothing; the next cron retries. A
+`:stable` that does not exist is `absent`: there is nothing to compare. To read the verdict
+without dispatching:
+
+```bash
+gh workflow run watch-upstream.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=true
+```
+
+## GHCR retention
+
+`clean.yml` runs on `15 0 * * 0` (Sunday 00:15 UTC) and names the three packages in full. It
+prunes the versions older than 90 days beyond the 7 newest tagged and the 7 newest untagged,
+and excludes `:stable` and `:staging` whatever their age. The `.sig` images and the SBOM
+referrer of an image that is gone go with it; the attestations live in GitHub's store and stay.
+The dated release tags are prunable; their GitHub Release stays. A dispatch defaults to a dry
+run:
+
+```bash
+gh workflow run clean.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=true   # read the log
+gh workflow run clean.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=false  # owner's OK
+```
+
+On GHCR a version is the manifest, and several tags share one: `:staging`, re-pointed by every
+release run, rides the same version as that run's dated tag. Removing one tag by hand therefore
+takes three steps, since deleting a version takes every tag on it. The steps use the `gh`
+token, which `gh auth login` issues without the package scopes; the copy wants
+`write:packages`, the deletion `read:packages` and `delete:packages` (GitHub REST docs, «Delete
+a package version for the authenticated user»).
+
+```bash
+gh auth refresh -s read:packages,write:packages,delete:packages
+gh auth token | skopeo login ghcr.io --username 'MatrixDJ96' --password-stdin
+# 1. move each dated tag off the version :stable or :staging points at
+skopeo copy --all --preserve-digests 'docker://ghcr.io/matrixdj96/PACKAGE@OTHER_DIGEST' \
+  'docker://ghcr.io/matrixdj96/PACKAGE:TAG'
+# 2. delete the version that now carries only the tags you want gone, then the versions
+#    tagged sha256-<its digest>.sig and sha256-<its digest>; the orphan pass of clean.yml
+#    takes the SBOM they leave and its signature
+gh api -X DELETE 'user/packages/container/PACKAGE/versions/ID'
+# 3. check from outside, then log out
+skopeo list-tags 'docker://ghcr.io/matrixdj96/PACKAGE'
+gh release list --repo MatrixDJ96/bazzite-mx
+skopeo logout ghcr.io
+```
+
+`PACKAGE` is the bare package name (`bazzite-mx`, `bazzite-mx-nvidia-open`,
+`bazzite-mx-nvidia`), `TAG` a dated release tag, `OTHER_DIGEST` the manifest you move it onto
+and `ID` the version id from `gh api user/packages/container/PACKAGE/versions`. Pair a
+`sha256-<digest>` tag with its image by that digest (`skopeo inspect --format '{{.Digest}}'`),
+never by timestamp.
+
+A deleted version can be restored within 30 days of its deletion, the only way back to its
+digest once the base has moved:
+`gh api 'user/packages/container/PACKAGE/versions?state=deleted'` gives the id,
+`gh api -X POST 'user/packages/container/PACKAGE/versions/ID/restore'` restores it with the
+scopes above, and its `sha256-<digest>.sig` and `sha256-<digest>` versions come back the same
+way (GitHub REST docs, «Restore a package version for the authenticated user»), then the SBOM
+that index lists and its `sha256-<SBOM digest>.sig`: `skopeo inspect --raw` on the restored
+`sha256-<digest>` tag gives the SBOM's digest, the `name` of its deleted version.
+
 ## Promotions
 
 ```bash
@@ -158,8 +240,15 @@ gh workflow run promote.yml --repo MatrixDJ96/bazzite-mx --ref main -f release_t
 `promote.yml` re-verifies the three images at `:<tag>` through `gate-release.sh promote`
 (labels, negative controls, signature, attestation) and copies their digests onto `:stable`. It
 shares the `bazzite-mx-release` concurrency group, so it never runs beside a release. Unlike
-the `promote_stable` input of a release run, it reads no repository variable: a dispatch moves
-`:stable` whatever `PROMOTE_STABLE` says, which is why it takes the owner's OK.
+the two crons and the `promote_stable` input of a release run, it reads no repository variable:
+a dispatch moves `:stable` whatever `PROMOTE_STABLE` says, which is why it takes the owner's
+OK.
+
+A promotion back onto an older release holds only with the automation off: the watcher finds
+that release's base stale and the Tuesday trigger fires, and either run rebuilds `main` and
+promotes it again. Set `PROMOTE_STABLE` to `false` before the dispatch
+(`gh variable set PROMOTE_STABLE --body false --repo MatrixDJ96/bazzite-mx`) and back to `true`
+once the fix is on `main`.
 
 ## Recovery: a published image without a signature
 
@@ -203,6 +292,7 @@ Checked and set with `gh`, each command run with the owner's OK.
 | variable `PROMOTE_STABLE`    | the switch of the automatic releases                                                                                                                                                      | `gh variable list`                                                                        | `gh variable set PROMOTE_STABLE --body false`                                   |
 | immutable releases           | a release tag never moves, a release is never deleted, and a deleted release keeps its tag name burnt ([`gotchas.md`](gotchas.md) § A deleted immutable release keeps its tag name burnt) | `gh api repos/MatrixDJ96/bazzite-mx/immutable-releases`                                   | `gh api -X PUT repos/MatrixDJ96/bazzite-mx/immutable-releases`                  |
 | default workflow permissions | the token starts read-only, each job declares what it needs                                                                                                                               | `gh api repos/MatrixDJ96/bazzite-mx/actions/permissions/workflow`                         | leave                                                                           |
+| workflow states              | GitHub disables a public repository's cron after 60 days without repository activity (GitHub docs, `schedule`)                                                                            | `refresh-pins.sh --check`, class `workflow`                                               | `gh api -X PUT repos/MatrixDJ96/bazzite-mx/actions/workflows/<file>.yml/enable` |
 | package visibility           | an anonymous host cannot pull a private image                                                                                                                                             | `gh api /user/packages/container/<package> --jq .visibility`                              | the package's settings page: the REST API has no endpoint                       |
 
 The `gh secret` and `gh variable` lines want `--repo MatrixDJ96/bazzite-mx` outside the
@@ -251,6 +341,7 @@ row goes `OK` to `STALE` on the version that removes it like any other.
 
 ## What takes the owner's OK
 
-A push to `main`. A dispatch of `release.yml`, `promote.yml` or `sign-image.yml`. A write or a
-delete on GHCR (a tag moved, a version deleted). Any change to the repository settings above,
-and anything that touches a host.
+A push to `main`. A dispatch of `release.yml`, `promote.yml`, `sign-image.yml` or
+`trigger-release.yml`, or one of `watch-upstream.yml` without `dry_run=true`. A write or a
+delete on GHCR (`clean.yml` with `dry_run=false`, a tag moved, a version deleted or restored).
+Any change to the repository settings above, and anything that touches a host.

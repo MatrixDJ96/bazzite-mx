@@ -496,8 +496,8 @@ write_package_diff() {
 # write_commits: the commits since the previous release's revision. A first
 # release, and a revision missing from this history (a rewritten one), list
 # every commit of this tree and say so. A release cut from the previous
-# release's own commit, as when the base alone moved, states that no commit
-# landed.
+# release's own commit, which every weekly and watcher dispatch is when the
+# base alone moved, states that no commit landed.
 write_commits() {
     local log_format='- `%h` %s'
     local commits

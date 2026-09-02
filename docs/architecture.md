@@ -49,6 +49,7 @@ Each script owns one artefact and ships a `--self-test`.
 | `refresh-pins.sh`                                 | the pin table (`--check`) and the rewrite (`--apply`)                                                                                                                                                                                                |
 | `check-commits.sh [<rev>]`                        | the commit-message rules (§ Commits of `conventions.md`) over every commit reachable from `<rev>`                                                                                                                                                    |
 | `check-form.sh <file>...`                         | the form rules (§ Bash → Form of `conventions.md`): line width, the banned control-flow shapes and the four failure shapes (`\| grep -q`, `\|\| echo` fallback, a pipeline assigned without `\|\| true`, a `$( )` inside `$(( ))`), on logical lines |
+| `watch-upstream.sh check\|decide`                 | the base-digest verdict, and whether to dispatch                                                                                                                                                                                                     |
 
 ## build_files/
 

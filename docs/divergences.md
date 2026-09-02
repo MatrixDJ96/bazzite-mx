@@ -24,12 +24,12 @@ out-of-tree modules against the kernel each base ships. Source: `bazzite`'s
 images, `bazzite-nvidia` and its GNOME twin, take the `ogc-lts` kernel.
 
 Every enumeration of the three images is literal: `PACKAGES` and `FLAVOURS` in
-`.github/scripts/lib.sh`, the build matrix and the recovery signer name them one by one;
-`resolve-base.sh --digests` loops over `FLAVOURS`. `release-tag.sh` probes every package for
-taken tags.
+`.github/scripts/lib.sh`, the build matrix, the retention list and the recovery signer name
+them one by one; the watcher and `resolve-base.sh --digests` loop over `FLAVOURS`.
+`release-tag.sh` probes every package for taken tags.
 
 Files: `Containerfile`, `.github/scripts/resolve-base.sh`, `.github/scripts/lib.sh`,
-`.github/scripts/release-tag.sh`.
+`.github/scripts/release-tag.sh`, `.github/scripts/watch-upstream.sh`.
 
 ## Image identity and the update ref
 
@@ -735,7 +735,8 @@ switches, where the family's moves on every run.
 ([`gotchas.md`](gotchas.md) § `setup-oras` installs only the ORAS versions embedded in its own
 release) and renovate are replaced by scripts of ours with `--self-test`s. Bazzite's version
 step swallows its tag probe with `|| true`; ours aborts on a probe that fails or returns
-nothing. The family is split on freeing disk: Bazzite and bazzite-dx run
+nothing. bazzite-dx reads the base's version label; `watch-upstream.sh` compares base digests,
+which also move on a retag. The family is split on freeing disk: Bazzite and bazzite-dx run
 `jlumbroso/free-disk-space` (`bazzite/.github/workflows/build.yml:150`,
 `bazzite-dx/.github/workflows/build.yml:67`), Bazzite having dropped
 `AdityaGarg8/remove-unwanted-software` in a45a310e and taken `jlumbroso/free-disk-space` in
