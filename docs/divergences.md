@@ -8,7 +8,7 @@ which files carry it; the guards themselves live in the build script and its tes
 
 Contents: three flavours · image identity · signing trust · hook framework · Docker CE ·
 virtualization · VS Code · git tools · command-line tools · mise · desktop applications ·
-Sunshine · the cleaned stage · CI.
+Sunshine · KDE defaults · ujust recipes · the cleaned stage · CI.
 
 ## Three flavours, one recipe
 
@@ -61,11 +61,11 @@ Files: `build_files/11-image-signing.sh` and its test, `cosign.pub`,
 
 ## Hook framework: ublue-setup-services
 
-The base ships no `system-setup.hooks.d` dispatcher. Two features here need a step that
+The base ships no `system-setup.hooks.d` dispatcher. Three features here need a step that
 converges at every boot or login: the group memberships the container runtime and libvirt need,
-and the VS Code extensions of each account. `ublue-setup-services` comes from the COPR
-`ublue-os/packages`, the way bazzite-dx installs it
-(`bazzite-dx/build_files/20-install-apps.sh`) and enables it
+the VS Code extensions of each account, and the copy-and-paste skel files of the accounts that
+predate the image. `ublue-setup-services` comes from the COPR `ublue-os/packages`, the way
+bazzite-dx installs it (`bazzite-dx/build_files/20-install-apps.sh`) and enables it
 (`bazzite-dx/build_files/40-services.sh`). Only the system unit is enabled here;
 `ublue-user-setup.service` is enabled `--global` by the IDE feature, the first one with a user
 hook. Our hooks converge instead of stamping a version. bazzite-dx gates the same work behind
@@ -427,6 +427,70 @@ its own step if a host needs it.
 Files: `build_files/41-sunshine.sh` and its test, `system_files/etc/yum.repos.d/sunshine.repo`,
 `system_files/etc/pki/rpm-gpg/RPM-GPG-KEY-copr-lizardbyte-stable`,
 `system_files/usr/share/ublue-os/just/82-bazzite-sunshine.just`.
+
+## KDE defaults
+
+Four per-user defaults. They reach existing accounts only from the image, two through Plasma's
+update scripts and two through a user hook, which is why they are here and not in a recipe.
+
+Two of them are Plasma update scripts under the shell package's `contents/updates/`, the
+mechanism Plasma itself and Bazzite use for one-shot per-user defaults: plasmashell runs every
+`.js` there once per user and records it in `~/.config/plasmashellrc` (KDE developer
+documentation, Plasma scripting), reaching new accounts after the default layout and existing
+ones at their next start. An autostart entry with a per-user stamp file would need a wait for
+plasmashell on the session bus; this form needs neither. A JavaScript error is only a warning
+in the journal, and the script is still marked performed. The CI lint job therefore checks the
+files with `node --check`, there being no JavaScript engine in the image. The first sets
+`showSeconds=2` on every digital clock that still has the upstream default, leaving a clock the
+user set to never alone. The second gives every screen without any panel a bottom panel copying
+the primary's geometry and widgets, minus the system tray, a second tray applet spawning a
+duplicate containment. A screen that already carries a panel is skipped. A first login with one
+screen adds nothing and the script is still marked performed, so `ujust setup-panels` evaluates
+the same file through `org.kde.PlasmaShell.evaluateScript`. The record in `plasmashellrc` is
+the script's path (plasma-workspace, `shell/scripting/scriptengine.cpp`,
+`pendingUpdateScripts`), so an account that already ran a script, every account that logged in
+on a published image, never runs a changed version of it, and a new account runs the current
+one: `ujust setup-panels` is how an existing account gets a changed panel script, and the clock
+script has no recipe.
+
+The other two are skel files for Windows-style copy and paste. Konsole gets `edit_copy` on
+`Ctrl+C; Ctrl+Shift+C` through a `sessionui.rc` whose `version="1"` is below Konsole's own, so
+KXmlGui merges only its `ActionProperties`; Konsole disables that action while nothing is
+selected, so Ctrl+C still interrupts the shell. PowerShell is not in the image, and the skel
+profile applies to a pwsh the user installs, binding the two keys through `wl-copy` and
+`wl-paste` because PSReadLine's own clipboard functions need xclip on Linux. A skel file is
+copied only into the home `useradd` creates (useradd(8), `-k`), so an account that predates the
+image would never get either ([`gotchas.md`](gotchas.md) § A skel file reaches no account that
+already exists). The user hook `12-bazzite-mx-copy-paste.sh` copies each of the two files at
+every login when the account has none, through the same `ublue-user-setup.service` as the VS
+Code hook, and leaves a file the user already has alone. A file the user deletes is therefore
+copied again at the next login, and one given up is emptied rather than deleted.
+
+Files: `build_files/45-kde-defaults.sh` and its test, the two scripts under
+`system_files/usr/share/plasma/shells/org.kde.plasma.desktop/contents/updates/`,
+`system_files/etc/skel/.local/share/kxmlgui5/konsole/sessionui.rc`,
+`system_files/etc/skel/.config/powershell/profile.ps1`,
+`system_files/usr/share/ublue-os/user-setup.hooks.d/12-bazzite-mx-copy-paste.sh`, and the
+recipe `setup-panels` in `system_files/usr/share/ublue-os/just/95-bazzite-mx.just`.
+
+## ujust recipes
+
+Bazzite's `ujust` is `just` run on `/usr/share/ublue-os/justfile`, which imports every file
+under `/usr/share/ublue-os/just/` by name and sets `allow-duplicate-recipes`. One recipe of
+ours joins it: `setup-panels`.
+
+`95-bazzite-mx.just` is appended as one more `import` line, the way bazzite-dx adds its own
+file (`bazzite-dx/build_files/60-clean-base.sh`). With duplicate names across imports the
+earlier import wins ([`gotchas.md`](gotchas.md) § `just`: the earlier import wins on a
+duplicate recipe name), so an appended import can never override a base recipe. A recipe of
+ours that carries an upstream name therefore takes the upstream file's place, as
+`84-bazzite-virt.just` and `82-bazzite-sunshine.just` do, each holding exactly the one recipe
+we replace. `00-prep.sh` records every base recipe file's recipe set before `system_files` is
+copied. `70-justfile.sh` then refuses a replaced file whose set differs from ours and any name
+defined in two files.
+
+Files: `build_files/70-justfile.sh` and its test,
+`system_files/usr/share/ublue-os/just/95-bazzite-mx.just`.
 
 ## The cleaned stage
 

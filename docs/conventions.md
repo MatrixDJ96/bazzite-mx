@@ -32,12 +32,12 @@ CI · prose · commits.
 A script is read by a person before bash runs it, and the person is not the author. These rules
 hold for every file the lint job covers: build scripts, libraries, tests, the libexec helpers,
 the boot hooks, the CI scripts and the edit hook. They hold in the same spirit for every other
-file of the repo: a workflow, the Containerfile, a justfile, a `.repo` or `.conf` file gets the
-same blank lines between its steps, the same 100 columns and comments that carry a reason,
-never a restatement. The shapes and the width are checked by `.github/scripts/check-form.sh`,
-which the edit hook runs on every shell file an edit touches and the `lint` job on the whole
-shell catalogue; a line that holds a banned shape as data ends in `# form: literal`. The rest
-is checked by hand at review, like § Prose.
+file of the repo: a workflow, the Containerfile, a justfile, a Plasma update script, a `.repo`
+or `.conf` file gets the same blank lines between its steps, the same 100 columns and comments
+that carry a reason, never a restatement. The shapes and the width are checked by
+`.github/scripts/check-form.sh`, which the edit hook runs on every shell file an edit touches
+and the `lint` job on the whole shell catalogue; a line that holds a banned shape as data ends
+in `# form: literal`. The rest is checked by hand at review, like § Prose.
 
 - **Control flow is written as `if … then … fi`.** `cmd || return 1`, `a && b || c`,
   `! cmd || die`, `cmd || { … }` and a subshell `( … ) ||` used as a guard are out: they hide
@@ -94,7 +94,8 @@ is checked by hand at review, like § Prose.
 - **A pipeline assigned carries `|| true` or opens a condition.** `var=$(grep …)` and
   `var=$(cmd | …)` are refused by `check-form.sh` without one of the two: under `pipefail` an
   element that fails (a grep matching nothing, `just` on a broken file, `head` closing early)
-  fails the assignment and `set -e` ends the script.
+  fails the assignment, `set -e` ends the script, and a `FAIL:` branch written that way died
+  before its verdict ([`gotchas.md`](gotchas.md) § A FAIL branch died before its verdict).
   `|| true` when nothing found is a value, the fallback naming what was not found;
   `if ! var=$(…); then` when the failure is an error. A `FAIL:` line quoting a probe's output
   goes through `on_one_line <fallback>` of `tests/lib.sh`, which never leaves it blank.
@@ -218,12 +219,18 @@ known-bad still red after it. The rules above add to the earlier bullets of this
 - A recipe that replaces one of Bazzite's ships in a file with the same name under
   `system_files/usr/share/ublue-os/just/`. The base justfile imports the path, so our file
   takes the base file's place and nothing else changes. It only works when the base file holds
-  exactly the recipes we replace.
+  exactly the recipes we replace, and `70-justfile.sh` refuses the build when the base's recipe
+  set, recorded by `00-prep.sh` before the copy, differs from ours.
+- Our own recipes live in `95-bazzite-mx.just`, imported last into the master justfile on a
+  fresh inode. With `allow-duplicate-recipes` the earlier import wins
+  ([`gotchas.md`](gotchas.md) § `just`: the earlier import wins on a duplicate recipe name), so
+  `70-justfile.sh` fails the build on any name defined in two files and checks that the master
+  justfile exposes every name of ours and still parses.
 - Recipes are `just --unstable --fmt --check` clean and start with
   `source /usr/lib/ujust/ujust.sh`, which brings the colours and `Choose`. The `help` action
   comes before the not-as-root check so the smoke test can run the recipe body in the build.
-  The `lint` job checks every tracked `.just` file with Fedora 44's `just`, the release the
-  image ships.
+  Two guards: the `lint` job checks every tracked `.just` file with Fedora 44's `just`, the
+  release the image ships, and `70-justfile.sh` checks ours again inside the build.
 - What the image already does, a unit enabled or a package installed or a module option, is not
   redone by a recipe: the recipe reports it under `status` and does only what needs the host,
   an opt-in module or a per-user choice.
@@ -295,7 +302,7 @@ Where each one runs:
 | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.github/scripts/*.sh`                                    | `lint` job, `build.yml`                                                                                                                                   |
 | `check-form.sh`                                           | `lint` job, `build.yml`, which then runs the check itself over the whole shell catalogue; `.claude/hooks/lint-edit.sh` runs it on every edited shell file |
-| `80-fix-opt.sh`, `90-validate-repos.sh`                   | the test RUN, called by their paired test                                                                                                                 |
+| `70-justfile.sh`, `80-fix-opt.sh`, `90-validate-repos.sh` | the test RUN, called by their paired test                                                                                                                 |
 | `tests/run.sh`                                            | `lint` job, `build.yml`, after the CI scripts                                                                                                             |
 
 ## CI

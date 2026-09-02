@@ -4,13 +4,14 @@ Surprises found on this project that a reader would otherwise rediscover the har
 says what happens, how and when it was measured, and what the repository does about it. The
 rules themselves live in [`conventions.md`](conventions.md).
 
-Contents, in the order of the entries: torn writeback on 6.17-azure · ujust.sh readonly names ·
-kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set · command | grep -q ·
-stub-resolv.conf left in the image · remove-unwanted-software v9 · force-push without a push
-run · 1Password BrowserSupport gid · pre-flight without the changed script · image-info.json vs
-OCI label day · sunshine --version home · Docker FORWARD policy and libvirt · recipe
-description line · vendor build-log warnings · arithmetic error escapes set -e · scriptlet
-rewrote a .pyc.
+Contents, in the order of the entries: torn writeback on 6.17-azure · just duplicate recipe ·
+ujust.sh readonly names · kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set ·
+command | grep -q · stub-resolv.conf left in the image · remove-unwanted-software v9 ·
+force-push without a push run · 1Password BrowserSupport gid · pre-flight without the changed
+script · skel and existing accounts · KXmlGui write-back · image-info.json vs OCI label day ·
+FAIL branch before its verdict · sunshine --version home · Docker FORWARD policy and libvirt ·
+recipe description line · vendor build-log warnings · arithmetic error escapes set -e ·
+scriptlet rewrote a .pyc.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -27,6 +28,14 @@ in 4 of 4 arms.
 
 CI builds on `ubuntu-26.04` for this reason, and the image carries neither a cold NUL sweep nor
 a fresh-inode helper. A runner whose kernel is a 6.17-azure brings the defect back.
+
+## `just`: the earlier import wins on a duplicate recipe name
+
+With `set allow-duplicate-recipes` and the same recipe name in two imported files, just keeps
+the recipe of the file imported first (just manual, "Imports"; measured 2026-09-02 with two
+files on just 1.57.0). An import appended after the base's files can never override a base
+recipe, so `70-justfile.sh` replaces the base file, and fails the build on any name defined
+twice.
 
 ## `ujust.sh` declares its colour and formatting names readonly
 
@@ -144,6 +153,25 @@ Measured 2026-09-04: the closed flavour's pre-flight after a new feature printed
 `Using cache` lines, while `--no-cache` produced the real build. CI is not affected, a fresh
 runner having no layer cache.
 
+## A skel file reaches no account that already exists
+
+`/etc/skel` is read once, by `useradd`, when it creates a home (useradd(8), `-k`). The Konsole
+`sessionui.rc` and the PowerShell profile shipped there since the first image were absent from
+every home of the three hosts that run it (measured 2026-09-07, `test -f` on each), while the
+two Plasma update scripts of the same feature had run, plasmashell replaying them per user. The
+docs said the four defaults reach existing accounts alike. The user hook
+`12-bazzite-mx-copy-paste.sh` copies the two files at login when they are missing, the way
+`11-bazzite-mx-vscode-extensions.sh` seeds `settings.json`; a skel file added later needs the
+same.
+
+## KXmlGui writes the merged file back at the application's version
+
+The Konsole shortcut file ships with `version="1"` so that KXmlGui merges its
+`ActionProperties` into Konsole's own layout. At Konsole's next start the local file is
+rewritten as the full merged layout at Konsole's version, the `ActionProperties` kept (measured
+2026-09-07: 668 bytes seeded, 3812 bytes and `version="36"` after one start). The shortcut
+holds; a reader comparing the home copy with the skel copy finds them different.
+
 ## The base's image-info.json and its OCI label can name different days
 
 `ghcr.io/ublue-os/bazzite@sha256:437920ba…` carries
@@ -152,6 +180,26 @@ is `44.20260907`. `resolve-base.sh` reads the label, while `10-image-info.sh` re
 so `base-version` and the `(Bazzite …)` of `version-pretty` follow the file: a `.dev` build
 without `VERSION` would be `44.20260907.dev`. Measured 2026-09-12 on the pre-flight image. Both
 numbers are the base's own; the image reports each from its source and neither is rewritten.
+
+## A FAIL branch died before its verdict
+
+Six smoke tests, at eight sites, built their `FAIL:` line as
+`lines=$(grep … "$file" | tr '\n' ' ')`: with the file empty, grep matched nothing and exited
+1, `pipefail` failed the assignment, `set -e` ended the test before its `echo`, and the runner
+saw a test that stopped early instead of the line naming the file (measured 2026-09-08 with an
+empty `vscode.repo` mounted over the image: 2 lines of output instead of 11, no `FAIL:`). The
+sibling shapes turned up one file at a time: `$(cmd || echo x)` under a command that prints its
+answer and exits non-zero (`grep -c` printed `0`, then `echo` printed another), a `head -n1` on
+a tool that prints several lines, `$(cmd)` inside an `echo` whose status nobody reads, an empty
+variable printed as a value, a fixture file read as empty when missing, a state change inside
+`if …; then` without an `else`. The two shapes a regex can see are rules 8 and 9 of
+`check-form.sh` since 2026-09-08; the rest is read by hand at review, listed here for that
+reading. One more shape has no pipe for rule 9 to see: a bare `var=$(jq …)`, `var=$(rpm -q …)`,
+`var=$(tail …)` or `var=$(a_function)` whose command exits non-zero on the state the test is
+there to catch (measured 2026-09-08: a master justfile that does not parse left `tests/70` at 3
+lines of 80, an unreadable `image-info.json` left `tests/10` at none). A probe assigned in a
+test carries `|| true` and its `FAIL:` line prints the fallback; the twenty sites of the tests
+were converted the same day.
 
 ## `sunshine --version` needs a home directory
 

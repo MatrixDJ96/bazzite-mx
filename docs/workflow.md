@@ -14,8 +14,9 @@ Contents: branches and profiles · run the lint job locally · what takes the ow
 The `lint` job runs shellcheck, `check-form.sh` and `check-commits.sh` (every commit of the
 pushed ref, `conventions.md` § Commits) on the runner, then shfmt, yamllint and
 `just --fmt --check` on the recipe files inside `quay.io/fedora/fedora:44`, the `just` release
-the image ships. The `--self-test` of every script under `.github/scripts/` and of
-`tests/run.sh` runs right after ShellCheck, before the checks it proves.
+the image ships. It also runs `node --check` on the Plasma update scripts. The `--self-test` of
+every script under `.github/scripts/` and of `tests/run.sh` runs right after ShellCheck, before
+the checks it proves.
 
 `build.yml` ignores pushes that touch only `**.md`, `docs/`, `.claude/` or `LICENSE`.
 
@@ -48,6 +49,7 @@ scripts=$({ git ls-files -co --exclude-standard '*.sh'
 recipes=$(git ls-files '*.just' | tr '\n' ' ')
 shellcheck -x -P SCRIPTDIR --severity=warning $scripts
 ./.github/scripts/check-form.sh $scripts
+for f in $(git ls-files '*.js'); do node --check "$f"; done
 podman run --rm -v "$PWD:/repo:ro,z" -w /repo quay.io/fedora/fedora:44 \
   bash -euo pipefail -c "dnf -q install -y shfmt yamllint just >/dev/null
     shfmt -d -i 4 -ci -bn -sr $scripts; yamllint --strict .
