@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test of 01-system-files.sh: every file under system_files/ is in the
-# image, byte for byte, mode included.
+# image, byte for byte, mode included, and every group the image fixes has
+# its number in /usr/lib/group, where the cleaned stage moves it.
 #
 # Usage: run by tests/run.sh inside the image (offline, on the cleaned tree),
 # with the repo at ../.. so system_files/ is readable.
@@ -9,6 +10,7 @@
 set -euo pipefail
 
 SOURCE_TREE=$(dirname "$(realpath "$0")")/../../system_files
+FIXED_GROUPS=$SOURCE_TREE/usr/lib/sysusers.d/bazzite-mx-groups.conf
 
 # One FAIL line per file that is missing, differs or carries another mode;
 # one OK line when every file matched.
@@ -38,4 +40,24 @@ check_system_files() {
     fi
 }
 
+# One line per `g <name> <gid>` line of the sysusers file.
+check_fixed_groups() {
+    local type name gid got
+
+    while read -r type name gid; do
+        if [ "$type" != g ]; then
+            continue
+        fi
+
+        got=$(awk -F: -v name="$name" '$1 == name { print $3 }' /usr/lib/group)
+
+        if [ "$got" = "$gid" ]; then
+            echo "OK: group $name has the fixed gid $gid"
+        else
+            echo "FAIL: group $name has gid '${got:-none}' in /usr/lib/group, expected $gid"
+        fi
+    done < "$FIXED_GROUPS"
+}
+
 check_system_files
+check_fixed_groups

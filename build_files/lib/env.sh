@@ -21,3 +21,5 @@ mkdir -p "$BUILD_TMP" "$BUILD_STATE"
 source "$BUILD_FILES/lib/log.sh"
 # shellcheck source=repos.sh
 source "$BUILD_FILES/lib/repos.sh"
+# shellcheck source=gpg.sh
+source "$BUILD_FILES/lib/gpg.sh"
