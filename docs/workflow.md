@@ -5,8 +5,9 @@ the repository settings the pipeline relies on, and the pin refresh. The build i
 [`architecture.md`](architecture.md).
 
 Contents: branches and profiles · run the lint job locally · probe a pre-flight image by hand ·
-the release run · the weekly trigger and the upstream watcher · GHCR retention · promotions ·
-recovery · repository settings · keeping the pins fresh · what takes the owner's OK.
+the release run · the weekly trigger and the upstream watcher · GHCR retention · the site ·
+promotions · recovery · repository settings · keeping the pins fresh · what takes the owner's
+OK.
 
 ## Branches and profiles
 
@@ -19,9 +20,9 @@ recovery · repository settings · keeping the pins fresh · what takes the owne
 The `lint` job runs shellcheck, `check-form.sh` and `check-commits.sh` (every commit of the
 pushed ref, `conventions.md` § Commits) on the runner, then shfmt, yamllint and
 `just --fmt --check` on the recipe files inside `quay.io/fedora/fedora:44`, the `just` release
-the image ships. It also runs `node --check` on the Plasma update scripts. The `--self-test` of
-every script under `.github/scripts/` and of `tests/run.sh` runs right after ShellCheck, before
-the checks it proves.
+the image ships. It also runs `node --check` on the Plasma update scripts and `check-site.sh`
+on `site/`. The `--self-test` of every script under `.github/scripts/` and of `tests/run.sh`
+runs right after ShellCheck, before the checks it proves.
 
 A push never releases: `release.yml` has one trigger, `workflow_dispatch`. The main profile is
 proven on a branch before it reaches `main`, naming the branch you want it to run on:
@@ -30,12 +31,12 @@ proven on a branch before it reaches `main`, naming the branch you want it to ru
 gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref develop -f rechunk=true
 ```
 
-`build.yml` ignores pushes that touch only `**.md`, `docs/`, `.claude/` or `LICENSE`.
+`build.yml` ignores pushes that touch only `**.md`, `docs/`, `site/`, `.claude/` or `LICENSE`.
 
 A force-push that replaces the history may create no `push` run ([`gotchas.md`](gotchas.md) § A
 force-push of a rewritten history may create no `push` run). Read the push run of the new head
-first, for `build.yml`; `--commit` wants the full sha, and an empty list means the run is
-missing:
+first, for `build.yml` and, on `main`, for `deploy-pages.yml`; `--commit` wants the full sha,
+and an empty list means the run is missing:
 
 ```bash
 gh run list --repo MatrixDJ96/bazzite-mx --workflow <workflow> --event push \
@@ -43,10 +44,11 @@ gh run list --repo MatrixDJ96/bazzite-mx --workflow <workflow> --event push \
 ```
 
 Dispatch only what is missing: a `build.yml` dispatch cancels a push run of the same ref
-(`cancel-in-progress`). For `main`:
+(`cancel-in-progress`), a `deploy-pages.yml` one queues a second deployment. For `main`:
 
 ```bash
 gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref main -f rechunk=true
+gh workflow run deploy-pages.yml --repo MatrixDJ96/bazzite-mx --ref main
 ```
 
 ## Run the lint job locally
@@ -230,6 +232,22 @@ way (GitHub REST docs, «Restore a package version for the authenticated user»)
 that index lists and its `sha256-<SBOM digest>.sig`: `skopeo inspect --raw` on the restored
 `sha256-<digest>` tag gives the SBOM's digest, the `name` of its deleted version.
 
+## The site
+
+`site/` holds seven hand-written pages, one stylesheet and `logo.svg`, no script and no
+external asset. `deploy-pages.yml` publishes the directory on a push to `main` that touches
+`site/`, `.github/scripts/check-site.sh` or the workflow itself, and on a dispatch. `build.yml`
+ignores `site/`, so a site-only push runs the deployment alone. `check-site.sh` walks every
+page before the upload and on every sandbox run.
+
+```bash
+./.github/scripts/check-site.sh site             # what CI runs, links fetched
+python3 -m http.server 8765 --bind 127.0.0.1 --directory site   # look at it on port 8765
+```
+
+Only `main` deploys: the branch policy of the `github-pages` environment admits no other ref,
+whose deployment would replace the published site.
+
 ## Promotions
 
 ```bash
@@ -294,6 +312,8 @@ Checked and set with `gh`, each command run with the owner's OK.
 | default workflow permissions | the token starts read-only, each job declares what it needs                                                                                                                               | `gh api repos/MatrixDJ96/bazzite-mx/actions/permissions/workflow`                         | leave                                                                           |
 | workflow states              | GitHub disables a public repository's cron after 60 days without repository activity (GitHub docs, `schedule`)                                                                            | `refresh-pins.sh --check`, class `workflow`                                               | `gh api -X PUT repos/MatrixDJ96/bazzite-mx/actions/workflows/<file>.yml/enable` |
 | package visibility           | an anonymous host cannot pull a private image                                                                                                                                             | `gh api /user/packages/container/<package> --jq .visibility`                              | the package's settings page: the REST API has no endpoint                       |
+| Pages source                 | the Pages actions need the source "GitHub Actions"                                                                                                                                        | `gh api repos/MatrixDJ96/bazzite-mx/pages --jq .build_type`                               | the repository's Pages settings                                                 |
+| environment `github-pages`   | only `main` deploys the site                                                                                                                                                              | `gh api repos/MatrixDJ96/bazzite-mx/environments/github-pages/deployment-branch-policies` | the environment's settings page                                                 |
 
 The `gh secret` and `gh variable` lines want `--repo MatrixDJ96/bazzite-mx` outside the
 checkout; the `gh api` lines name the repository in their path. GHCR creates a package private

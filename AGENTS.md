@@ -14,17 +14,18 @@ for s in ./.github/scripts/*.sh; do "$s" --self-test; done  # each CI script's g
 shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's ShellCheck
 ./.github/scripts/check-form.sh <file>.sh                   # banned shapes, 100 columns
 ./.github/scripts/check-commits.sh HEAD                     # every commit message on the ref
+./.github/scripts/check-site.sh site                        # the seven pages, links fetched
 ./.github/scripts/refresh-pins.sh --check                   # one row per pin; STALE is a row
 ./.github/scripts/preflight-build.sh bazzite --no-cache     # build and probe one flavour
 # the main profile (chunked image, its probe, the signing-key proof) on a branch
 gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref <branch> -f rechunk=true
 ```
 
-- The commands need bash, git, jq, shellcheck and node on the host, podman and
+- The commands need bash, git, jq, python3, curl, shellcheck and node on the host, podman and
   skopeo for the pre-flight, podman for the lint job's container (shfmt, yamllint, just), and a
   gh login (`gh auth login` or `GH_TOKEN`) for `refresh-pins.sh` and the dispatch;
   `.claude/hooks/lint-edit.sh` skips any linter it cannot find.
-- The `lint` job of `build.yml` runs the first five, `node --check` on the Plasma update
+- The `lint` job of `build.yml` runs the first six, `node --check` on the Plasma update
   scripts, and shfmt, yamllint and `just --fmt --check` in `quay.io/fedora/fedora:44`; the
   local equivalent is `docs/workflow.md` § Run the lint job locally.
 - A change under `build_files/` or `system_files/` gets the pre-flight (`/preflight`,
@@ -40,7 +41,7 @@ gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref <branch> -f rechunk
 - `system_files/` — copied over `/`: vendored `.repo` files and keys, setup hooks, ujust
   recipes and their `usr/libexec/bazzite-mx-*` helpers.
 - `.github/scripts/` — one owner per CI artefact, each with a `--self-test`.
-- `site/` — `logo.svg`, the logo the image's labels point at.
+- `site/` — seven hand-written pages, `style.css` and `logo.svg`, no script.
 
 ## Conventions
 
@@ -73,7 +74,7 @@ gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref <branch> -f rechunk
 
 - A file rewritten by a shell command gets no lint: `.claude/hooks/lint-edit.sh` fires on the
   Edit and Write tools only, so run shellcheck, `check-form.sh` and shfmt on it by hand.
-- A push touching only `**.md`, `docs/`, `.claude/` or `LICENSE` runs no `build.yml`.
+- A push touching only `**.md`, `docs/`, `site/`, `.claude/` or `LICENSE` runs no `build.yml`.
 - A force-push of a rewritten history may create no `push` run: list the runs of the new head
   and dispatch only what is missing (`docs/workflow.md` § Branches and profiles).
 

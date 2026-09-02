@@ -75,6 +75,7 @@ podman build --build-arg BASE_IMAGE="$base_image" --build-arg IMAGE_NAME="$image
 
 ## Documentation
 
+- [The site](https://matrixdj96.github.io/bazzite-mx/): the material for a reader who installs.
 - [`AGENTS.md`](AGENTS.md): the project guide for anyone working on the repo.
 - [`docs/architecture.md`](docs/architecture.md): build flow, layout, build state, the gates.
 - [`docs/conventions.md`](docs/conventions.md): the rules for scripts, recipes, tests and CI.

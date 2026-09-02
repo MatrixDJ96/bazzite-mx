@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Recipes, bazzite-mx</title>
+<meta name="description"
+  content="The ujust recipes bazzite-mx adds to Bazzite's, and the three it replaces, with their
+  options." />
+<link rel="icon" href="logo.svg" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="top">
+  <div class="row">
+    <a class="brand" href="index.html" aria-label="bazzite-mx">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <defs>
+          <linearGradient id="mx-bar" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#60a5fa" />
+            <stop offset="0.52" stop-color="#7657ff" />
+            <stop offset="1" stop-color="#a855f7" />
+          </linearGradient>
+        </defs>
+        <rect x="2" y="2" width="60" height="60" rx="15" fill="#0b1020" stroke="url(#mx-bar)"
+          stroke-width="2.5" />
+        <text x="32" y="43" text-anchor="middle" font-family="ui-monospace, Menlo, monospace"
+          font-size="27" font-weight="700" fill="url(#mx-bar)">MX</text>
+      </svg>
+      <span>bazzite-mx</span>
+    </a>
+    <nav aria-label="Site">
+      <ul>
+        <li><a href="index.html">Home</a></li>
+        <li><a href="images.html">Images</a></li>
+        <li><a href="install.html">Install</a></li>
+        <li><a href="changes.html">What changes</a></li>
+        <li><a href="verify.html">Verify</a></li>
+        <li><a href="recipes.html" aria-current="page">Recipes</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </nav>
+    <a class="button cta" href="index.html#images">Get the image</a>
+  </div>
+</header>
+<main>
+  <div class="page-head">
+    <h1>Recipes</h1>
+    <p class="lead">Nine <code>ujust</code> recipes come from this image, three of them in place of
+      a Bazzite recipe of the same name. Each answers <code>ujust &lt;name&gt; help</code>, and none
+      runs as root: they call <code>sudo</code> where a step needs it.</p>
+  </div>
+
+  <section id="own">
+    <h2>Added by the image</h2>
+    <div class="grid two">
+      <div class="card recipe">
+        <h3>ujust migrate</h3>
+        <ul class="options"><li>plan</li><li>apply</li><li>apply &lt;tag&gt;</li><li>help</li></ul>
+        <p>Brings this host to the state the image expects, one confirmation per change but step 2
+          (backups, pin, timer stop), the reboot left to you. <code>plan</code> is read-only and
+          the default; the tag defaults to <code>stable</code>. Step by step:
+          <a href="install.html">install</a>.</p>
+      </div>
+      <div class="card recipe">
+        <h3>ujust verify-host</h3>
+        <ul class="options"><li>help</li></ul>
+        <p>Checks the host against what the image expects and prints one line per check, exiting 1
+          on any <code>FAIL:</code>. Every failing line names its fix or why the check could not
+          run (<a href="install.html#already">install</a>).</p>
+      </div>
+      <div class="card recipe">
+        <h3>ujust setup-ntfsplus</h3>
+        <ul class="options"><li>status</li><li>enable</li><li>disable</li><li>help</li></ul>
+        <p>Uses the NTFSPLUS driver for this host's NTFS volumes. <code>enable</code> proves the
+          driver on a loop image, switches the <code>fstab</code> rows from <code>ntfs3</code> to
+          <code>ntfs</code> and remounts what is not busy; <code>disable</code> is the reverse.
+          Every <code>ntfs</code> row without an <code>errors=</code> option gains
+          <code>errors=remount-ro</code>, and the volumes the file manager mounts take it from
+          the image, so a dirty volume, or one Windows hibernated on, mounts read-only; fast
+          startup can leave a volume with neither sign, so turn it off in Windows. No mask is
+          written: a row without <code>umask</code>, <code>fmask</code> or <code>dmask</code>
+          goes from 0755 under <code>ntfs3</code> to 0777 under NTFSPLUS, writable by every
+          account. The module is unsigned, so Secure Boot has to be off.</p>
+      </div>
+      <div class="card recipe">
+        <h3>ujust setup-msi</h3>
+        <ul class="options"><li>status</li><li>enable</li><li>disable</li><li>help</li></ul>
+        <p>Only on an MSI system. <code>enable</code> loads <code>msi-ec</code> and
+          <code>acpi_ec</code> now and at boot and installs MControlCenter; <code>disable</code>
+          undoes both. The modules are unsigned, so Secure Boot has to be off.</p>
+      </div>
+      <div class="card recipe">
+        <h3>ujust setup-panels</h3>
+        <ul class="options"><li>help</li></ul>
+        <p>Runs the image's Plasma panel script again in the running session, for a login that had
+          one screen or a screen added later. Every screen without a panel gets one.</p>
+      </div>
+      <div class="card recipe">
+        <h3>ujust setup-dev</h3>
+        <ul class="options"><li>status</li><li>install</li><li>help</li></ul>
+        <p><code>install</code> seeds <code>~/.config/mise/config.toml</code> from the image's
+          default when you have none, then runs <code>mise install</code> for this user. A project's
+          own <code>mise.toml</code> wins over the global config.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="replaced">
+    <h2>In place of Bazzite's</h2>
+    <div class="grid two">
+      <div class="card recipe">
+        <h3>ujust setup-virtualization</h3>
+        <ul class="options"><li>status</li><li>kvmfr</li><li>help</li></ul>
+        <p>Bazzite's version installs the virt-manager Flatpak, enables the monolithic libvirt
+          daemon and adds kernel arguments. All of that is in the image here, so <code>status</code>
+          reports what the host has and <code>kvmfr</code> sets up the module for Looking Glass.</p>
+      </div>
+      <div class="card recipe">
+        <h3>ujust setup-sunshine</h3>
+        <ul class="options">
+          <li>status</li><li>enable</li><li>disable</li><li>portal</li><li>virtual-monitor</li>
+          <li>help</li>
+        </ul>
+        <p>Bazzite's version installs a Flatpak or a Homebrew build per host. Sunshine is an RPM of
+          the image here, so <code>enable</code> and <code>disable</code> switch the user unit;
+          <code>enable</code> also limits the portal to this PC unless the user set
+          <code>origin_web_ui_allowed</code>, and asks for the portal's credentials before the
+          first start; the Sunshine entry of the menu runs <code>enable</code>.
+          <code>portal</code> opens the management page and <code>virtual-monitor</code> adds a KWin
+          virtual display per stream.</p>
+      </div>
+      <div class="card recipe">
+        <h3>ujust install-jetbrains-toolbox</h3>
+        <ul class="options"><li>install</li><li>status</li><li>latest</li><li>help</li></ul>
+        <p>Bazzite's version installs a Homebrew cask. This one downloads the newest Toolbox build
+          from JetBrains' release feed, verifies its sha256 against the feed, unpacks it under
+          <code>~/.local/share/JetBrains/ToolboxApp</code> and starts it once.</p>
+      </div>
+    </div>
+    <p>What each recipe does under the hood, with its sources, is in
+      <a href="https://github.com/MatrixDJ96/bazzite-mx/blob/main/docs/divergences.md">docs/divergences.md</a>.</p>
+  </section>
+</main>
+<footer>
+  <p>A single-maintainer image, built in the open, not affiliated with Bazzite or Universal
+    Blue. Rebase at your own risk. Source under Apache-2.0.</p>
+  <ul>
+    <li><a href="https://github.com/MatrixDJ96/bazzite-mx">Source</a></li>
+    <li><a href="https://github.com/MatrixDJ96/bazzite-mx/releases">Releases</a></li>
+    <li><a href="https://github.com/MatrixDJ96/bazzite-mx/issues">Issues</a></li>
+  </ul>
+</footer>
+</body>
+</html>

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>bazzite-mx</title>
+<meta name="description"
+  content="A personal bootc image on Bazzite: the three images, how to move a host onto one and how
+  to verify what it pulls." />
+<link rel="icon" href="logo.svg" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="top">
+  <div class="row">
+    <a class="brand" href="index.html" aria-label="bazzite-mx">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <defs>
+          <linearGradient id="mx-bar" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#60a5fa" />
+            <stop offset="0.52" stop-color="#7657ff" />
+            <stop offset="1" stop-color="#a855f7" />
+          </linearGradient>
+        </defs>
+        <rect x="2" y="2" width="60" height="60" rx="15" fill="#0b1020" stroke="url(#mx-bar)"
+          stroke-width="2.5" />
+        <text x="32" y="43" text-anchor="middle" font-family="ui-monospace, Menlo, monospace"
+          font-size="27" font-weight="700" fill="url(#mx-bar)">MX</text>
+      </svg>
+      <span>bazzite-mx</span>
+    </a>
+    <nav aria-label="Site">
+      <ul>
+        <li><a href="index.html" aria-current="page">Home</a></li>
+        <li><a href="images.html">Images</a></li>
+        <li><a href="install.html">Install</a></li>
+        <li><a href="changes.html">What changes</a></li>
+        <li><a href="verify.html">Verify</a></li>
+        <li><a href="recipes.html">Recipes</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </nav>
+    <a class="button cta" href="index.html#images">Get the image</a>
+  </div>
+</header>
+<main>
+  <section class="hero">
+    <div class="lockup">
+      <svg viewBox="0 0 64 64" role="img" aria-label="MX">
+        <defs>
+          <linearGradient id="mx-hero" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#60a5fa" />
+            <stop offset="0.52" stop-color="#7657ff" />
+            <stop offset="1" stop-color="#a855f7" />
+          </linearGradient>
+          <radialGradient id="mx-hero-bg" cx="0.28" cy="0.18" r="1.1">
+            <stop offset="0" stop-color="#1b1533" />
+            <stop offset="0.62" stop-color="#0b1020" />
+          </radialGradient>
+        </defs>
+        <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#mx-hero-bg)"
+          stroke="url(#mx-hero)" stroke-width="2" />
+        <text x="32" y="43" text-anchor="middle" font-family="ui-monospace, Menlo, monospace"
+          font-size="27" font-weight="700" fill="url(#mx-hero)">MX</text>
+      </svg>
+      <h1 class="wordmark">
+        <span class="registry">ghcr.io/matrixdj96/</span>
+        <span class="name">bazzite-mx</span><wbr /><span class="tag">:stable</span>
+      </h1>
+    </div>
+    <p class="lead">A personal <a href="https://bootc-dev.github.io/bootc/">bootc</a> image on
+      <a href="https://bazzite.gg">Bazzite</a>, KDE desktop, <code>stable</code> stream. Kernel
+      modules, services, vendor repositories, signing trust and the <code>ujust</code> recipes are
+      in the image; applications stay on Flatpak, mutable userspace in a distrobox.</p>
+    <div class="actions">
+      <a class="button" href="install.html">Install on a Bazzite host</a>
+      <a class="button quiet" href="changes.html">What changes over Bazzite</a>
+    </div>
+    <ul class="facts">
+      <li>Three images, one recipe</li>
+      <li>Signed by digest, attested by the run that built it</li>
+      <li>Updates the Bazzite way, rollback from the boot menu or the terminal</li>
+    </ul>
+  </section>
+
+  <section id="images">
+    <h2>Pick your image</h2>
+    <p>Only the base image differs. <code>lspci -d 10de:</code> prints a line when there is an
+      NVIDIA GPU; no line means the first image.</p>
+    <div class="grid three">
+      <div class="card image-card">
+        <p class="for">AMD or Intel graphics</p>
+        <span class="ref">ghcr.io/matrixdj96/bazzite-mx:stable</span>
+        <p class="base">on ghcr.io/ublue-os/bazzite:stable</p>
+      </div>
+      <div class="card image-card">
+        <p class="for">NVIDIA, open kernel modules (Turing and newer)</p>
+        <span class="ref">ghcr.io/matrixdj96/bazzite-mx-nvidia-open:stable</span>
+        <p class="base">on ghcr.io/ublue-os/bazzite-nvidia-open:stable</p>
+      </div>
+      <div class="card image-card">
+        <p class="for">NVIDIA, closed driver (Maxwell, Pascal and Volta)</p>
+        <span class="ref">ghcr.io/matrixdj96/bazzite-mx-nvidia:stable</span>
+        <p class="base">on ghcr.io/ublue-os/bazzite-nvidia:stable</p>
+      </div>
+    </div>
+    <p>Follow <code>:stable</code>: it moves only onto a release the gate has verified. The
+      <a href="images.html">images page</a> has the dated tags, the update command and the
+      rollback.</p>
+  </section>
+
+  <section id="start">
+    <h2>Five commands</h2>
+    <p>From a Bazzite host. The first rebase is unsigned, because stock Bazzite trusts nothing
+      under <code>ghcr.io/matrixdj96</code>; <code>ujust migrate</code> then moves the host onto the
+      signed origin, asking before every change except those of step 2: the backups, the pin
+      and the timer stop.</p>
+<pre tabindex="0"><code>sudo rpm-ostree rebase ostree-unverified-registry:ghcr.io/matrixdj96/bazzite-mx:stable
+systemctl reboot
+ujust migrate apply
+systemctl reboot
+ujust verify-host</code></pre>
+    <p>On an NVIDIA machine name <code>bazzite-mx-nvidia-open</code> (Turing and newer) or
+      <code>bazzite-mx-nvidia</code> (Maxwell, Pascal and Volta) in the first line; an older GPU
+      stays on <code>bazzite-mx</code>. Every step, with what it removes and what stays:
+      <a href="install.html">install</a>.</p>
+  </section>
+
+  <section id="adds">
+    <h2>What the image adds</h2>
+    <p>Every change enters on four conditions: Bazzite does not cover it, it needs the image layer,
+      a machine that runs the image uses it, and it ships a smoke test with its source cited.</p>
+    <div class="grid three">
+      <a class="card link" href="changes.html#trust">
+        <h3>Signing trust</h3>
+        <p>A key and a policy scope for <code>ghcr.io/matrixdj96</code>: a host checks every
+          pull.</p>
+      </a>
+      <a class="card link" href="changes.html#docker">
+        <h3>Docker CE next to Podman</h3>
+        <p>Engine, buildx and compose from Docker's repository, both sockets on.</p>
+      </a>
+      <a class="card link" href="changes.html#virt">
+        <h3>Virtualization</h3>
+        <p>libvirt, QEMU/KVM, virt-manager, swtpm and quickemu in the image, VMs reach the network
+          past Docker's firewall.</p>
+      </a>
+      <a class="card link" href="changes.html#dev">
+        <h3>Editor and runtimes</h3>
+        <p>Visual Studio Code as Microsoft's RPM, <code>mise</code> for per-user node, python,
+          java and dotnet.</p>
+      </a>
+      <a class="card link" href="changes.html#cli">
+        <h3>Command-line and git tools</h3>
+        <p><code>gh</code>, <code>glab</code>, ShellCheck, shfmt, GitKraken and a tracing set.</p>
+      </a>
+      <a class="card link" href="changes.html#desktop">
+        <h3>Desktop applications</h3>
+        <p>Firefox and 1Password as RPMs, so the browser integration works; gparted.</p>
+      </a>
+      <a class="card link" href="changes.html#sunshine">
+        <h3>Sunshine as an RPM</h3>
+        <p>KMS capture the Flatpak cannot do, streaming opt-in per user.</p>
+      </a>
+      <a class="card link" href="changes.html#kde">
+        <h3>KDE defaults</h3>
+        <p>Clock seconds, a panel per screen, Ctrl+C to copy in Konsole, Ctrl+C and Ctrl+V in a
+          pwsh you install.</p>
+      </a>
+      <a class="card link" href="changes.html#msi">
+        <h3>MSI laptop</h3>
+        <p><code>msi-ec</code> and <code>acpi_ec</code> built against the kernel, MControlCenter
+          on request.</p>
+      </a>
+    </div>
+    <p>The rest is on <a href="changes.html">what changes</a>: the setup hooks that run at boot
+      and at login, the <a href="changes.html#ntfsplus">NTFSPLUS driver</a> as a per-host opt-in,
+      and the <a href="recipes.html">recipes</a> that migrate, verify and set up a host.</p>
+  </section>
+
+  <section id="verify">
+    <h2>Verified before it is pulled</h2>
+    <p>Every published image is signed by digest with
+      <a href="https://raw.githubusercontent.com/MatrixDJ96/bazzite-mx/main/cosign.pub">cosign.pub</a>,
+      the key the image itself trusts, and attested by the workflow run that built it. A push
+      never publishes: a release is a dispatched run whose gate verifies the signature by digest
+      before the dated tag or <code>:stable</code> points at the image.</p>
+<pre tabindex="0"><code>cosign verify --key https://raw.githubusercontent.com/MatrixDJ96/bazzite-mx/main/cosign.pub \
+  ghcr.io/matrixdj96/bazzite-mx:stable</code></pre>
+    <p>The attestation, the SBOM and what a migrated host checks on its own:
+      <a href="verify.html">verify</a>.</p>
+  </section>
+</main>
+<footer>
+  <p>A single-maintainer image, built in the open, not affiliated with Bazzite or Universal
+    Blue. Rebase at your own risk. Source under Apache-2.0.</p>
+  <ul>
+    <li><a href="https://github.com/MatrixDJ96/bazzite-mx">Source</a></li>
+    <li><a href="https://github.com/MatrixDJ96/bazzite-mx/releases">Releases</a></li>
+    <li><a href="https://github.com/MatrixDJ96/bazzite-mx/issues">Issues</a></li>
+  </ul>
+</footer>
+</body>
+</html>

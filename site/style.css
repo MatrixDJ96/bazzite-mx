@@ -1,0 +1,413 @@
+/* One stylesheet for the seven pages: system fonts, a dark and a light palette, no asset
+   fetched from outside the site. */
+:root {
+  --bg: #0b1020;
+  --bg-raise: #111832;
+  --surface: #141c33;
+  --fg: #e8edf7;
+  --muted: #9aa6bd;
+  --line: #273250;
+  --line-strong: #3a4870;
+  --code-bg: #0e142a;
+  --accent: #60a5fa;
+  --accent-mid: #8b7cff;
+  --accent-2: #a855f7;
+  --accent-ink: #0b1020;
+  --glow: rgba(124, 58, 237, 0.28);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  color-scheme: dark light;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f5f7fc;
+    --bg-raise: #eef1f9;
+    --surface: #ffffff;
+    --fg: #131a2c;
+    --muted: #596479;
+    --line: #d8deec;
+    --line-strong: #b9c3da;
+    --code-bg: #eaeef7;
+    --accent: #2563eb;
+    --accent-mid: #5b3fe0;
+    --accent-2: #8b3fd9;
+    --accent-ink: #ffffff;
+    --glow: rgba(124, 58, 237, 0.12);
+  }
+}
+
+* { box-sizing: border-box; }
+/* The bar stays one row and sticky down to 641px, so one padding clears it
+   for every #fragment; below, it wraps and scrolls away with the page. */
+html { scroll-padding-top: 80px; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.6 var(--sans);
+}
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; margin: 0; }
+p { margin: 10px 0; }
+ul, ol { padding-left: 22px; }
+li { margin: 4px 0; }
+code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  overflow-wrap: break-word;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+pre {
+  margin: 12px 0;
+  padding: 14px 18px;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow-x: auto;
+  scrollbar-color: var(--line-strong) transparent;
+  line-height: 1.5;
+}
+pre code { padding: 0; border: 0; background: none; font-size: 14px; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 15px; }
+th, td {
+  text-align: left;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+th { color: var(--muted); font-weight: 600; }
+.scroll { overflow-x: auto; scrollbar-color: var(--line-strong) transparent; }
+
+/* --- top bar --------------------------------------------------------------- */
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.top .row {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--fg);
+  text-decoration: none;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 15px;
+  margin-right: 6px;
+}
+.brand svg { width: 28px; height: 28px; display: block; }
+.brand span { white-space: nowrap; }
+/* One row, scrolling sideways when it no longer fits: a nav that wraps under
+   a sticky bar hides every #fragment behind it. The button and the wordmark
+   go before the nav has to scroll. */
+nav { min-width: 0; }
+nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  gap: 2px 4px;
+}
+nav li { flex: none; }
+nav a {
+  display: block;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 15px;
+}
+nav a:hover { color: var(--fg); background: var(--bg-raise); }
+nav a[aria-current="page"] { color: var(--fg); background: var(--bg-raise); }
+.top .cta { margin-left: auto; }
+
+.button {
+  display: inline-block;
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  color: var(--accent-ink);
+  background: linear-gradient(120deg, var(--accent), var(--accent-mid) 52%, var(--accent-2));
+  box-shadow: 0 0 0 1px var(--line-strong) inset;
+}
+.button:hover { color: var(--accent-ink); filter: brightness(1.08); }
+.button.quiet {
+  color: var(--fg);
+  background: var(--bg-raise);
+  box-shadow: 0 0 0 1px var(--line) inset;
+}
+.button.quiet:hover { color: var(--fg); background: var(--surface); }
+
+/* --- page frame ---------------------------------------------------------- */
+main { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+.page-head { padding: 56px 0 8px; }
+.page-head h1 { font-size: 40px; }
+.page-head .lead { margin: 12px 0 0; font-size: 18px; color: var(--muted); max-width: 66ch; }
+section { padding: 28px 0 4px; }
+section h2 { font-size: 24px; margin-bottom: 8px; }
+section h3 { font-size: 18px; margin: 22px 0 4px; }
+section > p, section > div > p, .card p, .step p { max-width: 72ch; }
+.jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.jump a {
+  display: inline-block;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-raise);
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 14px;
+}
+.jump a:hover { border-color: var(--accent); color: var(--fg); }
+
+/* --- hero ------------------------------------------------------------------ */
+.hero {
+  padding: 72px 0 40px;
+  position: relative;
+}
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 60%;
+  height: 100%;
+  background: radial-gradient(closest-side, var(--glow), transparent);
+  pointer-events: none;
+}
+.hero > * { position: relative; }
+.lockup { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; }
+.lockup svg {
+  width: 124px;
+  height: 124px;
+  flex: none;
+  filter: drop-shadow(0 12px 32px var(--glow));
+}
+.wordmark { font-family: var(--mono); line-height: 1; }
+.wordmark .registry { display: block; font-size: 18px; color: var(--muted); margin-bottom: 8px; }
+.wordmark .name {
+  display: inline;
+  font-size: clamp(40px, 9vw, 104px);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  white-space: nowrap;
+  background:
+    linear-gradient(100deg, var(--accent) 0%, var(--accent-mid) 45%, var(--accent-2) 80%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.wordmark .tag {
+  display: inline;
+  font-size: clamp(22px, 4vw, 44px);
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: -0.02em;
+}
+.hero .lead { font-size: 20px; max-width: 60ch; margin: 26px 0 0; color: var(--fg); }
+.hero .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.hero .facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 26px;
+  margin: 30px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+/* --- cards ----------------------------------------------------------------- */
+.grid { display: grid; gap: 14px; margin-top: 16px; }
+.grid + p { margin-top: 18px; }
+.grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px 20px;
+}
+.card h3 { font-size: 17px; margin: 0 0 6px; }
+.card p { margin: 6px 0 0; color: var(--muted); font-size: 15px; }
+.card p a { color: var(--fg); }
+.card.link { display: block; color: inherit; text-decoration: none; }
+.card.link:hover { border-color: var(--accent); }
+.card.link h3 { color: var(--accent); }
+
+.image-card { border-top: 3px solid var(--accent); }
+.image-card .for { font-weight: 600; color: var(--fg); margin: 0 0 8px; font-size: 15px; }
+.image-card .ref {
+  display: block;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+}
+.image-card .base { margin: 8px 0 0; font-size: 14px; }
+/* From 861px each image is a full-width row, so its whole reference fits on one line:
+   check-site.sh wants the reference unbroken in the markup, so no <wbr> can split it. */
+@media (min-width: 861px) {
+  .grid.three:has(> .image-card) { grid-template-columns: 1fr; }
+  .image-card {
+    display: grid;
+    grid-template-columns: minmax(0, 17em) 1fr;
+    column-gap: 24px;
+    align-items: baseline;
+    border-top: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+  }
+  .image-card .for { grid-row: 1 / span 2; margin: 0; }
+  .image-card .ref { grid-column: 2; overflow-wrap: normal; }
+  .image-card .base { grid-column: 2; margin-top: 4px; }
+}
+
+.steps { list-style: none; margin: 18px 0 0; padding: 0; counter-reset: step; }
+.step {
+  position: relative;
+  padding: 4px 0 22px 62px;
+  border-left: 1px solid var(--line);
+  margin-left: 20px;
+}
+.step:last-child { border-left-color: transparent; }
+.step::before {
+  counter-increment: step;
+  content: counter(step);
+  position: absolute;
+  left: -21px;
+  top: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--accent-ink);
+  background: linear-gradient(120deg, var(--accent), var(--accent-mid) 52%, var(--accent-2));
+}
+.step > p:first-child { margin-top: 8px; font-weight: 600; }
+.step pre { margin: 10px 0; }
+
+.recipe { margin-top: 14px; }
+.recipe h3 { font-family: var(--mono); font-size: 16px; margin: 0 0 8px; overflow-wrap: anywhere; }
+.recipe .options { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; }
+.recipe .options li {
+  margin: 0;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--fg);
+}
+
+details {
+  border-top: 1px solid var(--line);
+  padding: 4px 0;
+}
+details:last-of-type { border-bottom: 1px solid var(--line); }
+summary {
+  cursor: pointer;
+  padding: 14px 0;
+  font-size: 17px;
+  font-weight: 600;
+  list-style: none;
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: "+";
+  content: "+" / "";
+  font-family: var(--mono);
+  color: var(--accent);
+  flex: 0 0 1ch;
+}
+details[open] summary::before { content: "\2212"; content: "\2212" / ""; }
+details p { margin: 0 0 14px 2.2ch; max-width: 72ch; color: var(--fg); }
+
+.note {
+  border-left: 3px solid var(--accent);
+  background: var(--bg-raise);
+  padding: 10px 16px;
+  border-radius: 0 10px 10px 0;
+  margin: 14px 0;
+}
+.note p { margin: 4px 0; }
+
+footer {
+  margin: 64px max(24px, calc((100% - 1072px) / 2)) 40px;
+  padding: 20px 0 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  justify-content: space-between;
+}
+footer p { margin: 0; max-width: 70ch; }
+footer ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 18px; flex-wrap: wrap; }
+
+@media (max-width: 860px) {
+  .grid.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 940px) {
+  .top .cta { display: none; }
+}
+@media (max-width: 760px) {
+  .brand span { display: none; }
+  .brand { margin-right: 0; }
+  nav a { padding: 6px 8px; }
+}
+@media (max-width: 640px) {
+  html { scroll-padding-top: 0; }
+  .top { position: static; }
+  .top .row { padding: 8px 16px; gap: 10px; }
+  nav ul { flex-wrap: wrap; overflow-x: visible; }
+  nav a { padding: 5px 8px; font-size: 14px; }
+  main { padding-left: 16px; padding-right: 16px; }
+  footer { margin-left: 16px; margin-right: 16px; }
+  .page-head { padding-top: 36px; }
+  .page-head h1 { font-size: 32px; }
+  .hero { padding: 44px 0 28px; }
+  .lockup { gap: 16px; }
+  .lockup svg { width: 76px; height: 76px; }
+  .grid.three, .grid.two { grid-template-columns: 1fr; }
+  .step { padding-left: 50px; margin-left: 16px; }
+  .step::before { width: 34px; height: 34px; left: -17px; font-size: 14px; }
+  th, td { padding: 7px 8px; }
+  .scroll table { min-width: 560px; }
+}

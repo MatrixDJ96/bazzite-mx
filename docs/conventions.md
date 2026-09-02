@@ -439,12 +439,12 @@ Where each one runs:
 - Names follow `ublue-os/bazzite`'s workflows (`bazzite/.github/workflows/build.yml`: jobs
   `Version`, `Make`, `Generate Release`; steps `Build Image`, `Apply Labels`, `Push to GHCR`,
   `Install Cosign`). Workflow `name:` Title Case. A job name is the phase in one Title Case
-  word: `Lint`, `Build`, `Version`, `Gate`, `Release`, `Prune`, `Promote`, `Sign`, `Trigger`,
-  `Compare`; the matrix job of the reusable build is named by its flavour, so a run reads
-  `Build / bazzite-nvidia`. A step name is Title Case, verb + object, no article, a tool in its
-  own casing: `Checkout`, `Resolve Base`, `Build Image`, `Install Cosign`, `Push to GHCR`,
-  `Run shfmt, yamllint and just`. Env vars `SCREAMING_SNAKE_CASE`; outputs `snake_case`, one
-  key name across workflows.
+  word: `Lint`, `Build`, `Version`, `Gate`, `Release`, `Prune`, `Deploy`, `Promote`, `Sign`,
+  `Trigger`, `Compare`; the matrix job of the reusable build is named by its flavour, so a run
+  reads `Build / bazzite-nvidia`. A step name is Title Case, verb + object, no article, a tool
+  in its own casing: `Checkout`, `Resolve Base`, `Build Image`, `Install Cosign`,
+  `Push to GHCR`, `Run shfmt, yamllint and just`. Env vars `SCREAMING_SNAKE_CASE`; outputs
+  `snake_case`, one key name across workflows.
 - Concurrency groups are literal `bazzite-mx-<phase>[-<key>]` and never built from
   `${{ github.workflow }}`. A called workflow reports the caller's name there, so a group built
   from it would put caller and callee in the same group and the callee would wait for the run
@@ -452,7 +452,7 @@ Where each one runs:
 - Every third-party `uses:` is pinned to a commit SHA with the version in a trailing comment
   ([`workflow.md`](workflow.md) § Keeping the pins fresh).
 - `ubuntu-26.04` for jobs that need podman or skopeo; `ubuntu-slim` only for `gh`, `jq`, `curl`
-  and `python3` work, since it has no container engine and an older
+  and `python3` work (the site check), since it has no container engine and an older
   shellcheck. `ubuntu-26.04` is also the runner whose kernel keeps in-place writeback intact,
   so a runner change is a change to that measurement ([`gotchas.md`](gotchas.md) § Torn
   writeback on a 6.17-azure runner kernel).

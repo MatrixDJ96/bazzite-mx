@@ -8,7 +8,8 @@ which files carry it; the guards themselves live in the build script and its tes
 
 Contents: three flavours · image identity · signing trust · hook framework · Docker CE ·
 virtualization · VS Code · git tools · command-line tools · mise · desktop applications ·
-Sunshine · KDE defaults · MSI laptop · NTFSPLUS · ujust recipes · the cleaned stage · CI.
+Sunshine · KDE defaults · MSI laptop · NTFSPLUS · ujust recipes · the cleaned stage · CI · the
+site.
 
 ## Three flavours, one recipe
 
@@ -749,3 +750,37 @@ v9 fails on `ubuntu-26.04`). No space-freeing action runs here.
 
 Files: `.github/workflows/` and `.github/scripts/`, one owner per script
 ([`architecture.md`](architecture.md)).
+
+## The site
+
+Seven pages for a reader who installs the image: the home, the images and their tags, the
+install guide in both cases, what changes over Bazzite in plain words, the verification of
+signature, attestation and SBOM, the recipes, and the questions a first rebase raises. Every
+command on a page is one the docs or the recipes' helpers already run. Each page is written as
+well-formed XML, so Python's expat can prove its markup, and shares `style.css`, the top bar
+with the MX mark as inline SVG and the same `<nav>` block. One asset ships with them,
+`site/logo.svg`: the same mark as a file, the favicon of every page and the image every release
+stamps into `io.artifacthub.package.logo-url`, a label the base would otherwise leave pointing
+at Bazzite's own logo. System fonts, a dark palette by default and a light one through
+`prefers-color-scheme`, no script, no asset fetched from outside the site, no build step.
+
+bazzite keeps its site in a separate repository, and aurora and bazzite-dx have no page, so
+this is the only page in the family with a checker. `check-site.sh` runs in the lint job and
+again before the upload. It refuses a symbolic or hard link in `site/`, which the Pages
+artifact may not contain. On every page it refuses markup that is not well formed, any mention
+of `:testing` or `:latest`, a local reference that is not a file of the directory, an asset
+fetched from outside the site, a plain http link, and anything other than exactly one `<nav>`
+naming every page. The home and images pages must name each of the three images as a whole
+name, the home and verify pages the public key, and every https link must answer. A link into
+this repository must resolve to a file of the checkout, so the page and the file ship in the
+same push ([`gotchas.md`](gotchas.md) § A `blob/main` link is dead until the file is on
+`main`).
+
+The publishing workflow is GitHub's `starter-workflows/pages/static.yml`, pinned, in the
+`github-pages` environment, with the concurrency group `bazzite-mx-pages` and
+`cancel-in-progress: false`, following the starter's comment that a production deployment is
+never cancelled. The trigger is a push to `main` that touches `site/`, the check or the
+workflow, or a dispatch; there is no schedule, the site having no reason to change on its own.
+
+Files: `site/*.html`, `site/style.css`, `site/logo.svg`, `.github/workflows/deploy-pages.yml`,
+`.github/scripts/check-site.sh`.

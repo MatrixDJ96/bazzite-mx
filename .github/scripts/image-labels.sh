@@ -23,7 +23,8 @@ REPO_URL=https://github.com/MatrixDJ96/bazzite-mx
 # The base stamps io.artifacthub.package.readme-url at ublue-os/bazzite: restated
 # here or the image hands out Bazzite's README as its own.
 README_URL=https://raw.githubusercontent.com/MatrixDJ96/bazzite-mx/refs/heads/main/README.md
-# The base stamps the logo at ublue-os/bazzite too: site/logo.svg is ours.
+# The base stamps the logo at ublue-os/bazzite too: site/logo.svg is the mark
+# the site shows, and check-site.sh proves the file the pages reference.
 LOGO_URL=https://raw.githubusercontent.com/MatrixDJ96/bazzite-mx/refs/heads/main/site/logo.svg
 VENDOR=matrixdj96
 NAME_SHAPE='^bazzite-mx(-nvidia(-open)?)?$'
