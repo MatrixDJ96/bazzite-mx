@@ -81,7 +81,7 @@ podman build --build-arg BASE_IMAGE="$base_image" --build-arg IMAGE_NAME="$image
 - [`docs/divergences.md`](docs/divergences.md): what changes over Bazzite, and why.
 - [`docs/gotchas.md`](docs/gotchas.md): surprises found here, each with how it was found.
 - [`docs/migration.md`](docs/migration.md): bringing a host onto the image, re-checking one.
-- [`docs/workflow.md`](docs/workflow.md): branches and the release run.
+- [`docs/workflow.md`](docs/workflow.md): branches, the release run, retention.
 
 ## License
 
