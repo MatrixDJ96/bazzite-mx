@@ -1,0 +1,38 @@
+# Workflow
+
+How a change reaches a host: the branches and the profiles they run.
+
+Contents: branches and profiles · run the lint job locally · what takes the owner's OK.
+
+## Branches and profiles
+
+| Where                        | What runs                                                            | What it proves                                                     | What it publishes                 |
+| ---------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------- |
+| `develop`, `main`, pull requests | the `lint` job, then the three flavours                              | the tree builds                                                    | nothing                           |
+
+The `lint` job runs shellcheck, `check-form.sh` and `check-commits.sh` (every commit of the
+pushed ref, `conventions.md` § Commits) on the runner, then shfmt and yamllint inside
+`quay.io/fedora/fedora:44`. The `--self-test` of every script under `.github/scripts/` runs
+right after ShellCheck, before the checks it proves.
+
+`build.yml` ignores pushes that touch only `**.md`, `docs/` or `LICENSE`.
+
+## Run the lint job locally
+
+The shell catalogue is every `.sh` git does not ignore, tracked or not, plus any extensionless
+script, found by its shebang; shfmt and yamllint run in the container the job uses, so the
+releases match the image's.
+
+```bash
+scripts=$({ git ls-files -co --exclude-standard '*.sh'
+  git grep --untracked -l '^#!/usr/bin/env bash'; } | sort -u | tr '\n' ' ')
+shellcheck -x -P SCRIPTDIR --severity=warning $scripts
+./.github/scripts/check-form.sh $scripts
+podman run --rm -v "$PWD:/repo:ro,z" -w /repo quay.io/fedora/fedora:44 \
+  bash -euo pipefail -c "dnf -q install -y shfmt yamllint >/dev/null
+    shfmt -d -i 4 -ci -bn -sr $scripts; yamllint --strict ."
+```
+
+## What takes the owner's OK
+
+A push to `main`. Any change to the repository settings, and anything that touches a host.
