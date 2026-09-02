@@ -127,7 +127,7 @@ check_hook_first_run() {
     if output=$(run_hook "$fixture") && wheel_user_in_every_group "$fixture"; then
         echo "OK: hook adds the wheel user to $(groups_the_image_fixes)"
     else
-        groups_in_fixture=$(grep -E '^docker:' "$fixture/etc/group" 2>&1 \
+        groups_in_fixture=$(grep -E '^(docker|libvirt):' "$fixture/etc/group" 2>&1 \
             | on_one_line none || true)
         echo "FAIL: hook on fixture:" \
             "$(on_one_line 'no output' <<< "$output"); group file: $groups_in_fixture"
@@ -146,30 +146,37 @@ check_hook_second_run() {
     fi
 }
 
-# A host whose /etc/group carries docker on another gid than the image's
-# takes the image's number, and a file with the old gid under /run or /etc
-# follows while one in a home stays; a number another group holds is left.
+# A host whose /etc/group carries docker and libvirt on other gids than the
+# image's takes the image's numbers, and a file with an old gid under /run,
+# /etc or /var/lib/libvirt follows while one in a home stays; a number
+# another group holds is left.
 check_hook_realigns_gids() {
-    local fixture output docker_gid
+    local fixture output docker_gid libvirt_gid
 
     fixture=$(fixture_create)
     docker_gid=$(awk -F: '$1 == "docker" { print $3 }' "$fixture/usr/lib/group")
-    printf 'docker:x:958:alice\n' >> "$fixture/etc/group"
-    mkdir -p "$fixture/var/home/alice" "$fixture/run"
+    libvirt_gid=$(awk -F: '$1 == "libvirt" { print $3 }' "$fixture/usr/lib/group")
+    printf 'docker:x:958:alice\nlibvirt:x:961:alice\n' >> "$fixture/etc/group"
+    mkdir -p "$fixture/var/lib/libvirt/images" "$fixture/var/home/alice" "$fixture/run"
     : > "$fixture/run/docker.sock"
-    : > "$fixture/etc/docker-f"
+    : > "$fixture/etc/libvirt-f"
+    : > "$fixture/var/lib/libvirt/images/disk"
     : > "$fixture/var/home/alice/f"
-    chgrp 958 "$fixture/run/docker.sock" "$fixture/etc/docker-f" "$fixture/var/home/alice/f"
+    chgrp 958 "$fixture/run/docker.sock" "$fixture/var/home/alice/f"
+    chgrp 961 "$fixture/etc/libvirt-f" "$fixture/var/lib/libvirt/images/disk"
 
     if output=$(run_hook "$fixture") \
         && grep -qx "docker:x:$docker_gid:alice" "$fixture/etc/group" \
+        && grep -qx "libvirt:x:$libvirt_gid:alice" "$fixture/etc/group" \
         && [ "$(stat -c %g "$fixture/run/docker.sock")" = "$docker_gid" ] \
-        && [ "$(stat -c %g "$fixture/etc/docker-f")" = "$docker_gid" ] \
+        && [ "$(stat -c %g "$fixture/etc/libvirt-f")" = "$libvirt_gid" ] \
+        && [ "$(stat -c %g "$fixture/var/lib/libvirt/images/disk")" = "$libvirt_gid" ] \
         && [ "$(stat -c %g "$fixture/var/home/alice/f")" = 958 ]; then
-        echo "OK: hook moves docker to the image's gid, its files with it, a home's left"
+        echo "OK: hook moves docker and libvirt to the image's gids, their files with them," \
+            "a home's left"
     else
-        echo "FAIL: hook on gid 958: $(on_one_line 'no output' <<< "$output");" \
-            "$(grep -E '^docker:' "$fixture/etc/group" | on_one_line none)"
+        echo "FAIL: hook on gids 958 and 961: $(on_one_line 'no output' <<< "$output");" \
+            "$(grep -E '^(docker|libvirt):' "$fixture/etc/group" | on_one_line none)"
     fi
 
     sed -i -e "s/^docker:x:$docker_gid:/docker:x:958:/" "$fixture/etc/group"

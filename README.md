@@ -16,7 +16,7 @@ What the image changes over Bazzite, and why, is [`docs/divergences.md`](docs/di
 
 ## What the image adds
 
-- Containers: Docker CE and the podman tools.
+- Containers and VMs: Docker CE, libvirt, QEMU/KVM, swtpm (`ujust setup-virtualization`).
 - Signing trust for `ghcr.io/matrixdj96/*`: a host pulls only what this repository signed.
 
 ## Build it yourself
@@ -32,7 +32,7 @@ podman build --build-arg BASE_IMAGE="$base_image" --build-arg IMAGE_NAME="$image
 
 - [`AGENTS.md`](AGENTS.md): the project guide for anyone working on the repo.
 - [`docs/architecture.md`](docs/architecture.md): build flow, layout, build state, the gates.
-- [`docs/conventions.md`](docs/conventions.md): the rules for scripts, tests and CI.
+- [`docs/conventions.md`](docs/conventions.md): the rules for scripts, recipes, tests and CI.
 - [`docs/divergences.md`](docs/divergences.md): what changes over Bazzite, and why.
 - [`docs/gotchas.md`](docs/gotchas.md): surprises found here, each with how it was found.
 - [`docs/workflow.md`](docs/workflow.md): branches and the sandbox.

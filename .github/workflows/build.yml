@@ -75,7 +75,7 @@ jobs:
       - name: Check Commits
         run: ./.github/scripts/check-commits.sh HEAD
 
-      - name: Run shfmt and yamllint
+      - name: Run shfmt, yamllint and just
         run: |
           set -euo pipefail
           podman run --rm \
@@ -83,7 +83,7 @@ jobs:
             --workdir /repo \
             quay.io/fedora/fedora:44 \
             bash -euo pipefail -c '
-              dnf -q install -y shfmt yamllint git > /dev/null
+              dnf -q install -y shfmt yamllint just git > /dev/null
               git config --global --add safe.directory /repo
 
               rpm -q shfmt
@@ -101,6 +101,13 @@ jobs:
               yamllint --version
               yamllint --strict .
               echo "yamllint ok"
+
+              just --version
+              mapfile -t files < <(git ls-files "*.just")
+              for f in "${files[@]}"; do
+                just --unstable --fmt --check --justfile "$f"
+              done
+              echo "just --fmt --check ok: ${#files[@]} files"
             '
 
   build:
