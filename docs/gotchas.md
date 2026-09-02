@@ -7,8 +7,9 @@ rules themselves live in [`conventions.md`](conventions.md).
 Contents, in the order of the entries: torn writeback on 6.17-azure · ujust.sh readonly names ·
 kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set · command | grep -q ·
 stub-resolv.conf left in the image · remove-unwanted-software v9 · force-push without a push
-run · pre-flight without the changed script · image-info.json vs OCI label day · Docker FORWARD
-policy and libvirt · arithmetic error escapes set -e · scriptlet rewrote a .pyc.
+run · 1Password BrowserSupport gid · pre-flight without the changed script · image-info.json vs
+OCI label day · Docker FORWARD policy and libvirt · arithmetic error escapes set -e · scriptlet
+rewrote a .pyc.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -112,6 +113,25 @@ changed, the workflow will not run"). The same shape of push did create the `pus
 2026-09-05 and twice on 2026-09-06, so the rule is not one to rely on either way. After such a
 push the run list is read before anything is assumed, and what is missing is dispatched by
 hand, `gh workflow run build.yml --ref <branch>`.
+
+## The 1Password app rejects a BrowserSupport whose group id is below 1000
+
+With `onepassword` created as a system group (gid 951) the Firefox extension never connects:
+`1Password-BrowserSupport` verifies the browser, connects to the app and gets
+`ConnectionReset`, while the app's journal says
+
+```
+[1P:foundation/op-sys-info/src/process_information/linux.rs:409] invalid group attempted to connect, rejecting remote
+Failed to accept new connection.: PipeAuth
+```
+
+The setgid bit was in force (the peer's `Gid` line read `1000 951 951 951`), the binary was
+`root:onepassword` and `/usr/lib/group` resolved the name through altfiles. Measured 2026-09-03
+with 1Password 8.12.34 and Firefox 154 from Fedora. The rule is documented by NixOS
+(`nixos/modules/misc/ids.nix`, "1Password requires that its GID be larger than 1000",
+31001/31002) and by the Gentoo overlays that carry `acct-group/onepassword` (gentoo-zh at 26753
+after a first `-1` broke the browser integration, nekochigura refusing a gid under 1000; read
+2026-09-06); `40-desktop-apps.sh` creates the two groups with the fixed gids 31001 and 31002.
 
 ## A local pre-flight can exit 0 without running a changed build script
 

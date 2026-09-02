@@ -31,6 +31,7 @@ check_packages() {
         virt-viewer virt-install edk2-ovmf swtpm swtpm-tools guestfs-tools waypipe \
         quickemu ublue-os-libvirt-workarounds
 
+    # tests/40-desktop-apps.sh owns the rest of the blocklist.
     check_flatpak_deny 'org.virt_manager.virt-manager/*'
 
     # mesa-demos comes from Fedora through a lifted exclude; Mesa itself must

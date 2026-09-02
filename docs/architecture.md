@@ -59,6 +59,8 @@ Each script owns one artefact and ships a `--self-test`.
 | `31-git-tools.sh`         | GitKraken and git-credential-libsecret                                                                                                           |
 | `32-cli-rpms.sh`          | the Fedora command-line and system-administration packages                                                                                       |
 | `33-mise.sh`              | mise from its COPR; activation and defaults come from `system_files/`                                                                            |
+| `40-desktop-apps.sh`      | Firefox, gparted, 1Password, and the Firefox Flatpak denied                                                                                      |
+| `80-fix-opt.sh`           | `/var/opt/<name>` moves to `/usr/lib/opt/<name>` with a tmpfiles line                                                                            |
 | `90-validate-repos.sh`    | the repository gate, run after the last install                                                                                                  |
 | `95-clean-stage.sh`       | the tree bootc lint expects                                                                                                                      |
 | `tests/run.sh`            | the test runner and the pairing guard                                                                                                            |
@@ -66,8 +68,8 @@ Each script owns one artefact and ships a `--self-test`.
 | `tests/NN-<feature>.sh`   | one smoke test per build script, same stem                                                                                                       |
 
 Numbering, as the tree uses it: `00-09` preparation, `10-19` identity and trust, `20-49`
-services, packages and desktop defaults, `90-99` gates and cleanup. The file name is the only
-statement of the order.
+services, packages and desktop defaults, `80-89` fix-ups, `90-99` gates and cleanup. The file
+name is the only statement of the order.
 
 ## system_files/
 
@@ -75,8 +77,8 @@ One tree, copied over `/` by `01-system-files.sh`.
 
 | Path                                           | Content                                                                                                                                                                                                                                                                                                                    |
 | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `etc/yum.repos.d/`                             | the three vendored repositories, every section `enabled=0`                                                                                                                                                                                                                                                                 |
-| `etc/pki/rpm-gpg/RPM-GPG-KEY-*`                | the three keys those files read with `gpgkey=file://`                                                                                                                                                                                                                                                                      |
+| `etc/yum.repos.d/`                             | the four vendored repositories, every section `enabled=0`                                                                                                                                                                                                                                                                  |
+| `etc/pki/rpm-gpg/RPM-GPG-KEY-*`                | the four keys those files read with `gpgkey=file://`                                                                                                                                                                                                                                                                       |
 | `etc/containers/registries.d/matrixdj96.yaml`  | sigstore attachments for our own scope                                                                                                                                                                                                                                                                                     |
 | `etc/profile.d/mise.sh`                        | activation, in bash only                                                                                                                                                                                                                                                                                                   |
 | `etc/skel/`                                    | per-user defaults: VS Code, mise                                                                                                                                                                                                                                                                                           |
