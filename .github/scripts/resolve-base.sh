@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-# Resolve a base image to the coordinates every build consumes: the digest the
-# build pins to, the version the release title quotes, the kernel the akmods
-# carrier is picked by, and the image name the flavour maps to. One owner for the schema, used by CI and the pre-flight.
+# The one owner of the base coordinates a build consumes: digest, version,
+# kernel and the image name the flavour maps to. Every value is required, so
+# an empty label fails instead of defaulting.
 #
-#   resolve-base.sh <flavour>            flavour: bazzite | bazzite-nvidia-open
-#   resolve-base.sh --from-json <file> <flavour>   parse a saved `skopeo inspect`
-#   resolve-base.sh --self-test          prove the fail-closed paths
-#
-# Prints KEY=value lines (shell-sourceable) and appends them to $GITHUB_OUTPUT
-# when set. Every value is required: an empty label is a failure, never a
-# default (verification.md: blank-where-value-expected is failure).
+#   resolve-base.sh <flavour>                       bazzite | bazzite-nvidia-open | bazzite-nvidia
+#   resolve-base.sh --digests                       base_digest_<flavour> for the three flavours
+#   resolve-base.sh --from-json <file> <flavour>    parse a saved `skopeo inspect`
+#   resolve-base.sh --self-test
 set -euo pipefail
 
 # shellcheck source=lib.sh

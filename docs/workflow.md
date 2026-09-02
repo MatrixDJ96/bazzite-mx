@@ -70,28 +70,35 @@ gh workflow run release.yml --repo MatrixDJ96/bazzite-mx --ref main -f reason=ma
 gh run list --repo MatrixDJ96/bazzite-mx --workflow release.yml --limit 3
 ```
 
-With `promote_stable` off, or the repository variable `PROMOTE_STABLE` not `true`, the gate
-prints `promotion not requested` and the run is green with the dated tag alone. The weekly
-trigger and the upstream watcher dispatch with `promote_stable=true`, and only while the
-variable is `true` (below): with the switch off the only release runs are the ones you dispatch.
+With `promote_stable` off, or the repository variable `PROMOTE_STABLE` not `true`, the job
+prints that promotion was not requested, the gate leaves `:stable` untouched and the run is
+green with the dated tag alone.
 
 ## The weekly trigger and the upstream watcher
 
-Both live on `main` (a `schedule` runs on the default branch only) and both dispatch
-`release.yml` with `reason` and `promote_stable=true`; neither dispatches while
+Both live on `main`, because a `schedule` runs on the default branch only, and both dispatch
+`release.yml` with a `reason` and `promote_stable=true`. Neither dispatches while
 `PROMOTE_STABLE` is not `true`.
 
 | Workflow | When | What it does |
 |---|---|---|
-| `trigger-release.yml` | Tuesday 03:20 UTC, or a dispatch | one job on `ubuntu-slim`: `gh workflow run release.yml --ref main -f reason=weekly -f promote_stable=true`; skipped, visibly, while the variable is not `true` |
-| `watch-upstream.yml` | every 6 h at :37, or a dispatch (`dry_run`) | `watch-upstream.sh check`: the digest of `ghcr.io/ublue-os/<base>:stable` against the `base.digest` label of our `:stable`, per flavour; `decide`: dispatch only on `stale`, with the variable `true`, no release run queued or running, and no release with the same reason completed in the last 24 h; then the dispatch, `reason=upstream:<12 hex per base>` |
+| `trigger-release.yml` | `20 3 * * 2` (Tuesday 03:20 UTC), or a dispatch | dispatches `release.yml` with `reason=weekly` |
+| `watch-upstream.yml` | `37 */6 * * *` (every 6 h at :37), or a dispatch with `dry_run` | compares the base digests with our `:stable`, then dispatches on `stale` |
 
-The watcher fails closed: a base that cannot be resolved, an image that cannot be inspected or
-a `:stable` without the label make the run red and dispatch nothing (`UNKNOWN`); the next cron
-retries. A `:stable` that does not exist is `absent`: nothing to compare. The verdict on the
-day of the commit: `current` on both flavours (MEASURED 2026-09-02 15:31Z: v1's `:stable`
-carries the label with the digest of the current base). To read the watcher without
-dispatching:
+`trigger-release.yml` carries `if: vars.PROMOTE_STABLE == 'true'` on its job, so a skipped run
+shows why. `watch-upstream.sh decide` dispatches only when all four conditions hold:
+
+- the verdict is `stale`;
+- `PROMOTE_STABLE` is `true`;
+- no release run is queued or running;
+- no release with the same reason finished in the last 24 hours.
+
+The reason it passes is `upstream:<12 hex per base>`.
+
+The watcher fails closed. A base that cannot be resolved, an image that cannot be inspected or
+a `:stable` without the label make the run red and dispatch nothing; the next cron retries. A
+`:stable` that does not exist is `absent`: there is nothing to compare. To read the verdict
+without dispatching:
 
 ```bash
 gh workflow run watch-upstream.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=true
