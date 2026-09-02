@@ -439,24 +439,26 @@ Where each one runs:
 - Names follow `ublue-os/bazzite`'s workflows (`bazzite/.github/workflows/build.yml`: jobs
   `Version`, `Make`, `Generate Release`; steps `Build Image`, `Apply Labels`, `Push to GHCR`,
   `Install Cosign`). Workflow `name:` Title Case. A job name is the phase in one Title Case
-  word: `Lint`, `Build`; the matrix job of the reusable build is named by its flavour, so a run
-  reads `Build / bazzite-nvidia`. A step name is Title Case, verb + object, no article, a tool
-  in its own casing: `Checkout`, `Resolve Base`, `Build Image`, `Install Cosign`,
+  word: `Lint`, `Build`, `Version`, `Gate`, `Release`, `Promote`, `Sign`; the matrix job of the
+  reusable build is named by its flavour, so a run reads `Build / bazzite-nvidia`. A step name
+  is Title Case, verb + object, no article, a tool in its own casing: `Checkout`,
+  `Resolve Base`, `Build Image`, `Install Cosign`, `Push to GHCR`,
   `Run shfmt, yamllint and just`. Env vars `SCREAMING_SNAKE_CASE`; outputs `snake_case`, one
   key name across workflows.
 - Concurrency groups are literal `bazzite-mx-<phase>[-<key>]` and never built from
   `${{ github.workflow }}`. A called workflow reports the caller's name there, so a group built
   from it would put caller and callee in the same group and the callee would wait for the run
   that started it.
-- Every third-party `uses:` is pinned to a commit SHA with the version in a trailing comment.
+- Every third-party `uses:` is pinned to a commit SHA with the version in a trailing comment
+  ([`workflow.md`](workflow.md) § Keeping the pins fresh).
 - `ubuntu-26.04` for jobs that need podman or skopeo, which every job here does. It is also the
   runner whose kernel keeps in-place writeback intact, so a runner change is a change to that
   measurement ([`gotchas.md`](gotchas.md) § Torn writeback on a 6.17-azure runner kernel).
 - `runner.temp` is not available in a job-level `env:`; steps read `$RUNNER_TEMP`.
 - A dispatch on a branch runs that branch's copy of the file,
   `gh workflow run build.yml --ref <branch>`, and `-f rechunk=true` runs the main profile.
-- Two profiles, one reusable workflow: what `main` adds to the sandbox is an input (`rechunk`),
-  never a second copy of the steps.
+- Two profiles, one reusable workflow: what `main` and a release run add to the sandbox is an
+  input (`rechunk`, then `publish`), never a second copy of the steps.
 - Every check CI runs on an image is a script under `.github/scripts/` with a `--self-test` the
   `lint` job runs; the workflow calls the script and does not restate the checks.
 - One labels file per build (`image-labels.sh`), passed to `podman build` and again to the
@@ -468,6 +470,25 @@ Where each one runs:
 - A secret proves itself before it is needed. The main profile derives the public half of
   `SIGNING_SECRET` and requires it to be `cosign.pub` byte for byte, so a rotated or mispasted
   key fails on a push to `main`, not in the release run.
+- Publishing is an input, never an event: every step that reaches GHCR sits behind
+  `if: inputs.publish`, `publish` is passed by `release.yml` alone, and `release.yml` has one
+  trigger. A job's permissions cannot follow an input, so the callee declares the set its
+  publishing steps need and every caller grants it (GitHub docs, reusing workflows: permissions
+  can only be maintained or reduced through the chain).
+- An image travels between jobs by digest, never by tag: the build job writes
+  `release-<flavour>.env`, uploads it as an artifact, and the gate inspects
+  `docker://<image>@<digest>`. A `:staging` tag left by an earlier run of the same day would
+  carry the same version and the gate could not tell the two apart.
+- A verifier is shown failing before its first pass. The gate runs `cosign verify --key` and
+  `gh attestation verify --repo` on the flavour's own base and requires both to reject it. Only
+  a signature-class rejection counts, matched on cosign's own message: a network error also
+  exits non-zero and would pass a control that simply saw no signature.
+- A release tag is written once: the gate refuses to copy onto a `:<tag>` that already points
+  at another digest, and treats the same digest as a no-op. `:stable` is the one alias that
+  moves, and only through the gate or `promote.yml`.
+- Binaries the workflows install take their version from an input or an env var
+  (`cosign-release`, `syft-version`, `ORAS_VERSION`), never "latest", and `refresh-pins.sh`
+  reads exactly those three names.
 - Retries are loops in the step or the tool's own flag (`skopeo inspect --retry-times 3`),
   never an action: one pin fewer for a `for` loop.
 

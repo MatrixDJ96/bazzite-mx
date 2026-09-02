@@ -65,8 +65,8 @@ read_coords() {
 # image_version <release tag> <base version> <fedora version> <kernel version>:
 # the version label, the tag for a release and <base version>.dev for a
 # sandbox build. A tag naming another Fedora than the base's kernel is
-# refused: a release stamps one tag on all three flavours, so every
-# flavour's kernel must be that Fedora's.
+# refused: release.yml derives the tag from one flavour's base and stamps it
+# on all three, so every flavour's kernel must be that Fedora's.
 image_version() {
     local tag=$1
     local base_version=$2

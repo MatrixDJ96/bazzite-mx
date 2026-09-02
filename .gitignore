@@ -1,4 +1,5 @@
 # The cosign private key a local signing test may leave in the checkout: the
 # repository trusts cosign.pub alone and the key lives in the SIGNING_SECRET
-# repository secret.
+# repository secret (docs/workflow.md § Repository settings the pipeline
+# relies on).
 cosign.key

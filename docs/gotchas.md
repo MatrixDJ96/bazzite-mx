@@ -8,18 +8,20 @@ Contents, in the order of the entries: torn writeback on 6.17-azure · just dupl
 ujust.sh readonly names · kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set ·
 command | grep -q · modinfo /lib/modules path · modprobe -n -v on a loaded module · podman
 build labels · stub-resolv.conf left in the image · remove-unwanted-software v9 · skopeo and
-containers-storage · force-push without a push run · inactive package request · 1Password
-BrowserSupport gid · local RPM blocks the rebase · EXIT trap and local · private install marker
-· mise dotnet SDK · kbuild fragment compiles nothing · mount -t ntfs helper · module panics at
-first use · NTFS drivers' modes and case · udisks defaults outside allow · pre-flight without
-the changed script · NTFSPLUS EINVAL · skel and existing accounts · KXmlGui write-back · flags
-in a command substitution · findmnt --verify on nofail · fstab row ending at its type · fstab
-row with leading whitespace · mount point with a space · status empty list · verify-host and
-unplugged nofail · findmnt -t exit status · automount over autofs · root's flatpak list ·
-image-info.json vs OCI label day · FAIL branch before its verdict · sunshine --version home ·
-Docker FORWARD policy and libvirt · # inside an fstab field · 2> /dev/null on a failed
-redirection · recipe description line · vendor build-log warnings · no BTF from kernel-devel ·
-arithmetic error escapes set -e · scriptlet rewrote a .pyc.
+containers-storage · force-push without a push run · setup-oras versions · cosign verify and
+referrers · inactive package request · 1Password BrowserSupport gid · local RPM blocks the
+rebase · EXIT trap and local · private install marker · mise dotnet SDK · burnt immutable tag ·
+kbuild fragment compiles nothing · mount -t ntfs helper · module panics at first use · NTFS
+drivers' modes and case · udisks defaults outside allow · pre-flight without the changed script
+· OGC kernel changelog · NTFSPLUS EINVAL · skel and existing accounts · KXmlGui write-back ·
+flags in a command substitution · findmnt --verify on nofail · fstab row ending at its type ·
+fstab row with leading whitespace · mount point with a space · status empty list · verify-host
+and unplugged nofail · findmnt -t exit status · automount over autofs · root's flatpak list ·
+SBOM media type · image-info.json vs OCI label day · FAIL branch before its verdict · sunshine
+--version home · Docker FORWARD policy and libvirt · # inside an fstab field · 2> /dev/null on
+a failed redirection · recipe description line · cosign 3.1.3 bundle flag · vendor build-log
+warnings · no BTF from kernel-devel · arithmetic error escapes set -e · scriptlet rewrote a
+.pyc · anonymous GHCR 403.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -99,8 +101,10 @@ through `dnf5 versionlock list | grep -q` and was green while the list held five
 base of 2026-09-07 (`44.20260907`, kernel 7.2.3-ogc3.1) locks every qt6 and plasma package too,
 the list runs to 3179 lines, and the three flavours went red on `tests: FAILED` with a
 docs-only change (measured 2026-09-07, status 141 reproduced in the base). The test captures
-the list first. Every `| grep -q` of the repo captures first and `check-form.sh` refuses the
-shape.
+the list first. The same day the release run went red on `rpm -q gpg-pubkey | grep -qi` in
+`tests/30-ide.sh`, five lines of output, on a base the main run had passed minutes earlier: in
+the base's container the pipe failed 16 times in 1000 runs. Every `| grep -q` of the repo
+captures first and `check-form.sh` refuses the shape.
 
 ## `modinfo -F filename` and `modprobe --show-depends` print `/lib/modules/...`
 
@@ -177,6 +181,29 @@ changed, the workflow will not run"). The same shape of push did create the `pus
 push the run list is read before anything is assumed, and what is missing is dispatched by
 hand, `gh workflow run build.yml --ref <branch>`.
 
+## `setup-oras` installs only the ORAS versions embedded in its own release
+
+`oras-project/setup-oras` v2.0.1 resolves `version` against a list shipped in the action,
+`src/lib/data/releases.json`, which runs from 1.0.0 to 1.3.3 (re-read 2026-09-06 at v2.0.1).
+Any other version fails with "official ORAS CLI releases does not contain version 1.3.4"
+(measured 2026-09-03, after the push and the signature of `:staging`). v2.0.2 added 1.3.4 on
+2026-09-29, 33 days after ORAS released it (read 2026-10-01). `install-oras.sh` installs from
+the ORAS release directly, the tarball refused unless its sha256 matches the release's
+checksums file.
+
+## `cosign verify --key` reads a certificate-signed referrer before the `.sig`
+
+`ghcr.io/ublue-os/bazzite:stable` carries its legacy `.sig` tag, an SPDX SBOM and a SLSA
+provenance bundle, the last two attached as OCI referrers. cosign v3.1.3
+`verify --key cosign.pub` on it fails with "no matching attestations: expected key signature,
+not certificate" and never reaches the `.sig`: the provenance bundle is signed with a
+certificate and a key was requested. An image of ours, checked with a throwaway key, fails
+instead with "no matching signatures: error verifying bundle: comparing public key PEMs".
+Measured 2026-09-03 locally with the same cosign as the gate, after a negative control that
+accepted only the second shape stopped a release run as inconclusive. `cosign_rejected` in
+`gate-release.sh` classifies both shapes as rejections of the signing material and leaves the
+transport errors inconclusive.
+
 ## An inactive package request stays in the origin and keeps bootc incompatible
 
 A layered package the new image already ships is reported by the rebase as an inactive request
@@ -245,6 +272,22 @@ target and leaves `~/.local/share/mise/installs/dotnet/<version>` as a symlink t
 2026-09-05 on a host with a hand-installed SDK 10.0.300 in `~/.dotnet`: the run added SDK
 10.0.400 and runtime 10.0.11 next to it and rewrote the `dotnet` muxer, with `MISE_DATA_DIR`
 pointed elsewhere. `ujust setup-dev help` says so; the other runtimes stay under `installs/`.
+
+## A deleted immutable release keeps its tag name burnt
+
+With immutable releases on (the repository setting in [`workflow.md`](workflow.md)), a tag name
+that ever carried a published release is refused for good: `gh release create` answers
+`HTTP 422 … tag_name was used by an immutable release`, and so does `POST /git/refs` for a bare
+tag, with the setting switched off as well. Measured 2026-09-05 after
+`gh release delete 44.20260905 --cleanup-tag`: the rebuilt release run promoted its three
+images to GHCR as `44.20260905` and died in the release job; the retry with the setting off
+died the same way. `release-tag.sh` probes GHCR and the release list, neither of which lists a
+burnt name, so the rule is procedural: a release is never deleted to reuse its name; the next
+release takes the next free name (`.N`, or the next day), or the name the dispatch forces with
+`release_tag` ([`workflow.md`](workflow.md)). Measured 2026-09-06 22:18Z, every release, tag,
+GHCR version and run deleted: the version job refused to pick a tag from an empty registry
+(`no tag found … refusing to pick a tag`), which is why an empty answer counts as "nothing
+taken" and only a failed probe stops it.
 
 ## A kbuild fragment gated on a kernel config symbol compiles nothing and exits 0
 
@@ -318,6 +361,19 @@ kmod-builder and build steps and exits 0 in about three minutes with an image bu
 old scripts. Measured 2026-09-04: the closed flavour's pre-flight after a new feature printed
 ten `Using cache` lines and no `kmod ntfsplus:` line, while `--no-cache` produced the real
 build. CI is not affected, a fresh runner having no layer cache.
+
+## The OGC kernel's changelog is its git tag, not the RPM changelog
+
+`rpm -q --changelog kernel` on the image prints one inherited Nobara entry from February 2026
+and nothing else: OGC builds from stable tags in CI without a per-build changelog entry
+(measured 2026-09-04 on `7.2.1-ogc4.1.fc44`). The real changelog is the mirror
+https://github.com/OpenGamingCollective/linux, branch `ogc-<series>.y`, tagged `vX.Y.Z-ogcN`,
+where an RPM release like `7.2.1-ogc4.1` is the tag `v7.2.1-ogc4` plus the RPM build number.
+Two builds compare at `.../compare/<tagA>...<tagB>`. A `git log A..B` over that branch walks
+into the merged `features/*` histories and reports tens of thousands of commits, so filter on
+the OGC subject prefixes (`[FROM-ML]`, `[EXTERNALLY-MAINTAINED]`) instead. A stable bump
+rebases the patchset unchanged, so the whole delta is upstream's; kernel config changes live in
+the separate `kernel-packages` repository and never show in that diff.
 
 ## NTFSPLUS can refuse a directory entry with a bare `EINVAL`, once
 
@@ -473,16 +529,26 @@ therefore passed as "no Firefox Flatpak" and the profile copy docs/migration.md 
 never announced. `src_flatpaks` lists `--system` as root and `--user` through
 `runuser -u "$SUDO_USER"`, each status kept.
 
+## The SBOM referrer is syft JSON under the SPDX media type
+
+`reusable-build.yml` writes the SBOM with `syft -o syft-json` and attaches it with
+`--artifact-type application/vnd.spdx+json`, the shape of `ublue-os/bazzite`'s build.yml
+(`Generate SBOM` and `Upload SBOM` steps), and `changelog.sh` selects the referrer by that
+type. The document is syft's own format (`{"artifacts": […]}`, no `spdxVersion`; syft calls its
+media type `vnd.syft+json`), so an SPDX parser does not open the file a reader pulls by
+following the type. Measured 2026-09-12 on `:stable` with `oras discover` and `oras pull`. Kept
+as upstream's shape on purpose: the diff `changelog.sh` prints reads `.artifacts[]`.
+
 ## The base's image-info.json and its OCI label can name different days
 
 `ghcr.io/ublue-os/bazzite@sha256:437920ba…` carries
 `org.opencontainers.image.version=44.20260908` and ships an `image-info.json` whose `version`
 is `44.20260907`. `resolve-base.sh` reads the label, so the `.dev` version of a sandbox build
-follows it, while `10-image-info.sh` reads the file, so `base-version` and the `(Bazzite …)` of
-`version-pretty` follow the file: an image built from that base is
-`44.20260908.dev (Bazzite 44.20260907)`, and a `.dev` build without `VERSION` would be
-`44.20260907.dev`. Measured 2026-09-12 on the pre-flight image. Both numbers are the base's
-own; the image reports each from its source and neither is rewritten.
+follows it (a release tag is the run's UTC date, `release-tag.sh`), while `10-image-info.sh`
+reads the file, so `base-version` and the `(Bazzite …)` of `version-pretty` follow the file: an
+image built from that base is `44.20260908.dev (Bazzite 44.20260907)`, and a `.dev` build
+without `VERSION` would be `44.20260907.dev`. Measured 2026-09-12 on the pre-flight image. Both
+numbers are the base's own; the image reports each from its source and neither is rewritten.
 
 ## A FAIL branch died before its verdict
 
@@ -572,6 +638,17 @@ lost. So the description comments of `82-bazzite-sunshine.just` (113 columns) an
 outside the shell catalogue `check-form.sh` measures, so nothing enforces the limit there
 anyway.
 
+## cosign 3.1.3 deprecates the flag the signature layout needs
+
+`cosign sign -y --new-bundle-format=false --use-signing-config=false <ref>` opens with "Flag
+--new-bundle-format has been deprecated, this will be the only supported format in future
+versions" (measured 2026-09-12 with the pinned cosign v3.1.3). The flag still works and
+`reusable-build.yml` and `sign-image.yml` need it off: the new bundle format is not the layout
+`policy.json`'s `sigstoreSigned` reads on a host (containers/container-libs#388,
+coreos/rpm-ostree#5509). The release that removes it signs images a host cannot verify, and
+`refresh-pins.sh --apply` would carry the pin past it with an `OK` row, reading the tag alone.
+A cosign bump is read against this note before it is applied.
+
 ## Two build-log warnings come from the vendors
 
 A pre-flight on the 44.20260921 base (measured 2026-09-23) prints two warnings the repository
@@ -639,3 +716,14 @@ variable to every build script and `tests/run.sh` to every test. The last gate o
 `Containerfile` requires `rpm -V --nomtime python3-setuptools` clean on the final image, which
 holds what the build RUN and the test RUN wrote: without the variable, the `python3` of
 `tests/33-mise.sh` makes a rewrite of its own.
+
+## An anonymous probe of a GHCR package never published answers 403
+
+`skopeo list-tags --no-creds docker://ghcr.io/matrixdj96/<package>` lists the tags of the three
+published packages, and for a package never published fails with
+`Requesting bearer token: received unexpected HTTP status: 403 Forbidden`; logged in, the same
+probe fails with `fetching tags list: name unknown` (measured 2026-10-01 with skopeo on this
+project's packages and a never-published name). `release-tag.sh` reads `name unknown` as a
+package with no tag taken and any other failure as a failed probe, so the release job logs in
+to GHCR before it resolves the tag: anonymously, a flavour not yet published would stop the
+run.

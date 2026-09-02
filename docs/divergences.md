@@ -23,10 +23,13 @@ out-of-tree modules against the kernel each base ships. Source: `bazzite`'s
 `.github/workflows/build.yml`, the image matrix of the `push-ghcr` job, where the closed-driver
 images, `bazzite-nvidia` and its GNOME twin, take the `ogc-lts` kernel.
 
-Every enumeration of the three images is literal: `FLAVOURS` in `.github/scripts/lib.sh` and
-the build matrix name them one by one; `resolve-base.sh --digests` loops over `FLAVOURS`.
+Every enumeration of the three images is literal: `PACKAGES` and `FLAVOURS` in
+`.github/scripts/lib.sh`, the build matrix and the recovery signer name them one by one;
+`resolve-base.sh --digests` loops over `FLAVOURS`. `release-tag.sh` probes every package for
+taken tags.
 
-Files: `Containerfile`, `.github/scripts/resolve-base.sh`, `.github/scripts/lib.sh`.
+Files: `Containerfile`, `.github/scripts/resolve-base.sh`, `.github/scripts/lib.sh`,
+`.github/scripts/release-tag.sh`.
 
 ## Image identity and the update ref
 
@@ -35,8 +38,9 @@ is not cosmetic: `image-ref` in `/usr/share/ublue-os/image-info.json` is what Ba
 greeting (`/usr/share/ublue-os/motd/env.sh`) prints as the host's image and `check-image.sh`
 asserts, so an unrewritten file calls the host `ghcr.io/ublue-os/bazzite`. Bazzite's rollback
 helper reads `image-name` too: `brh rebase <tag>` builds `ghcr.io/ublue-os/<image-name>:<tag>`,
-a repository that does not exist for this image. The image a host pulls from at `bootc upgrade`
-is the deployment's origin, which `bootc status` prints. The build writes `image-name`,
+a repository that does not exist for this image, so a dated release of this image is reached
+with `ujust migrate apply <tag>` instead. The image a host pulls from at `bootc upgrade` is the
+deployment's origin, which `bootc status` prints. The build writes `image-name`,
 `image-vendor`, `image-ref`, `version`, `version-pretty` and `base-version` there,
 `base-version` keeping the base's own `version`; `VARIANT_ID` and `IMAGE_ID` in
 `/usr/lib/os-release`, the identity os-release(5) gives an image; and `Variant` and `Website`
@@ -710,17 +714,28 @@ aurora.
 
 **A push never publishes.** Bazzite builds, rechunks, tests and pushes in one job gated on the
 event (`bazzite/.github/workflows/build.yml`), where aurora takes `publish` as an input
-(`aurora/.github/workflows/reusable-build.yml`). This repository is the only one of the family
-that proves the signing secret on every push to `main`, and the only one whose build waits on a
-lint of its scripts and workflows; aurora runs zizmor and a just check as workflows of their
-own (`aurora/.github/workflows/zizmor.yml`, `validate-just.yml`).
+(`aurora/.github/workflows/reusable-build.yml`). Here only the dispatched release workflow
+passes `publish`. This repository is also the only one of the family that proves the signing
+secret on every push to `main`, and the only one whose build waits on a lint of its scripts and
+workflows; aurora runs zizmor and a just check as workflows of their own
+(`aurora/.github/workflows/zizmor.yml`, `validate-just.yml`).
 
 **The artefact that ships is the one that is probed.** Bazzite runs goss on the chunked image
 and is the only member of the family that tests what it ships
 (`bazzite/.github/workflows/build.yml`). `check-image.sh` does the same with the tools the
 image already has, and asserts on the artefact every label `image-labels.sh` wrote.
 
-**Fewer actions, more bash.** The family is split on freeing disk: Bazzite and bazzite-dx run
+**The release tag is born in a gate.** Bazzite and bazzite-dx push the dated tag and every
+alias from the build job (`bazzite-dx/.github/workflows/build.yml`); aurora pushes `:staging`,
+signs it, then pushes the real tags from the same job. Here the build stops at `:staging` and a
+separate job verifies the image before any tag points at it. `:stable` moves behind two
+switches, where the family's moves on every run.
+
+**Fewer actions, more bash.** `nick-fields/retry`, `softprops/action-gh-release`, `setup-oras`
+([`gotchas.md`](gotchas.md) § `setup-oras` installs only the ORAS versions embedded in its own
+release) and renovate are replaced by scripts of ours with `--self-test`s. Bazzite's version
+step swallows its tag probe with `|| true`; ours aborts on a probe that fails or returns
+nothing. The family is split on freeing disk: Bazzite and bazzite-dx run
 `jlumbroso/free-disk-space` (`bazzite/.github/workflows/build.yml:150`,
 `bazzite-dx/.github/workflows/build.yml:67`), Bazzite having dropped
 `AdityaGarg8/remove-unwanted-software` in a45a310e and taken `jlumbroso/free-disk-space` in

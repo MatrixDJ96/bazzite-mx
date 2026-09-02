@@ -1,7 +1,7 @@
 # The sandbox: on a push to main or develop, a pull request or a dispatch,
 # the lint job, then the three flavours through reusable-build.yml. Nothing
-# here reaches GHCR; main and a dispatch with rechunk add the chunked image,
-# its probe and the signing-key proof
+# here reaches GHCR and no release comes from a push; main and a dispatch
+# with rechunk add the chunked image, its probe and the signing-key proof
 # (docs/workflow.md § Branches and profiles).
 name: Build
 
@@ -136,6 +136,10 @@ jobs:
     needs: lint
     permissions:
       contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     uses: ./.github/workflows/reusable-build.yml
     with:
       rechunk: ${{ github.ref == 'refs/heads/main' || inputs.rechunk == true }}
