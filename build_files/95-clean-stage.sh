@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Leave the tree in the state bootc lint expects. Two things
+# Leave the tree in the state bootc lint and the rechunk expect. Two things
 # stay on purpose: the kernel versionlock, which holds a host on the ogc
 # kernel, and flatpak-add-fedora-repos.service, which puts Flathub on a host.
 #
