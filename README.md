@@ -17,6 +17,7 @@ What the image changes over Bazzite, and why, is [`docs/divergences.md`](docs/di
 ## What the image adds
 
 - Containers and VMs: Docker CE, libvirt, QEMU/KVM, swtpm (`ujust setup-virtualization`).
+- Development: VS Code, GitKraken, `gh`, `glab`, ShellCheck, shfmt, mise.
 - Signing trust for `ghcr.io/matrixdj96/*`: a host pulls only what this repository signed.
 
 ## Build it yourself

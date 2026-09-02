@@ -68,6 +68,15 @@ is checked by hand at review, like § Prose.
   ([`gotchas.md`](gotchas.md) § `command | grep -q` under `pipefail` fails on a match). The
   output goes into a variable first, and the grep reads the variable.
 
+  ```bash
+  # before, tests/30-ide.sh
+  if rpm -q gpg-pubkey --qf '%{VERSION}\n' | grep -qi 'be1229cf$'; then
+  # after, tests/lib.sh
+  keys=$(rpm -q gpg-pubkey --qf '%{VERSION}\n' 2> /dev/null || true)
+
+  if grep -qi "$key_id\$" <<< "$keys"; then
+  ```
+
 - **A fallback is `${var:-…}`, never `|| echo`.** `$(cmd || echo x)` is refused by
   `check-form.sh`: a command that prints its answer and exits non-zero (`grep -c`,
   `systemctl is-enabled`, `is-active`) leaves x under what it printed, two lines for one. The
@@ -80,6 +89,15 @@ is checked by hand at review, like § Prose.
   `|| true` when nothing found is a value, the fallback naming what was not found;
   `if ! var=$(…); then` when the failure is an error. A `FAIL:` line quoting a probe's output
   goes through `on_one_line <fallback>` of `tests/lib.sh`, which never leaves it blank.
+
+  ```bash
+  # before, tests/30-ide.sh
+  gpg_lines=$(grep -E '^gpg' "$VSCODE_REPO" | tr '\n' ' ')
+  echo "FAIL: vscode.repo: $gpg_lines"
+  # after
+  gpg_lines=$(grep -E '^gpg' "$VSCODE_REPO" 2>&1 | tr '\n' ' ' || true)
+  echo "FAIL: vscode.repo: ${gpg_lines:-no gpg line}"
+  ```
 
 - **A command's output enters `$(( ))` through a variable.** `check-form.sh` refuses
   `$((n + $(cmd)))`: an empty output is a syntax error `set -e` does not stop
@@ -204,6 +222,11 @@ through `ublue-system-setup.service`, before user sessions. The dispatcher is a 
 - a hook takes a fixture prefix (`usermod --prefix`, files under a temporary tree) so its smoke
   test exercises the real script, positive and known-bad, without touching the image.
 
+User hooks (`user-setup.hooks.d/`, `ublue-user-setup.service`) follow the same three rules
+through the same kind of dispatcher. Their check must be cheap enough for every login, so it
+reads a file and never spawns the application. Their fixture is `HOME` plus a stub binary first
+in `PATH`.
+
 ## Tests
 
 - `tests/NN-<feature>.sh` with the same stem as the build script. `tests/run.sh` refuses a
@@ -217,8 +240,8 @@ through `ublue-system-setup.service`, before user sessions. The dispatcher is a 
   build had, and a test that touches dnf5 cannot leave a log behind for `bootc container lint`.
 - A check several tests make is a function of `tests/lib.sh`, sourced first: `check_pkg`,
   `check_unit_state`, `check_rpm_key`, `check_key_fingerprint`, `check_self_test`,
-  `check_recipe_help`, `check_flatpak_deny`, and `on_one_line` for a probe's output quoted in a
-  `FAIL:` line. A check made once stays in its test.
+  `check_desktop_file`, `check_recipe_help`, `check_flatpak_deny`, and `on_one_line` for a
+  probe's output quoted in a `FAIL:` line. A check made once stays in its test.
 
 ## Positive control
 
@@ -242,8 +265,9 @@ packages, with the mode, user and group of each, and catches a missing one, whil
 counts or walks a list read out of the very thing it tests shrinks with the defect and stays
 green: a required number of `OK:` lines lets a check stop reporting unnoticed, and a group list
 read from the hook's own summary shrinks with the hook. Name what a count stands for. The same
-reading condemns a tolerant `else` that prints `OK:` on the failure it meant to excuse. Neither
-shape holds a counter, so neither is found by grepping for one.
+reading condemns a tolerant `else` that prints `OK:` on the failure it meant to excuse:
+`check_desktop_file` passed a file `desktop-file-validate` calls an error, not a warning.
+Neither shape holds a counter, so neither is found by grepping for one.
 
 Where each one runs:
 

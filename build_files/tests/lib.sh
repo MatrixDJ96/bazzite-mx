@@ -115,6 +115,42 @@ check_self_test() {
     fi
 }
 
+# check_desktop_file <path>: a vendor's file that desktop-file-validate only
+# warns about still counts, with the warning shown; a file it calls an error
+# on is one the desktop will not launch, so it fails, as does a Hidden=true
+# file, which the desktop treats as deleted.
+check_desktop_file() {
+    local desktop=$1
+    local name findings
+
+    name=$(basename "$desktop")
+
+    if [ ! -f "$desktop" ]; then
+        echo "FAIL: $desktop missing"
+        return 0
+    fi
+
+    if grep -qx 'Hidden=true' "$desktop"; then
+        echo "FAIL: $name is Hidden=true: the desktop shows no such entry"
+        return 0
+    fi
+
+    if desktop-file-validate "$desktop" > /dev/null 2>&1; then
+        echo "OK: $name valid"
+        return 0
+    fi
+
+    findings=$(desktop-file-validate "$desktop" 2>&1 || true)
+
+    if grep -q ': error:' <<< "$findings"; then
+        echo "FAIL: $name desktop-file-validate:" \
+            "$(grep ': error:' <<< "$findings" | head -n1 | on_one_line 'no output')"
+    else
+        echo "OK: $name present (desktop-file-validate:" \
+            "$(head -n1 <<< "$findings" | on_one_line 'no output'))"
+    fi
+}
+
 # check_recipe_help <justfile> <recipe>: the help action runs and prints its
 # usage line.
 check_recipe_help() {

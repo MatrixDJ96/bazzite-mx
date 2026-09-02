@@ -7,7 +7,7 @@ which files carry it; the guards themselves live in the build script and its tes
 [`gotchas.md`](gotchas.md) holds the surprises this project probed, each with its date.
 
 Contents: three flavours · image identity · signing trust · hook framework · Docker CE ·
-virtualization · the cleaned stage · CI.
+virtualization · VS Code · git tools · command-line tools · mise · the cleaned stage · CI.
 
 ## Three flavours, one recipe
 
@@ -60,13 +60,15 @@ Files: `build_files/11-image-signing.sh` and its test, `cosign.pub`,
 
 ## Hook framework: ublue-setup-services
 
-The base ships no `system-setup.hooks.d` dispatcher. One feature here needs a step that
-converges at every boot: the group memberships the container runtime and libvirt need.
-`ublue-setup-services` comes from the COPR `ublue-os/packages`, the way bazzite-dx installs it
+The base ships no `system-setup.hooks.d` dispatcher. Two features here need a step that
+converges at every boot or login: the group memberships the container runtime and libvirt need,
+and the VS Code extensions of each account. `ublue-setup-services` comes from the COPR
+`ublue-os/packages`, the way bazzite-dx installs it
 (`bazzite-dx/build_files/20-install-apps.sh`) and enables it
-(`bazzite-dx/build_files/40-services.sh`). Only the system unit is enabled here. Our hooks
-converge instead of stamping a version. bazzite-dx gates the same work behind libsetup's
-`version-script`
+(`bazzite-dx/build_files/40-services.sh`). Only the system unit is enabled here;
+`ublue-user-setup.service` is enabled `--global` by the IDE feature, the first one with a user
+hook. Our hooks converge instead of stamping a version. bazzite-dx gates the same work behind
+libsetup's `version-script`
 (`bazzite-dx/system_files/usr/share/ublue-os/privileged-setup.hooks.d/20-dx.sh`), which records
 the run before the body executes: it never repeats a failed run and never reaches an account
 created later.
@@ -242,6 +244,84 @@ Files: `build_files/22-virtualization.sh` and its test, `build_files/lib/flatpak
 `system_files/usr/libexec/bazzite-dx-kvmfr-setup`,
 `system_files/usr/libexec/bazzite-mx-libvirt-forward`,
 `system_files/usr/lib/systemd/system/docker.service.d/bazzite-mx-libvirt.conf`.
+
+## Visual Studio Code
+
+The RPM from Microsoft's repository, so the editor follows the image instead of updating itself
+per user. bazzite-dx fetches Microsoft's `config.repo` at build time with `gpgcheck=0`
+(`bazzite-dx/build_files/20-install-apps.sh`); here `vscode.repo` is vendored with the stanza
+https://code.visualstudio.com/docs/setup/linux gives, the key ships in the image and its
+fingerprint is asserted before the install. The skel `settings.json` sets `update.mode` to
+`none`, the FAQ's switch for the editor's own update check
+(https://code.visualstudio.com/docs/supporting/faq); on Linux the repository owns the updates.
+
+The user hook seeds those settings for accounts that predate the image and installs the
+containers, remote-containers and remote-ssh extensions when
+`~/.vscode/extensions/extensions.json` lacks them. It runs at every login and keeps no version
+stamp, so an account created later is picked up, and its check reads that file rather than
+spawning the editor. With an extension missing it first waits up to a minute for the network:
+the unit's `After=network-online.target` names a target the user manager does not have
+(systemd.special(7) § Special User Units), so a session opened at boot can start before it. An
+extension that still fails to install is retried at the next login. What the user removes comes
+back the same way: an uninstalled extension is installed again and a deleted `settings.json`
+seeded again at the next login, so an unwanted extension is disabled rather than uninstalled,
+and the settings file emptied rather than deleted.
+
+Files: `build_files/30-ide.sh` and its test, `system_files/etc/yum.repos.d/vscode.repo`,
+`system_files/etc/pki/rpm-gpg/RPM-GPG-KEY-microsoft`,
+`system_files/etc/skel/.config/Code/User/settings.json`,
+`system_files/usr/share/ublue-os/user-setup.hooks.d/11-bazzite-mx-vscode-extensions.sh`.
+
+## Git tools
+
+GitKraken as an RPM in the image rather than a Flatpak, the owner's choice, plus
+`git-credential-libsecret` from Fedora, which pulls the full `git` package over the base's
+`git-core`: the perl-backed subcommands (`git send-email`, `git svn`, `git difftool`) are on a
+host for that reason. GitKraken publishes one fixed URL,
+https://release.gitkraken.com/linux/gitkraken-amd64.rpm, which redirects to whatever release is
+current, so nothing is pinned. The RPM carries no OpenPGP signature and no scriptlets, so the
+build checks its payload digests with `rpm -K --nosignature` and installs it with
+`--no-gpgchecks` for that one local file. Its only dependency, `libXScrnSaver`, is in the base.
+
+Files: `build_files/31-git-tools.sh` and its test.
+
+## Command-line tools
+
+`gh`, `glab`, `ShellCheck` and `shfmt`, plus the thirteen further packages `32-cli-rpms.sh`
+installs in one transaction: the tracing and profiling set (`bcc`, `bcc-tools`, `bpftop`,
+`bpftrace`, `iotop-c`, `nicstat`, `numactl`, `sysprof`, `trace-cmd`) and `android-tools`,
+`ccache`, `flatpak-builder` and `ripgrep`. All are Fedora 44 packages and none is in the base;
+bazzite-dx and aurora carry most of the same names
+(`bazzite-dx/build_files/20-install-apps.sh`, `aurora/build_scripts/dx/00-dx.sh`). Fedora's
+`shfmt` is the release CI and the edit hook format with, so image, hook and CI agree on the
+formatter and no formatting diff is meaningless ([`conventions.md`](conventions.md)).
+
+`ccache` ships `/etc/profile.d/ccache.sh`, which puts `/usr/lib64/ccache` first in the `PATH`
+of every login shell, so `gcc`, `cc`, `g++` and `c++` run through ccache for every account. The
+shared cache the script prefers, `/var/cache/ccache`, has no tmpfiles line and does not exist
+on a host, so each account keeps its own. Source: the package's own file.
+
+Files: `build_files/32-cli-rpms.sh` and its test.
+
+## mise
+
+`mise` manages per-user language runtimes. Its binary comes from the COPR its own documentation
+names (https://mise.jdx.dev/installing-mise.html), so it is the same on every host and needs no
+first-login install. The repository is vendored with `enabled=0`, the project key ships in the
+image and its fingerprint is asserted before the install.
+
+`/etc/profile.d/mise.sh` runs `mise activate bash` in login and interactive bash: a login
+shell, interactive or not, reads `profile.d` through `/etc/profile`, an interactive non-login
+one through Fedora's `/etc/bashrc`, which `~/.bashrc` sources. The skel
+`~/.config/mise/config.toml` names node lts, python 3.14, java temurin-21 and dotnet 10; the
+runtimes themselves are installed per user with `mise install`, never in the image. Only bash
+gets mise activated by the image; a fish account adds
+`if type -q mise; mise activate fish | source; end` to `~/.config/fish/config.fish`. The
+package ships the bash and fish completions.
+
+Files: `build_files/33-mise.sh` and its test, `system_files/etc/profile.d/mise.sh`,
+`system_files/etc/skel/.config/mise/config.toml`, `system_files/etc/yum.repos.d/mise.repo`,
+`system_files/etc/pki/rpm-gpg/RPM-GPG-KEY-copr-jdxcode-mise`.
 
 ## The cleaned stage
 
