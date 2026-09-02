@@ -1,0 +1,10 @@
+# Default per-user development runtimes, copied from /etc/skel into every new
+# home: `mise install` provisions them under $HOME and a project's own
+# mise.toml overrides them (33-mise.sh installs mise, etc/profile.d/mise.sh
+# activates it).
+
+[tools]
+node = "lts"
+python = "3.14"
+java = "temurin-21"
+dotnet = "10"

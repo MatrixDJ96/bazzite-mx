@@ -106,3 +106,53 @@ the monolithic `libvirtd` per host. Here (pattern bazzite-dx `20-install-apps.sh
   needs it.
 - The `libvirt` group is granted to wheel members by the boot hook, like `docker`: Fedora's
   `50-libvirt.rules` gives that group `org.libvirt.unix.manage` without a password.
+
+## Visual Studio Code (`30-ide.sh`)
+
+Criteria 1, 2, 3, 4; decision 1.5a (RPM from Microsoft's repository, extensions hook kept).
+Pattern bazzite-dx `20-install-apps.sh:94-97` (Microsoft's `config.repo` fetched at build,
+`gpgcheck=0`, `setopt enabled=0`), rewritten: `vscode.repo` vendored with the stanza
+https://code.visualstudio.com/docs/setup/linux gives (`[code]`, `gpgcheck=1`), the key
+"Microsoft (Release signing)" shipped in the image, fingerprint `BC52 8686 B50D 79E3 39D3
+721C EB3E 94AD BE12 29CF` (measured 2026-09-02 on
+https://packages.microsoft.com/keys/microsoft.asc; the packages are signed with it, `rpm -qp`
+on code 1.135.0). Skel `settings.json` sets `update.mode` to `none`
+(https://code.visualstudio.com/docs/supporting/faq: "Configure the Update: Mode setting from
+default to none"): the RPM follows the image. The user hook
+`11-bazzite-mx-vscode-extensions.sh` seeds the settings for accounts that predate the image and
+installs `ms-azuretools.vscode-containers`, `ms-vscode-remote.remote-containers`,
+`ms-vscode-remote.remote-ssh` (bazzite-dx's set) when `~/.vscode/extensions/extensions.json`
+lacks them, at every login, without a version stamp.
+
+## Git tools (`31-git-tools.sh`)
+
+Criteria 1, 2, 3, 4; decision 1.5b (GitKraken as RPM in the image, the owner's choice over
+the Flatpak) and the "Regola RPM" (latest release, no pin). GitKraken publishes one fixed URL,
+https://release.gitkraken.com/linux/gitkraken-amd64.rpm: HEAD answers 404, GET redirects to
+`release.gitkraken.dev/gkd/production/normal/linux/x64/<version>/<token>/gitkraken-amd64.rpm`
+(12.4.0, 216 MB, measured 2026-09-02). The RPM carries no OpenPGP signature (`%{SIGPGP}` none)
+and no scriptlets; the build checks its payload digests (`rpm -K --nosignature`) and installs
+it with `--no-gpgchecks` for that file only. Its one dependency, `libXScrnSaver`, is in the
+base. `git-credential-libsecret` from Fedora (aurora `base/01-packages.sh:64`).
+
+## Command-line tools (`32-cli-rpms.sh`)
+
+Criteria 1, 3, 4; decision 1.5b. `gh glab ShellCheck shfmt` and the v1 system-administration
+list `android-tools bcc bcc-tools bpftop bpftrace ccache flatpak-builder iotop-c nicstat
+numactl ripgrep sysprof trace-cmd`, all Fedora 44 (`repoquery` 2026-09-02; none in the base).
+Fedora's shfmt is 3.7.0, the release CI and the edit hook format with. v1 pinned gh, glab,
+shellcheck and shfmt as binaries by version and sha256; the Fedora packages replace that.
+
+## mise (`33-mise.sh`)
+
+Criteria 1, 2, 3, 4; decision 1.5c (bazzite-63 0b36480) with the RPM form the owner confirmed
+at the design checkpoint. bazzite-63 ships only `profile.d` and the skel config and installs
+mise per user through Homebrew; here `mise` comes from the COPR its documentation names
+(https://mise.jdx.dev/installing-mise.html: `dnf copr enable jdxcode/mise`), vendored as
+`mise.repo` with `enabled=0` and the project key shipped in the image (fingerprint `9504 792D
+1F9C CA15 14FD 1DEC 8497 A816 C83E 991C`, valid to 2030-07-19, measured 2026-09-02).
+`/etc/profile.d/mise.sh` runs `mise activate bash` in interactive bash (Fedora's `/etc/bashrc`
+sources `profile.d` for non-login shells too); the skel `~/.config/mise/config.toml` names
+node lts, python 3.14, java temurin-21, dotnet 10, installed per user with `mise install`
+(a `setup-dev` recipe arrives with the justfile feature). Other shells activate mise
+themselves; the package ships their completions.
