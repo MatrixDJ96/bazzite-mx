@@ -35,10 +35,16 @@ version; this file carries the reasons and the measured facts behind them.
   pinned to a commit (decision 1.5g: reproducibility of the module).
 - A vendor's signing key is pinned, on purpose: the armored key ships under
   `system_files/etc/pki/rpm-gpg/RPM-GPG-KEY-<vendor>`, the `.repo` reads it with
-  `gpgkey=file://`, and the feature script calls `assert_key_fingerprint` with the fingerprint
-  measured on the vendor's published key before the install. A key rotation is then a
-  reviewable diff plus a new fingerprint, never a silent download at build time. Where the
-  vendor's file changes: docs/divergences.md names the URL each key was read from.
+  `gpgkey=file://`, and the feature script calls `assert_key_fingerprint` before the install:
+  the fingerprint measured on the vendor's published key is pinned once, in the `KEY_FPR` table
+  of `lib/gpg.sh` (with the URL each key was read from), which the feature's test reads too. A
+  key rotation is then a reviewable diff plus a new table line, never a silent download at
+  build time.
+- A package that unpacks under `/opt` needs `mkdir -p /var/opt` before its install (`/opt` is a
+  symlink to `var/opt`, absent in a build: cpio fails) and nothing else: `80-fix-opt.sh`
+  moves every `/var/opt/<name>` to `/usr/lib/opt/<name>` and writes the tmpfiles line that
+  recreates the link on the host. Paths baked into the application keep their `/opt/...`
+  form; the smoke test checks them with `readlink`, not `-x` (the link dangles in the build).
 - A package `%post` runs in the build, not on the host: what it does is read
   (`rpm -qp --scripts`) before the package enters a script, and every effect that belongs to a
   host (a group in `/etc/group`, a unit enabled) is handled explicitly. `groupadd` in a `%post`

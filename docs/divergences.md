@@ -130,8 +130,8 @@ Criteria 1, 2, 3, 4; decision 1.5b (GitKraken as RPM in the image, the owner's c
 the Flatpak) and the "Regola RPM" (latest release, no pin). GitKraken publishes one fixed URL,
 https://release.gitkraken.com/linux/gitkraken-amd64.rpm: HEAD answers 404, GET redirects to
 `release.gitkraken.dev/gkd/production/normal/linux/x64/<version>/<token>/gitkraken-amd64.rpm`
-(12.4.0, 216 MB, measured 2026-09-02). The RPM carries no OpenPGP signature (`%{SIGPGP}` none)
-and no scriptlets; the build checks its payload digests (`rpm -K --nosignature`) and installs
+(12.4.0, 216 MB, measured 2026-09-02). The RPM carries no OpenPGP signature (`rpm -Kv` lists digests only; `%{SIGPGP}` and
+`%{RSAHEADER}` empty, re-measured 2026-09-02) and no scriptlets; the build checks its payload digests (`rpm -K --nosignature`) and installs
 it with `--no-gpgchecks` for that file only. Its one dependency, `libXScrnSaver`, is in the
 base. `git-credential-libsecret` from Fedora (aurora `base/01-packages.sh:64`).
 
@@ -156,3 +156,102 @@ sources `profile.d` for non-login shells too); the skel `~/.config/mise/config.t
 node lts, python 3.14, java temurin-21, dotnet 10, installed per user with `mise install`
 (a `setup-dev` recipe arrives with the justfile feature). Other shells activate mise
 themselves; the package ships their completions.
+
+## Desktop applications (`40-desktop-apps.sh`, `80-fix-opt.sh`)
+
+Criteria 1, 2, 3, 4; decision 1.5b (Firefox as Fedora's RPM, 1Password installed in the
+build), gparted and teams-for-linux from the design checkpoint (2026-09-02).
+
+- **Firefox**: Bazzite removes `firefox` and `firefox-langpacks` ("we use the flatpak",
+  `build_files/global-remove:8`). The RPM (`firefox 154.0-5.fc44`, `firefox-langpacks`,
+  Fedora updates, 2026-09-02) is back by the owner's decision; v1's reason, kept, is the
+  browser-host integration of 1Password (native messaging with
+  `/opt/1Password/1Password-BrowserSupport`, a host binary a sandboxed Firefox does not
+  reach out of the box). The Flatpak is denied through the mechanism Bazzite already runs at every
+  boot: `bazzite-flatpak-manager` (unit `WantedBy=multi-user.target`) passes
+  `/usr/share/ublue-os/flatpak-blocklist` to `flatpak remote-modify --filter` on Flathub
+  (`usr/libexec/bazzite-flatpak-manager:38-39`), and "if a ref matches a deny rule it is
+  disallowed unless it specifically matches an allow rule" (flatpak-remote-add(1),
+  `--filter`, flatpak 1.18.1). The build appends `deny org.mozilla.firefox/*` after the
+  base's lines (Steam, Lutris) on a fresh inode and asserts the count. The list
+  `/usr/share/ublue-os/bazzite/flatpak/install` is not edited: nothing in the image reads it
+  (grep on the bazzite checkout 54256f95, 2026-09-02; v1 measured the same on its image). A
+  host that already has the Flatpak keeps it installed: the migration recipe prints the
+  profile copy and leaves the uninstall to the user (design 2.0 § 7, item 5.1 of the
+  refutation).
+- **gparted** `1.7.0-3.fc44`, Fedora; Bazzite ships `gnome-disk-utility` in its place
+  (`configure-kde`) and gparted only on the live ISO.
+- **1Password** from the vendor's repository, the stanza of
+  https://support.1password.com/install-linux/ (read 2026-09-02) vendored with `enabled=0`
+  and the key "Code signing for 1Password <codesign@1password.com>" from
+  https://downloads.1password.com/linux/keys/1password.asc, fingerprint
+  `3FEF 9748 469A DBE1 5DA7 CA80 AC2D 6274 2012 EA22` (the page prints it; measured with
+  `gpg --show-keys`, valid to 2032-05-16). `repo_gpgcheck=1` stays: the repository publishes
+  `repodata/repomd.xml.asc` (HTTP 200, 2026-09-02); the package's own `.repo` comments it
+  out for a dnf4-era bug (bugzilla 1768206). 8.12.34 on 2026-09-02; the RPM carries a
+  header signature by the same key (`rpm -Kv`: "Header OpenPGP V4 RSA/SHA512 signature, key
+  ID ac2d62742012ea22"; `%{SIGPGP}` is empty, the signature lives in `%{RSAHEADER}`), which
+  `gpgcheck=1` verifies against the vendored key. Installing at build instead of layering on the host is what makes
+  `bootc status` compatible (decision 1.7). What the `%post` does and how each effect is
+  handled (`rpm -qp --scripts`, 2026-09-02):
+  - it writes `/etc/yum.repos.d/1password.repo` with `enabled=1` and an https `gpgkey`
+    (`installRpmChannel`): the build reinstalls the vendored copy and asserts it, and
+    `90-validate-repos.sh` would refuse the rewritten file anyway (its self-test covers
+    "vendored repo enabled");
+  - it renders `/usr/share/polkit-1/actions/com.1password.1Password.policy` from a template,
+    filling `org.freedesktop.policykit.owner` on `authorizeCLI` and `authorizeSshAgent` with
+    the first ten UID ≥ 1000 users of `/etc/passwd` (`installFiles`; the `unlock` action
+    carries no owner annotation). A build has no such user, so the annotation ships empty.
+    That is not a regression: polkit lets a process check the authorization of another
+    process of the **same** user without being an owner, the annotation only widens who may
+    query for *other* users' processes (polkit(8) § "org.freedesktop.policykit.owner": "If
+    this annotation is not specified, then only root can query whether a client running as a
+    different user is authorized"; `polkitbackendinteractiveauthority.c:1104-1123`, read
+    2026-09-02), and the 1Password app, CLI and SSH agent all run as the same user. The host
+    that layers 8.12.34 today already runs with the annotation empty (rpm-ostree renders the
+    `%post` in a build root without human users: policy file read on ldesktop-zrombi,
+    2026-09-02) and the owner reports system-authentication unlock working there
+    (refutation 2.6). The design's polkit rule (2.0 § 3, refutation
+    2.6) is therefore not added: a `polkit.addRule` returning `YES` for `unlock` would
+    remove the password prompt, and no rule can set an owner annotation. The vendor ships
+    `/opt/1Password/install_biometrics_policy.sh -f` to re-render the file with owners on a
+    host; not needed on the hub (owner's report), the fallback should a host show otherwise;
+  - it creates the groups `onepassword` and `onepassword-mcp` when `getent` does not find
+    them, and sets the group and setgid bit on `1Password-BrowserSupport` and
+    `1password-mcp` ("hardens it against environmental tampering", `SO_PEERCRED` for the
+    MCP server). Its `groupadd` has no `--system`, so in a build the groups take gid 1000
+    and 1001, the gids of a host's first human users (measured on the first pre-flight,
+    2026-09-02; the host that layers the package shows 1001 and 1003), and the setgid
+    binaries would run with a user's primary group. A system gid is not an answer either:
+    the desktop app rejects a BrowserSupport whose group id is below 1000 (the pilot's
+    first v2 boot, 2026-09-03, gid 951: [`gotchas.md`](gotchas.md); NixOS `ids.nix:734`
+    "1Password requires that its GID be larger than 1000"; the Gentoo overlay's
+    `acct-group/onepassword` uses 1010 "from previous issues"). The build creates both
+    groups first with the fixed gids 31001 and 31002 (NixOS's reservations) and asserts
+    them on the group file and on the two binaries; `95-clean-stage.sh` relocates them to
+    `/usr/lib/group`; no user needs membership, so the boot hook's group list is
+    unchanged;
+  - it sets `chrome-sandbox` to 4755 (electron/electron#17972) and symlinks
+    `/usr/bin/1password` and `/usr/bin/1password-mcp` into `/opt/1Password`;
+  - it installs `/etc/1password/custom_allowed_browsers` (an `/etc` file, merged on the
+    host as usual).
+- **`/opt` payload** (`80-fix-opt.sh`): the image's `/opt` is a symlink to `var/opt`
+  (base tree), `/var/opt` is created on a host by rpm-ostree's tmpfiles line
+  (`rpm-ostree-0-integration-opt-usrlocal.conf`) but does not exist in a build, so an RPM
+  unpacking under `/opt` dies in cpio (bazzite-63 gotcha #28, measured 2026-07-09), and
+  the build wipes `/var` anyway. `40-desktop-apps.sh` creates `/var/opt` before the install
+  and `80-fix-opt.sh` moves every `/var/opt/<name>` to `/usr/lib/opt/<name>` (the base
+  ships that directory, empty) and writes `usr/lib/tmpfiles.d/bazzite-mx-opt.conf` with one
+  `L+ /var/opt/<name> - - - - /usr/lib/opt/<name>` line per directory, so the `/opt/...`
+  paths the application and its `.desktop` file carry resolve on the host. Pattern
+  bazzite-dx `build_files/50-fix-opt.sh` (AmyOS `fix-opt.sh` before it), rewritten: the
+  checks (directory, not a symlink, no namesake under `/usr/lib/opt`) run before the first
+  move, the tmpfiles file is written whole, and `--self-test` refuses the three bad layouts.
+  bootc's guidance for `/opt` content is the same "move and link" (docs `filesystem.md` §
+  `/opt`, `building/guidance.md`, read 2026-09-02). The smoke test applies the file with
+  `systemd-tmpfiles --root=<fixture> --create` and reads the link back.
+- **teams-for-linux**: not in the image. A preinstall would put Teams on hosts that do not
+  use it (criterion 3) and `flatpak preinstall` synchronises, so removing the entry later
+  would uninstall the app (flatpak-preinstall(1), 1.18.1). The Flathub id
+  `com.github.IsmaelMartinez.teams_for_linux` and the `flatpak install` command go in
+  `docs/migration.md` with the justfile feature.

@@ -37,6 +37,8 @@ digest with `.github/scripts/resolve-base.sh`, which also reads the base's kerne
 | `31-git-tools.sh` | GitKraken from the vendor's fixed URL (latest release, unsigned RPM: TLS + payload digests, `--no-gpgchecks` for that file only), git-credential-libsecret |
 | `32-cli-rpms.sh` | gh, glab, ShellCheck, shfmt and the system-administration list, all Fedora |
 | `33-mise.sh` | mise from the vendored `jdxcode/mise` COPR (key asserted); activation and default runtimes come from system_files |
+| `40-desktop-apps.sh` | Firefox and gparted from Fedora, `deny org.mozilla.firefox/*` appended to the base's Flatpak filter, 1Password from the vendored repo (key asserted, `/var/opt` created first, the `.repo` its %post rewrites put back, polkit actions and groups checked) |
+| `80-fix-opt.sh` | every `/var/opt/<name>` an RPM unpacked moves to `/usr/lib/opt/<name>`, with a generated `usr/lib/tmpfiles.d/bazzite-mx-opt.conf` (`L+` per name) that recreates the `/var/opt` link at boot; checks before the first move, `--self-test` |
 | `90-validate-repos.sh` | repository gate: vendored files present, identical and disabled; base files untouched; additions disabled; `--self-test` |
 | `95-clean-stage.sh` | dnf.conf restored, dnf history removed, accounts relocated to `/usr/lib`, rpmdb hardlinked, `/var` `/run` `/tmp` `/boot` swept (aurora `clean-stage.sh`, bazzite `finalize`, `cleanup`) |
 | `tests/run.sh` | test runner: pairing guard (every `NN-x.sh` has `tests/NN-x.sh` and vice versa), `OK:`/`FAIL:` protocol, `--self-test` |
@@ -44,7 +46,7 @@ digest with `.github/scripts/resolve-base.sh`, which also reads the base's kerne
 | `tests/NN-x.sh` | one smoke test per build script, same stem |
 
 Numbering: `00-09` preparation, `10-19` identity and trust, `20-49` package installation,
-`50-59` kernel modules, `60-69` services, `70-79` justfile, `80-89` fix-ups, `90-99` gates and
+`50-59` kernel modules, `60-69` services, `70-79` justfile, `80-89` fix-ups (`/opt` relocation), `90-99` gates and
 cleanup. The order is the file name; nothing else states it.
 
 ## system_files/
@@ -58,7 +60,7 @@ One tree, copied over `/` by `01-system-files.sh`. What lives where:
 | `etc/pki/containers/`, `etc/containers/registries.d/` | signing trust for our own images (`11-image-signing.sh`) |
 | `usr/lib/modules-load.d/*.conf` | modules loaded at boot (`ip_tables.conf`: `iptable_nat` for docker-in-docker) |
 | `usr/lib/modprobe.d/bazzite-mx-*.conf` | module options (`kvm ignore_msrs`) |
-| `usr/lib/tmpfiles.d/bazzite-mx-*.conf` | `/var` directories packages ship and clean-stage removes; a host recreates them at boot |
+| `usr/lib/tmpfiles.d/bazzite-mx-*.conf` | `/var` directories packages ship and clean-stage removes; a host recreates them at boot (`bazzite-mx-opt.conf` is not in system_files: `80-fix-opt.sh` generates it from what sits under `/var/opt`) |
 | `usr/libexec/` | helpers recipes call (`bazzite-dx-kvmfr-setup`, bazzite-dx's file byte for byte) |
 | `usr/share/ublue-os/just/*.just` | `ujust` recipes; a file with a base file's name replaces that file (the base justfile already imports it), a new file is imported by the justfile feature |
 | `etc/skel/.config/` | per-user defaults a new account starts from (VS Code `update.mode`, mise runtimes); hooks seed them for existing accounts where it matters |
