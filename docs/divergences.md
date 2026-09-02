@@ -784,3 +784,64 @@ workflow", REST "Workflow runs" (`GET /repos/{owner}/{repo}/actions/runs` with `
 README (`ubuntu-slim` row) and `ubuntu-slim-Readme.md`; aurora
 `trigger-schedule-stable-image.yml`, `clean.yml`; bazzite `clean.yml`; v1 `watch-upstream.yml`,
 `clean.yml` (read as reference, rewritten).
+
+## The landing page (`site/index.html`, `deploy-pages.yml`, `check-site.sh`)
+
+Decision 1.5e (one page: the switch commands and the signature check; the full site returns
+when v2 is stable), 1.6 (action pins by SHA). What differs from v1 and why:
+
+- **One file, no build.** v1's page was 41 KB of markup with two web fonts and four SVG
+  assets, animated, and it still advertised `:testing`, `:latest`, the closed-driver flavour
+  and an hourly rebuild after all four were gone. Here `site/index.html` is one hand-written
+  file: the two images and their bases, the dated tags and what `:stable` means, the four
+  commands that move a Bazzite host (unsigned rebase, reboot, `ujust migrate apply`,
+  `ujust verify-host`: the chicken-and-egg of the signed transport is stated on the page,
+  [`migration.md`](migration.md) has the rest), `cosign verify` with the repository's key and
+  `gh attestation verify` (the manual's note that an `oci://` reference needs a registry
+  login, read 2026-09-02: `gh` reads the Docker credential keychain, cli/cli
+  `pkg/cmd/attestation/artifact/oci/client.go:55-57`), and three links into the docs. System
+  fonts, a light and a dark palette through `prefers-color-scheme`, no script.
+- **The page is checked before it is published, and on every sandbox run.** No family repo
+  checks its page (bazzite's site is a separate repository; aurora and bazzite-dx have none).
+  `check-site.sh` refuses: a symbolic or hard link in `site/` ("The tar file ... should not
+  contain any symbolic or hard links", GitHub docs "Using custom workflows with GitHub
+  Pages"), markup that is not well-formed (the page is written as XML on purpose, so
+  Python's expat is the parser: on `ubuntu-slim` 20260728.2.1 and `ubuntu-26.04`), a page
+  that does not name both images or the public key, any of `:testing`, `:latest` and a bare
+  `bazzite-mx-nvidia` (the v1 package), and a dead link: a link into this repository
+  (`blob/main`, raw `main`) must be a file of the checkout, so the page and the file ship in
+  the same push and the check holds while the branch is not yet on `main` (the first live run,
+  2026-09-02 17:15Z, was red on `docs/migration.md`, which v1's `main` does not have: the
+  positive control, before the repository links were resolved on the checkout); every other
+  link is fetched. `--self-test`: one good page accepted, six lesions refused. The self-test
+  runs in the lint job, the live check in the lint job and in `deploy-pages.yml` before the
+  upload.
+- **The workflow is the starter's, pinned.** GitHub's `starter-workflows/pages/static.yml`
+  and the docs' custom-workflow page: `configure-pages`, `upload-pages-artifact` (a composite
+  step: GNU `tar --dereference --hard-dereference` of the directory, then
+  `actions/upload-artifact`, `action.yml` at v5.0.0), `deploy-pages` in the `github-pages`
+  environment with `pages: write` and `id-token: write`; `contents: read` for the checkout;
+  the group `bazzite-mx-pages` with `cancel-in-progress: false` (the starter's comment: a
+  production deployment is never cancelled). Pins measured 2026-09-02 17:08Z:
+  `configure-pages` v6.0.0 `45bfe019`, `upload-pages-artifact` v5.0.0 `fc324d35`,
+  `deploy-pages` v5.0.1 `368f8252` (released 2026-09-01); `refresh-pins.sh --check` reports
+  all three `OK`. Runner `ubuntu-slim`: the actions run on Node.js 24 and the step
+  needs tar, python3 and curl, all there (`ubuntu-slim-Readme.md`). Trigger: a push to `main`
+  that touches `site/`, the check or the workflow, or a dispatch; no schedule (the page has no
+  reason to change on its own) and no run on any other branch: the repository's Pages source is
+  "GitHub Actions" (`build_type: workflow`, `gh api .../pages`, 2026-09-02).
+- **Deployment.** The first `Deploy Pages` run followed the first push of this tree to `main`,
+  dispatched by hand (a force-push of an unrelated history creates no `push` run,
+  `docs/gotchas.md`); since then every push to `main` that touches `site/`, the check or the
+  workflow deploys, and the check runs first.
+
+Sources read 2026-09-02: GitHub docs "Using custom workflows with GitHub Pages" (the three
+actions, permissions, the `github-pages` environment, the artifact's tar rules),
+"Configuring a publishing source for your GitHub Pages site" (source "GitHub Actions");
+`actions/starter-workflows` `pages/static.yml`; `actions/upload-pages-artifact` README and
+`action.yml` at v5.0.0, `actions/deploy-pages` README and `action.yml` at v5.0.1,
+`actions/configure-pages` `action.yml` at v6.0.0 (all `node24`); `gh attestation verify`
+manual; cli/cli `pkg/cmd/attestation/artifact/oci/client.go`; runner-images
+`ubuntu-slim-Readme.md` (image 20260728.2.1) and `images/ubuntu-slim/Dockerfile`
+(`FROM ubuntu:24.04`); v1 `site/index.html` and `deploy-pages.yml` (read as reference,
+rewritten).

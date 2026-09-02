@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FAQ, bazzite-mx</title>
+<meta name="description" content="The questions a first rebase onto bazzite-mx raises, answered." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23162032'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='monospace' font-size='28' font-weight='700' fill='%23f2f5f9'%3EMX%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header>
+  <p class="kicker">ghcr.io/matrixdj96</p>
+  <h1>FAQ</h1>
+  <p class="lead">The questions a first rebase raises.</p>
+</header>
+<nav aria-label="Site">
+  <ul>
+    <li><a href="index.html">Home</a></li>
+    <li><a href="images.html">Images</a></li>
+    <li><a href="install.html">Install</a></li>
+    <li><a href="changes.html">What changes</a></li>
+    <li><a href="verify.html">Verify</a></li>
+    <li><a href="recipes.html">Recipes</a></li>
+    <li><a href="faq.html" aria-current="page">FAQ</a></li>
+  </ul>
+</nav>
+<main>
+  <dl class="faq">
+    <dt>Is this Bazzite?</dt>
+    <dd>It is built on Bazzite's images and follows their <code>stable</code> stream. It stays a
+      personal image with one maintainer, public and usable at your own risk. Bazzite's
+      documentation covers everything it does not change, and
+      <a href="changes.html">what changes</a> lists what it does.</dd>
+    <dt>Which image is mine?</dt>
+    <dd><code>bazzite-mx</code> for AMD or Intel graphics, <code>bazzite-mx-nvidia-open</code> for
+      an NVIDIA GPU the open kernel modules cover, <code>bazzite-mx-nvidia</code> for the rest.
+      <code>lspci -d 10de:</code> says whether there is an NVIDIA GPU.</dd>
+    <dt>Why does the first rebase go through the unsigned transport?</dt>
+    <dd>A signed pull is checked against the policy of the deployment that runs it, and stock
+      Bazzite carries no trust for <code>ghcr.io/matrixdj96</code>. After that one pull, the
+      policy inside the image checks every later pull (<a href="verify.html">verify</a>).</dd>
+    <dt>What happens to the packages I layered on Bazzite?</dt>
+    <dd><code>ujust migrate</code> removes them all, with a dry run shown first, because bootc
+      marks a deployment incompatible on any rpm-ostree group. What you need on top goes to
+      Flatpak, Homebrew or a distrobox; what needs the image layer is a change to the image.</dd>
+    <dt>Why are the Firefox and virt-manager Flatpaks denied?</dt>
+    <dd>Both are RPMs in the image, so a Flatpak would be a second copy one click away in
+      Discover. The Firefox profile is copied by hand (<a href="install.html">install</a>).</dd>
+    <dt>I have an MSI laptop and the modules do not load.</dt>
+    <dd><code>msi-ec</code> and <code>acpi_ec</code> are unsigned, so lockdown refuses them while
+      Secure Boot is on. Check <code>bootctl status</code>; with Secure Boot off,
+      <code>ujust setup-msi enable</code> loads them and installs MControlCenter.</dd>
+    <dt>ntfs3, ntfs or ntfs-3g: which driver mounts my NTFS volumes?</dt>
+    <dd><code>ntfs3</code> by default, and <code>ujust migrate</code> rewrites <code>fstab</code>
+      rows onto it. The type <code>ntfs</code> is the NTFSPLUS driver, used only after
+      <code>ujust setup-ntfsplus enable</code>. <code>ntfs-3g</code> is the FUSE driver and stays
+      available as an explicit type. On a host that did not opt in, <code>mount -t ntfs</code>
+      fails with an unknown filesystem type instead of landing on FUSE.</dd>
+    <dt>How do I go back?</dt>
+    <dd><code>rpm-ostree rollback &amp;&amp; systemctl reboot</code> boots the previous deployment
+      again; the migration recipe pinned it, so it survives garbage collection until you unpin it.
+      To leave the image, rebase to any Bazzite image the way you arrived.</dd>
+    <dt>Can I build it myself?</dt>
+    <dd>Yes: <code>podman build</code> with <code>BASE_IMAGE</code> and <code>IMAGE_NAME</code> as
+      build arguments. The build runs the smoke tests and ends with
+      <code>bootc container lint --fatal-warnings</code>
+      (<a href="https://github.com/MatrixDJ96/bazzite-mx">the repository</a>).</dd>
+    <dt>Something is wrong. Where do I say so?</dt>
+    <dd>In the repository's <a href="https://github.com/MatrixDJ96/bazzite-mx/issues">issues</a>,
+      with the output of <code>ujust verify-host</code> and, for a pull, of
+      <code>rpm-ostree status</code>.</dd>
+  </dl>
+</main>
+<footer>
+  <p>A single-maintainer image, built in the open, not affiliated with Bazzite or Universal
+    Blue. Rebase at your own risk. Source under Apache-2.0.</p>
+</footer>
+</body>
+</html>

@@ -99,38 +99,71 @@ gh workflow run watch-upstream.yml --repo MatrixDJ96/bazzite-mx --ref main -f dr
 
 ## GHCR retention
 
-`clean.yml` runs every Sunday at 00:15 UTC (the family's slot, bazzite and aurora
-`clean.yml:4`; decision 1.5g). It prunes, on `bazzite-mx` and
-`bazzite-mx-nvidia-open` only, the versions older than 90 days beyond the 7 newest tagged and
-the 7 newest untagged, keeps `:stable` and `:staging` whatever their age, and deletes the
-signature, SBOM and attestation referrers whose image is gone. The dated release tags are
-prunable; their GitHub Release stays. `dry_run` defaults to `true`:
+`clean.yml` runs on `15 0 * * 0` (Sunday 00:15 UTC) and names the three packages in full. It
+prunes the versions older than 90 days beyond the 7 newest tagged and the 7 newest untagged,
+and excludes `:stable` and `:staging` whatever their age. Signature, SBOM and attestation
+referrers whose image is gone go with them. The dated release tags are prunable; their GitHub
+Release stays. A dispatch defaults to a dry run:
 
 ```bash
-gh workflow run clean.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=true   # read the log first
+gh workflow run clean.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=true   # read the log
 gh workflow run clean.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=false  # owner's OK
 ```
 
-The `:staging` tag is re-pointed by every run and is never deleted by version id: on GHCR a
-version is the manifest, and the dated tag and `:staging` share it (measured 2026-09-02 on the
-v1 package: five tags on one version).
-
-## The cutover and later promotions
+On GHCR a version is the manifest, and several tags share one: `:staging`, re-pointed by every
+release run, rides the same version as that run's dated tag. Removing one tag by hand therefore
+takes three steps, since deleting a version takes every tag on it.
 
 ```bash
-# 1. the pilot host has run 24 h on :<tag> and ujust verify-host passes but for the tag
-gh workflow run promote.yml --repo MatrixDJ96/bazzite-mx --ref main -f release_tag=44.<yyyymmdd>
-# 2. from now on the trigger and the watcher may move :stable
-gh variable set PROMOTE_STABLE --repo MatrixDJ96/bazzite-mx --body true
+gh auth token | skopeo login ghcr.io --username 'MatrixDJ96' --password-stdin
+# 1. move each dated tag off the version :stable or :staging points at
+skopeo copy --all --preserve-digests 'docker://PACKAGE@OTHER_DIGEST' 'docker://PACKAGE:TAG'
+# 2. delete the version that now carries only the tags you want gone, and its .sig referrer
+gh api -X DELETE 'user/packages/container/PACKAGE/versions/ID'
+# 3. check from outside, then log out
+skopeo list-tags 'docker://PACKAGE' && gh release list --repo MatrixDJ96/bazzite-mx
+skopeo logout ghcr.io
 ```
 
-`promote.yml` re-verifies both images at `:<tag>` (labels, negative controls, signature,
-attestation) and copies their digests onto `:stable`. It shares the `bazzite-mx-release`
-concurrency group: it never runs beside a release.
+`PACKAGE` is one of the three GHCR packages, `TAG` a dated release tag, `OTHER_DIGEST` the
+manifest you move it onto and `ID` the version id from
+`gh api user/packages/container/PACKAGE/versions`. Pair the signature referrer with its image
+by digest (`skopeo inspect --format '{{.Digest}}'`), never by timestamp.
+
+## The site
+
+`site/` holds seven hand-written pages and one stylesheet, no script and no external asset.
+`deploy-pages.yml` publishes the directory on a push to `main` that touches `site/`,
+`.github/scripts/check-site.sh` or the workflow itself, and on a dispatch. `build.yml` ignores
+`site/`, so a site-only push runs the deployment alone. `check-site.sh` walks every page before
+the upload and on every sandbox run.
+
+```bash
+./.github/scripts/check-site.sh site             # what CI runs, links fetched
+./.github/scripts/check-site.sh site --offline
+python3 -m http.server 8765 --bind 127.0.0.1 --directory site   # look at it on port 8765
+```
+
+The workflow runs on `main` only: a Pages deployment from another ref would replace the
+published site.
+
+## Promotions
+
+```bash
+# move :stable onto a release a host has run and verified (ujust verify-host)
+gh workflow run promote.yml --repo MatrixDJ96/bazzite-mx --ref main -f release_tag='44.YYYYMMDD'
+```
+
+`promote.yml` re-verifies the three images at `:<tag>` through `gate-release.sh promote`
+(labels, negative controls, signature, attestation) and copies their digests onto `:stable`. It
+shares the `bazzite-mx-release` concurrency group, so it never runs beside a release. Unlike
+the two crons and the `promote_stable` input of a release run, it reads no repository variable:
+a dispatch moves `:stable` whatever `PROMOTE_STABLE` says, which is why it takes the owner's
+OK.
 
 ## Recovery: a published image without a signature
 
-A run that died between the push and the signature leaves `:staging` unsigned; `sign-image.yml`
+A run that died between the push and the signature leaves `:staging` unsigned. `sign-image.yml`
 signs an image of this repository by digest and verifies it:
 
 ```bash
@@ -138,22 +171,27 @@ gh workflow run sign-image.yml --repo MatrixDJ96/bazzite-mx --ref main \
   -f image=ghcr.io/matrixdj96/bazzite-mx:staging
 ```
 
-It refuses any reference outside `ghcr.io/matrixdj96/bazzite-mx` and
-`ghcr.io/matrixdj96/bazzite-mx-nvidia-open`.
+It refuses any reference outside the three packages, and it resolves the tag to a digest before
+signing, because a tag can move between the two steps.
 
 ## Repository settings the pipeline relies on
 
-Checked and set with `gh`, each command run with the owner's OK. State MEASURED 2026-09-04
-02:16Z.
+Checked and set with `gh`, each command run with the owner's OK.
 
 | Setting | Why | Check | Set |
 |---|---|---|---|
-| secret `SIGNING_SECRET` | the cosign private key paired with `cosign.pub`; proven on every push to `main` | `gh secret list --repo MatrixDJ96/bazzite-mx` → present | rotate with `gh secret set SIGNING_SECRET < key`, then a push to `main` proves the pair |
-| variable `PROMOTE_STABLE` | the switch of the automatic releases and of the promotion: without it no run moves `:stable`, and neither the weekly trigger nor the watcher dispatches a release | `gh variable list --repo MatrixDJ96/bazzite-mx` → `true` | `gh variable set PROMOTE_STABLE --repo MatrixDJ96/bazzite-mx --body false` stops the crons and the promotion, `--body true` restores them |
-| immutable releases | a release tag never moves and a release is never deleted (docs "Immutable releases": tag locked to its commit, assets frozen, an attestation of the release generated) | `gh api repos/MatrixDJ96/bazzite-mx/immutable-releases` → `enabled: true` | `gh api -X PUT repos/MatrixDJ96/bazzite-mx/immutable-releases` (admin); set |
-| default workflow permissions | the token starts read-only; each job declares what it needs | `gh api repos/MatrixDJ96/bazzite-mx/actions/permissions/workflow` → `read` | leave |
-| workflow states | GitHub disables the cron of a public repository after 60 days without a commit; scheduled runs do not count | `refresh-pins.sh --check`, class `workflow` | `gh api -X PUT repos/MatrixDJ96/bazzite-mx/actions/workflows/<id>/enable` |
-| Pages source | the landing page (decision 1.5e), arrives with `deploy-pages.yml` | `gh api repos/MatrixDJ96/bazzite-mx/pages` | with that commit |
+| secret `SIGNING_SECRET` | the cosign private key paired with `cosign.pub` | `gh secret list` | `gh secret set SIGNING_SECRET < key` |
+| variable `PROMOTE_STABLE` | the switch of the automatic releases | `gh variable list` | `gh variable set PROMOTE_STABLE --body false` |
+| variable `BUILD_RUNNER` | the label of a self-hosted runner for the build jobs; unset, they run on `ubuntu-26.04` | `gh variable list` | `gh variable set BUILD_RUNNER --body <label>` |
+| fork pull request approval | `build.yml` runs on pull requests: with `BUILD_RUNNER` set, a fork's code must not reach the host unapproved | `gh api repos/MatrixDJ96/bazzite-mx/actions/permissions/fork-pr-contributor-approval` | the Actions settings page, "Require approval for all external contributors" |
+| immutable releases | a release tag never moves, a release is never deleted, and a deleted release keeps its tag name burnt ([`gotchas.md`](gotchas.md)) | `gh api repos/MatrixDJ96/bazzite-mx/immutable-releases` | `gh api -X PUT repos/MatrixDJ96/bazzite-mx/immutable-releases` |
+| default workflow permissions | the token starts read-only, each job declares what it needs | `gh api repos/MatrixDJ96/bazzite-mx/actions/permissions/workflow` | leave |
+| workflow states | GitHub disables a public repository's cron after 60 days without a commit | `refresh-pins.sh --check`, class `workflow` | `gh api -X PUT .../actions/workflows/<id>/enable` |
+| package visibility | an anonymous host cannot pull a private image | `gh api /user/packages/container/<package> --jq .visibility` | the package's settings page: the REST API has no endpoint |
+| Pages source | the Pages actions need the source "GitHub Actions" | `gh api repos/MatrixDJ96/bazzite-mx/pages --jq .build_type` | the repository's Pages settings |
+
+Every `gh` line above wants `--repo MatrixDJ96/bazzite-mx` outside the checkout. GHCR creates a
+package private at its first push, so the visibility row applies once per package.
 
 ## A self-hosted runner for the build jobs
 
@@ -162,11 +200,16 @@ The three build jobs of `reusable-build.yml` run on the runner the repository va
 variable is the whole switch: `gh variable set BUILD_RUNNER --body <label>` moves the builds,
 `gh variable delete BUILD_RUNNER` moves them back, no commit either way. A runner that is
 offline while the variable names it holds the jobs in the queue for 24 hours, then GitHub
-fails them.
+fails them. A release run builds here too: the cosign key and the `packages: write` token
+enter the host's job environment, and the GHCR logins and the cosign binary land in the job's
+temp directory, which the runner recreates for every job: the instances share one home, and
+two jobs installing cosign into it at once collide ([`gotchas.md`](gotchas.md)).
 
-A host needs rootless podman, skopeo, git, jq, curl, the runner's .NET libraries (libicu,
-krb5-libs, openssl-libs, zlib) and disk: 35 GB per instance at peak plus 13 GB of base image
-per storage. Instances build in parallel only when each has its own container storage and its
+A host needs rootless podman, docker (the CLI: `docker login` writes the credential cosign and
+oras read), skopeo, git, jq, curl, the runner's .NET libraries (libicu, krb5-libs,
+openssl-libs, zlib) and disk: 35 GB per instance at peak on the main profile, the release
+profile adding the rootfs export syft reads, plus 13 GB of base image per storage. Instances
+build in parallel only when each has its own container storage and its
 own `TMPDIR`, both set in the runner's `.env`: the compose step prunes every unused image in
 the storage it sees, and buildah keeps cache mounts under `$TMPDIR/buildah-cache-<uid>`, so
 two instances sharing either delete or corrupt each other's work (measured 2026-09-04:
@@ -196,15 +239,18 @@ Each instance runs as a user service (`ExecStart=%h/actions-runner-%i/run.sh`,
 `Restart=always`, lingering on), not through its `svc.sh`: a system service that executes a
 script under the user's home dies at EXEC on SELinux, and rootless podman wants the user's
 session. A job cancelled mid-build leaves buildah working containers behind: `buildah rm
---all` against that instance's storage once it is idle. Removal is `config.sh remove --token
+--all` against that instance's storage once it is idle; every job ends by removing its own
+images and working containers, so a storage holds only the bases between jobs (measured
+2026-09-05: three jobs' leftovers, 168 GB over three storages, failed the next main-profile
+run on `No space left on device`). Removal is `config.sh remove --token
 <token from .../runners/remove-token>`, then the directory, the storage and the unit go.
 
 ## Keeping the pins fresh
 
-Every `uses:` is pinned to a commit SHA with the version in a trailing comment, and the
-binaries the workflows install take their version from an input (`cosign-release`,
-`syft-version`, `ORAS_VERSION`). No bot refreshes them (decision 1.6);
-`.github/scripts/refresh-pins.sh` does, by hand:
+Every third-party `uses:` is pinned to a commit SHA with the version in a trailing comment; the
+repo's own reusable workflow is called by path, which GitHub cannot pin. The binaries the
+workflows install take their version from an input or an env value (`cosign-release`,
+`syft-version`, `ORAS_VERSION`). No bot refreshes them; `refresh-pins.sh` does, by hand:
 
 ```bash
 ./.github/scripts/refresh-pins.sh --self-test   # the verdicts on fixtures, offline

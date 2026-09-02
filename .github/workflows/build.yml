@@ -88,20 +88,21 @@ jobs:
           for f in "${files[@]}"; do just --unstable --fmt --check --justfile "$f"; done
           echo "just --fmt --check ok: ${#files[@]} files"
 
-      - name: Prove the CI scripts fail closed
+      - name: Check the site
+        run: ./.github/scripts/check-site.sh site
+
+      - name: Run the self-tests
         run: |
           set -euo pipefail
-          for s in resolve-base image-labels check-image release-tag gate-release changelog refresh-pins watch-upstream; do
-            "./.github/scripts/$s.sh" --self-test
+          for s in ./.github/scripts/*.sh; do
+            "$s" --self-test
           done
+          ./build_files/tests/run.sh --self-test
 
-  # The callee's job declares the permissions its publishing steps need and
-  # a caller may only maintain or reduce them (GitHub docs, reusable
-  # workflows), so the same set is granted here; no step of a sandbox or
-  # main run uses the write half (every publishing step is behind
-  # `if: inputs.publish`, and `publish` is never passed from here).
+  # A caller may only maintain or reduce the callee's permissions (GitHub docs,
+  # reusable workflows), so the publishing set is granted here and left unused.
   build:
-    name: Build
+    name: Build the flavours
     needs: lint
     permissions:
       contents: read

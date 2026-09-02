@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Verify, bazzite-mx</title>
+<meta name="description" content="How to verify a bazzite-mx image from any machine: signature, attestation, SBOM, and what the host checks on every pull." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23162032'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='monospace' font-size='28' font-weight='700' fill='%23f2f5f9'%3EMX%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header>
+  <p class="kicker">ghcr.io/matrixdj96</p>
+  <h1>Verify</h1>
+  <p class="lead">Every published image is signed by digest with one key and attested by the run
+    that built it. A migrated host repeats the signature check on every pull.</p>
+</header>
+<nav aria-label="Site">
+  <ul>
+    <li><a href="index.html">Home</a></li>
+    <li><a href="images.html">Images</a></li>
+    <li><a href="install.html">Install</a></li>
+    <li><a href="changes.html">What changes</a></li>
+    <li><a href="verify.html" aria-current="page">Verify</a></li>
+    <li><a href="recipes.html">Recipes</a></li>
+    <li><a href="faq.html">FAQ</a></li>
+  </ul>
+</nav>
+<main>
+  <section id="signature">
+    <h2>From any machine</h2>
+    <p>The key is <a href="https://github.com/MatrixDJ96/bazzite-mx/blob/main/cosign.pub">cosign.pub</a>
+      in the repository, the same file the image installs as
+      <code>/etc/pki/containers/matrixdj96.pub</code>. The signature sits on the digest, so it holds
+      whichever tag you name. Each release run also records a build provenance attestation in
+      GitHub's store, tied to this repository and to the digest it built.</p>
+<pre tabindex="0"><code>cosign verify --key https://raw.githubusercontent.com/MatrixDJ96/bazzite-mx/main/cosign.pub \
+  ghcr.io/matrixdj96/bazzite-mx:stable
+
+gh attestation verify oci://ghcr.io/matrixdj96/bazzite-mx:stable --repo MatrixDJ96/bazzite-mx</code></pre>
+    <p>Name another image or a dated tag to check that one. <code>gh</code> needs a registry
+      login, since an <code>oci://</code> reference is fetched from an authenticated registry.</p>
+  </section>
+
+  <section id="sbom">
+    <h2>The SBOM</h2>
+    <p>The packages of each image are listed in an SPDX document, attached to the image as a
+      referrer and signed with the same key. The release notes print the diff between two
+      releases; the document itself is one <code>oras</code> call away.</p>
+<pre tabindex="0"><code>oras discover --format json ghcr.io/matrixdj96/bazzite-mx:stable \
+  | jq -r '.referrers[] | select(.artifactType == "application/vnd.spdx+json") | .digest'</code></pre>
+  </section>
+
+  <section id="host">
+    <h2>What the host verifies</h2>
+    <p>After <code>ujust migrate</code> the origin is
+      <code>ostree-image-signed:docker://ghcr.io/matrixdj96/&lt;image&gt;:stable</code>. The
+      image's <code>/etc/containers/policy.json</code> carries the
+      <code>ghcr.io/matrixdj96</code> scope as <code>sigstoreSigned</code> with the key above, and
+      keeps <code>default</code> on <code>reject</code>. The tag stays free while the signature is
+      checked on the digest, and a failing pull is refused before anything is staged.</p>
+    <p><code>ujust verify-host</code> prints the policy in force (<a href="install.html">install</a>).
+      A local copy of <code>policy.json</code> shadows the image's, which is why the migration
+      recipe offers to restore it first.</p>
+  </section>
+
+  <section id="pipeline">
+    <h2>How a release is gated</h2>
+    <p>A push never publishes. A release is a dispatched run: by hand, by the weekly trigger, or
+      by the watcher. That watcher compares the base's digest with the one the current
+      <code>:stable</code> was built from. The run builds the three images, probes each one, pushes it to
+      <code>:staging</code>, signs it and records the attestation. A separate job verifies all of
+      that again by digest, with two negative controls. Only then does the run write the dated tag;
+      it moves <code>:stable</code> only when the dispatch asks for it
+      (<a href="https://github.com/MatrixDJ96/bazzite-mx/blob/main/docs/workflow.md">docs/workflow.md</a>).</p>
+  </section>
+</main>
+<footer>
+  <p>A single-maintainer image, built in the open, not affiliated with Bazzite or Universal
+    Blue. Rebase at your own risk. Source under Apache-2.0.</p>
+</footer>
+</body>
+</html>
