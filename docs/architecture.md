@@ -29,11 +29,13 @@ digest with `.github/scripts/resolve-base.sh`, which also reads the base's kerne
 | Path | Role |
 |---|---|
 | `build.sh` | orchestrator: runs `NN-<feature>.sh` in version order, one `::group::` each, stops at the first failure (bazzite-dx `build_files/build.sh:13-27`) |
-| `lib/env.sh` | sourced first by every script: `CTX`, `BUILD_FILES`, `BUILD_TMP`, `BUILD_STATE`, then `log.sh` and `repos.sh` |
+| `lib/env.sh` | sourced first by every script: `CTX`, `BUILD_FILES`, `BUILD_TMP`, `BUILD_STATE`, then `log.sh`, `repos.sh`, `gpg.sh` and `just.sh` |
 | `lib/log.sh` | `group`, `endgroup`, `log`, `die` |
 | `lib/repos.sh` | `install_from_repo <id> <pkg>..` (vendored `.repo`, enabled for one transaction), `copr_install_isolated <owner/project> <pkg>..` (aurora `copr-helpers.sh:4-23`) |
-| `lib/gpg.sh` | `key_fingerprint <file>`, `assert_key_fingerprint <file> <fpr>`: the vendored key's fingerprint against the value pinned in the feature script, before the install that trusts it |
-| `00-prep.sh` | dnf keeps its cache during the build (aurora `build-prep.sh:8-9`); records the base's `.repo` files by checksum |
+| `lib/just.sh` | `recipe_set <justfile>` (the recipe names, sorted), `has_recipe <justfile> <name>`: output captured before any grep (`just … \| grep -q` dies of SIGPIPE under pipefail) |
+| `lib/kmod.sh` | `kernel_version` (the image's one kernel), `assert_module <ko> <kver> [<version>]` (readable, vermagic names the kernel, MODULE_VERSION): sourced by the kmod-builder stage and by `50-kmods.sh` |
+| `lib/gpg.sh` | `KEY_FPR` (the pinned fingerprint of every vendored key, with its source), `key_fingerprint <file>`, `assert_key_fingerprint <file> [<fpr>]`: the vendored key's fingerprint against the table, before the install that trusts it |
+| `00-prep.sh` | dnf keeps its cache during the build (aurora `build-prep.sh:8-9`); records the base's `.repo` files by checksum and its `ujust` recipe files by recipe set |
 | `01-system-files.sh` | `rsync -rlpvK` of `system_files/` over the tree: every file lands on a fresh inode with the mode git stores |
 | `10-image-info.sh` | identity: `image-info.json` (name, vendor, signed `image-ref`, `version`, `base-version`), os-release `VARIANT_ID`/`IMAGE_ID`, KDE About page (bazzite-dx `00-image-info.sh` form) |
 | `11-image-signing.sh` | `cosign.pub` → `/etc/pki/containers/matrixdj96.pub`; `policy.json` scope `ghcr.io/matrixdj96` = `sigstoreSigned` + `matchRepository` (written with jq to a new file, then renamed) |
@@ -49,6 +51,7 @@ digest with `.github/scripts/resolve-base.sh`, which also reads the base's kerne
 | `kmods/build-kmods.sh` | kmod-builder stage: for every `kmods/<name>/source.env` (URL, pinned COMMIT, KO_NAME, KO_BUILD_PATH, KO_VERSION) fetch the commit, prove the checkout is that commit, `make -C /usr/src/kernels/<kver> M=<clone> modules`, `strip --strip-debug`, stage under `/out/<kver>/updates/`, assert readable, vermagic for `<kver>`, MODULE_VERSION; `--self-test` |
 | `45-kde-defaults.sh` | KDE defaults from system_files: two Plasma update scripts (clock seconds, a panel per screen), skel Konsole shortcut file and PowerShell profile, the `setup-panels` recipe; the script proves the files landed where their consumers read them and are well formed |
 | `50-kmods.sh` | installs the staged `msi-ec.ko` and `acpi_ec.ko` into `/usr/lib/modules/<kver>/updates/` (depmod searches `updates` first: kmod `tools/depmod.c:913-917`), runs `depmod`, asserts vermagic, version and that `modprobe` resolves each name to the new copy; nothing loads them at boot |
+| `70-justfile.sh` | `ujust`: drift guard on the base files we replace (recipe set equal to the snapshot), the base's `install-jetbrains-toolbox` cut out of `82-bazzite-apps.just` (the earlier import wins on duplicates), `95-bazzite-mx.just` imported into the master justfile on a fresh inode, no name defined twice, `just --list` runs, our files `--fmt` clean; `--self-test` |
 | `80-fix-opt.sh` | every `/var/opt/<name>` an RPM unpacked moves to `/usr/lib/opt/<name>`, with a generated `usr/lib/tmpfiles.d/bazzite-mx-opt.conf` (`L+` per name) that recreates the `/var/opt` link at boot; checks before the first move, `--self-test` |
 | `90-validate-repos.sh` | repository gate: vendored files present, identical and disabled; base files untouched; additions disabled; `--self-test` |
 | `95-clean-stage.sh` | dnf.conf restored, dnf history removed, accounts relocated to `/usr/lib`, rpmdb hardlinked, `/var` `/run` `/tmp` `/boot` swept (aurora `clean-stage.sh`, bazzite `finalize`, `cleanup`) |
@@ -72,8 +75,9 @@ One tree, copied over `/` by `01-system-files.sh`. What lives where:
 | `usr/lib/modules-load.d/*.conf` | modules loaded at boot (`ip_tables.conf`: `iptable_nat` for docker-in-docker) |
 | `usr/lib/modprobe.d/bazzite-mx-*.conf` | module options (`kvm ignore_msrs`) |
 | `usr/lib/tmpfiles.d/bazzite-mx-*.conf` | `/var` directories packages ship and clean-stage removes; a host recreates them at boot (`bazzite-mx-opt.conf` is not in system_files: `80-fix-opt.sh` generates it from what sits under `/var/opt`) |
-| `usr/libexec/` | helpers recipes call: `bazzite-dx-kvmfr-setup` (bazzite-dx's file byte for byte), `bazzite-mx-msi-setup` (the root half of `setup-msi`: modules-load, modprobe, MControlCenter installed per host under `/usr/local` and `/etc/dbus-1`; `ROOT=` and `DMI_VENDOR_FILE=` for its smoke test) |
-| `usr/share/ublue-os/just/*.just` | `ujust` recipes; a file with a base file's name replaces that file (the base justfile already imports it), a new file is imported by the justfile feature |
+| `usr/lib/bazzite-mx/host.sh` | what `verify-host` and `migrate` both read about the host (booted deployment, request lists, policy scope, fstab rows, ntfsplus residue) and their one fixture routing (`FIXTURE=`); sourced, never run |
+| `usr/libexec/` | helpers recipes call, each with a fixture knob for its smoke test: `bazzite-dx-kvmfr-setup` (bazzite-dx's file plus its two bold codes), `bazzite-mx-msi-setup` (the root half of `setup-msi`; `ROOT=`, `DMI_VENDOR_FILE=`), `bazzite-mx-verify-host` (the checks of `verify-host`; `FIXTURE=`), `bazzite-mx-migrate` (`plan`/`apply` of `migrate`; `FIXTURE=` for plan, `--self-test`), `bazzite-mx-jetbrains-toolbox` (the user half of `install-jetbrains-toolbox`; `FEED_URL=`, `CURL_PROTO=`, `NO_LAUNCH=`) |
+| `usr/share/ublue-os/just/*.just` | `ujust` recipes; a file with a base file's name replaces that file (the base justfile already imports it, and `70-justfile.sh` proves it held only the recipes we ship), `95-bazzite-mx.just` is imported by `70-justfile.sh` |
 | `usr/share/plasma/shells/org.kde.plasma.desktop/contents/updates/bazzite-mx-*.js` | Plasma update scripts: plasmashell runs each once per user at start, in file-name order, and records it in `~/.config/plasmashellrc` (`[Updates] performed`); the way Plasma and Bazzite (`bazzite-pins.js`) ship one-shot per-user defaults |
 | `etc/skel/.config/`, `etc/skel/.local/share/` | per-user defaults a new account starts from (VS Code `update.mode`, mise runtimes, PowerShell profile, Konsole `kxmlgui5/konsole/sessionui.rc`); hooks seed them for existing accounts where it matters |
 | `etc/profile.d/*.sh` | shell activation (`mise.sh`, interactive bash) |
@@ -85,7 +89,7 @@ One tree, copied over `/` by `01-system-files.sh`. What lives where:
 | Where | Lifetime | Content |
 |---|---|---|
 | `/tmp/bazzite-mx-build/` (`BUILD_TMP`) | the build `RUN` (tmpfs) | backups a later script restores (`dnf.conf.base`) |
-| `/usr/lib/bazzite-mx/build-state/` (`BUILD_STATE`) | shipped in the image | small text records the test `RUN` and a host can read back: `repos.base.sha256` |
+| `/usr/lib/bazzite-mx/build-state/` (`BUILD_STATE`) | shipped in the image | small text records the test `RUN` and a host can read back: `repos.base.sha256`, `just.base.summary` (the base's recipe files by recipe set) |
 | `/var/cache`, `/var/log` | cache mounts, not in the image | dnf cache (fast rebuilds), dnf logs |
 
 ## Gates, in order

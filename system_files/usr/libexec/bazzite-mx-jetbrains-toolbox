@@ -1,0 +1,258 @@
+#!/usr/bin/env bash
+# JetBrains Toolbox App for this user: the latest build of JetBrains' own
+# release feed, its tarball checked against the sha256 the feed publishes,
+# unpacked under the user's data directory and started once. The user half of
+# `ujust install-jetbrains-toolbox`; runs as the user, never as root.
+#
+# Usage: bazzite-mx-jetbrains-toolbox latest | install | status
+#   latest   the build, tarball URL and checksum URL the feed publishes
+#   install  download (cached), verify, unpack, start the app once
+#   status   the build installed here, from the tree's own bin/build.txt
+# Knobs for the smoke test: FEED_URL (a file:// feed whose links are file://
+# too), CURL_PROTO (default "=https"; the test adds file), NO_LAUNCH=1.
+# Exit status: 0 done; 1 refused or failed, the reason on stderr as `ERROR: …`
+# (the smoke test reads those lines; a message it cites stays as it is).
+# Writes: $XDG_DATA_HOME/JetBrains/ToolboxApp (the unpacked tree),
+#   $XDG_CACHE_HOME/bazzite-mx/jetbrains-toolbox/<tarball> (kept for a rerun).
+set -euo pipefail
+
+JETBRAINS_RELEASES=https://data.services.jetbrains.com/products/releases
+FEED_URL=${FEED_URL:-"$JETBRAINS_RELEASES?code=TBA&latest=true&type=release"}
+CURL_PROTO=${CURL_PROTO:-=https}
+
+# A fixed place: the app is started from there and updates itself inside its
+# own data directory, ~/.local/share/JetBrains/Toolbox.
+DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
+APP_DIR=$DATA_HOME/JetBrains/ToolboxApp
+APP_DATA_DIR=$DATA_HOME/JetBrains/Toolbox
+
+# The tarball stays here so a second run does not download it again.
+CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/bazzite-mx/jetbrains-toolbox
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+# Set by read_feed.
+BUILD=
+LINK=
+CHECKSUM_LINK=
+
+# --- errors and downloads -----------------------------------------------------
+
+exit_with_error() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+fetch() {
+    curl -fsSL --proto "$CURL_PROTO" "$@"
+}
+
+sha256_of() {
+    local file=$1
+
+    sha256sum "$file" | cut -d' ' -f1
+}
+
+# --- the feed and the installed tree ------------------------------------------
+
+# installed_build: the build at APP_DIR from the tarball's own bin/build.txt
+# (first line, no whitespace), whoever unpacked it there; empty when there is
+# no runnable Toolbox (docs/gotchas.md § The Toolbox helper read only its own
+# marker).
+installed_build() {
+    if [ ! -x "$APP_DIR/bin/jetbrains-toolbox" ]; then
+        return 0
+    fi
+
+    awk 'NR == 1 { gsub(/[[:space:]]/, ""); print }' "$APP_DIR/bin/build.txt" 2> /dev/null || true
+}
+
+# read_feed: sets BUILD, LINK and CHECKSUM_LINK, or exits naming what the
+# feed lost.
+read_feed() {
+    local json
+
+    if ! json=$(fetch "$FEED_URL"); then
+        exit_with_error "the JetBrains release feed is unreachable ($FEED_URL)"
+    fi
+
+    BUILD=$(jq -r '.TBA[0].build // ""' <<< "$json")
+    LINK=$(jq -r '.TBA[0].downloads.linux.link // ""' <<< "$json")
+    CHECKSUM_LINK=$(jq -r '.TBA[0].downloads.linux.checksumLink // ""' <<< "$json")
+
+    if [ -z "$BUILD" ] || [ -z "$LINK" ] || [ -z "$CHECKSUM_LINK" ]; then
+        exit_with_error "the feed lost its shape" \
+            "(.TBA[0].build / .downloads.linux.link / .checksumLink)"
+    fi
+
+    if [[ $LINK != *"jetbrains-toolbox-$BUILD.tar.gz" ]]; then
+        exit_with_error "the tarball link ($LINK) does not name build $BUILD"
+    fi
+}
+
+# --- the tarball --------------------------------------------------------------
+
+# download_verified_tarball <tarball>: the cached file when its sha256 is the
+# feed's, a fresh download otherwise; a download that does not match is
+# removed and the command stops.
+download_verified_tarball() {
+    local tarball=$1
+    local expected actual
+
+    expected=$(fetch "$CHECKSUM_LINK" | awk 'NR == 1 { print $1 }')
+    if [[ ! $expected =~ ^[0-9a-f]{64}$ ]]; then
+        exit_with_error "the checksum file does not start with a sha256 ($CHECKSUM_LINK)"
+    fi
+
+    if [ ! -s "$tarball" ] || [ "$(sha256_of "$tarball")" != "$expected" ]; then
+        echo "downloading build $BUILD ..."
+        if ! fetch -o "$tarball.part" "$LINK"; then
+            exit_with_error "download failed ($LINK)"
+        fi
+        mv -f "$tarball.part" "$tarball"
+    fi
+
+    actual=$(sha256_of "$tarball")
+    if [ "$actual" != "$expected" ]; then
+        rm -f "$tarball"
+        exit_with_error "sha256 mismatch for jetbrains-toolbox-$BUILD.tar.gz:" \
+            "feed says $expected, file is $actual (download removed)"
+    fi
+
+    echo "sha256 verified: $expected"
+}
+
+# tarball_top_directory <tarball>: prints the top directory after checking
+# the layout upstream ships: <top>/bin/jetbrains-toolbox and <top>/bin/build.txt.
+tarball_top_directory() {
+    local tarball=$1
+    local list top
+
+    if ! list=$(tar tzf "$tarball"); then
+        exit_with_error "$tarball is not a gzip tarball"
+    fi
+
+    top=$(head -n1 <<< "$list")
+    top=${top%%/*}
+    if [ "$top" != "jetbrains-toolbox-$BUILD" ]; then
+        exit_with_error "unexpected top directory '$top' in the tarball"
+    fi
+
+    if ! grep -qx "$top/bin/jetbrains-toolbox" <<< "$list"; then
+        exit_with_error "$top/bin/jetbrains-toolbox missing from the tarball" \
+            "(layout changed upstream?)"
+    fi
+
+    if ! grep -qx "$top/bin/build.txt" <<< "$list"; then
+        exit_with_error "$top/bin/build.txt missing from the tarball" \
+            "(status and the second run read the build there)"
+    fi
+
+    echo "$top"
+}
+
+# unpack_into_place <tarball> <top>: the new tree replaces APP_DIR in one
+# rename, so a failed unpack leaves the old tree in place.
+unpack_into_place() {
+    local tarball=$1
+    local top=$2
+
+    tar xzf "$tarball" -C "$WORK"
+    if [ ! -x "$WORK/$top/bin/jetbrains-toolbox" ]; then
+        exit_with_error "$top/bin/jetbrains-toolbox is not executable"
+    fi
+
+    mkdir -p "$(dirname "$APP_DIR")"
+    rm -rf "$APP_DIR.new"
+    mv "$WORK/$top" "$APP_DIR.new"
+    rm -rf "$APP_DIR"
+    mv "$APP_DIR.new" "$APP_DIR"
+
+    echo "Toolbox build $BUILD unpacked at $APP_DIR"
+}
+
+# The app writes its .desktop entry and its data on its first start.
+start_app_once() {
+    if [ "${NO_LAUNCH:-0}" = 1 ]; then
+        return 0
+    fi
+
+    echo "starting it once: the app writes its .desktop entry and data" \
+        "under ~/.local/share/JetBrains"
+    setsid -f "$APP_DIR/bin/jetbrains-toolbox" > /dev/null 2>&1
+}
+
+# --- commands -----------------------------------------------------------------
+
+cmd_latest() {
+    read_feed
+
+    echo "build $BUILD"
+    echo "tarball $LINK"
+    echo "sha256 $CHECKSUM_LINK"
+}
+
+cmd_status() {
+    local build
+
+    build=$(installed_build)
+    if [ -n "$build" ]; then
+        echo "installed: build $build at $APP_DIR"
+    else
+        echo "not installed (no runnable Toolbox with its bin/build.txt at $APP_DIR)"
+    fi
+
+    if [ -d "$APP_DATA_DIR" ]; then
+        echo "data: $APP_DATA_DIR (the app's own directory)"
+    fi
+}
+
+cmd_install() {
+    local tarball top
+
+    read_feed
+
+    if [ "$(installed_build)" = "$BUILD" ]; then
+        # The marker an earlier form of this helper wrote next to the tree.
+        rm -f "$APP_DIR/.bazzite-mx-build"
+        echo "build $BUILD is already installed at $APP_DIR"
+        return 0
+    fi
+
+    if pgrep -f "$APP_DIR/bin/jetbrains-toolbox" > /dev/null; then
+        exit_with_error "Toolbox is running from $APP_DIR: quit it first"
+    fi
+
+    mkdir -p "$CACHE"
+    tarball=$CACHE/jetbrains-toolbox-$BUILD.tar.gz
+    download_verified_tarball "$tarball"
+
+    top=$(tarball_top_directory "$tarball")
+    unpack_into_place "$tarball" "$top"
+    start_app_once
+}
+
+# --- main ---------------------------------------------------------------------
+
+main() {
+    local command=${1:-}
+
+    case "$command" in
+        latest)
+            cmd_latest
+            ;;
+        install)
+            cmd_install
+            ;;
+        status)
+            cmd_status
+            ;;
+        *)
+            echo "usage: bazzite-mx-jetbrains-toolbox latest|install|status" >&2
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
