@@ -49,4 +49,5 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
 # The last gate, offline (docs/architecture.md § Gates, in order).
 RUN --mount=type=tmpfs,target=/run \
     --network=none \
-    bootc container lint --fatal-warnings --no-truncate
+    rpm -V --nomtime python3-setuptools \
+    && bootc container lint --fatal-warnings --no-truncate

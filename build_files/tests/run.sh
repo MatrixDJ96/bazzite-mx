@@ -17,6 +17,8 @@ shopt -s nullglob
 TESTS_DIR=$(dirname "$(realpath "$0")")
 BUILD_FILES=$(realpath "$TESTS_DIR/..")
 export BUILD_STATE=/usr/lib/bazzite-mx/build-state
+# Tests write no .pyc either (docs/gotchas.md § A scriptlet rewrote a packaged `.pyc`).
+export PYTHONDONTWRITEBYTECODE=1
 
 # --- the runner ---------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The output of a build script: a section fold for the GitHub Actions log, a
 # progress line, and the one way to fail the build. Sourced by lib/env.sh;
-# tests/21-container-runtime.sh sources it on its own.
+# tests 21 and 22 source it on their own.
 #
 # Output contract: `::group::` and `::endgroup::` fold a section in the
 # Actions log; `FAIL: <reason>` on stderr is what the test runner greps for.

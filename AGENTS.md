@@ -17,11 +17,11 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 ```
 
 - The commands need bash, git, jq and shellcheck on the host, podman and
-  skopeo for the pre-flight, podman for the lint job's container (shfmt, yamllint);
+  skopeo for the pre-flight, podman for the lint job's container (shfmt, yamllint, just);
   `.claude/hooks/lint-edit.sh` skips any linter it cannot find.
-- The `lint` job of `build.yml` runs the first five, and shfmt and yamllint in
-  `quay.io/fedora/fedora:44`; the local equivalent is `docs/workflow.md` § Run the lint job
-  locally.
+- The `lint` job of `build.yml` runs the first five, and shfmt, yamllint and
+  `just --fmt --check` in `quay.io/fedora/fedora:44`; the local equivalent is
+  `docs/workflow.md` § Run the lint job locally.
 - A change under `build_files/` or `system_files/` gets the pre-flight (`/preflight`,
   `.claude/commands/preflight.md`) with `--no-cache` before the push: buildah keys a `RUN` on
   its command, not on a bind mount's content, so a cached run exits 0 without the change.
@@ -31,7 +31,8 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 - `build_files/` — `build.sh` runs `NN-<feature>.sh` in version order; `lib/` the sourced
   libraries; `tests/` one smoke test per script plus `run.sh`. Each file's role:
   `docs/architecture.md`.
-- `system_files/` — copied over `/`: vendored `.repo` files and keys, setup hooks.
+- `system_files/` — copied over `/`: vendored `.repo` files and keys, setup hooks, ujust
+  recipes.
 - `.github/scripts/` — one owner per CI artefact, each with a `--self-test`.
 
 ## Conventions
@@ -75,7 +76,7 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 ## Docs
 
 - `docs/architecture.md` — before adding a script: build flow, roles, build state, gates.
-- `docs/conventions.md` — before writing a script, boot hook, test or workflow.
+- `docs/conventions.md` — before writing a script, recipe, boot hook, test or workflow.
 - `docs/divergences.md` — what the image changes over Bazzite and why, one entry per feature.
 - `docs/gotchas.md` — a failure that looks familiar, by heading.
 - `docs/workflow.md` — branches and the local lint run.

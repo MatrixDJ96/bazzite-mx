@@ -6,8 +6,8 @@ ships a smoke test. Each entry says what the image does, why, where the claim co
 which files carry it; the guards themselves live in the build script and its test.
 [`gotchas.md`](gotchas.md) holds the surprises this project probed, each with its date.
 
-Contents: three flavours · image identity · signing trust · hook framework · Docker CE · the
-cleaned stage · CI.
+Contents: three flavours · image identity · signing trust · hook framework · Docker CE ·
+virtualization · the cleaned stage · CI.
 
 ## Three flavours, one recipe
 
@@ -62,7 +62,7 @@ Files: `build_files/11-image-signing.sh` and its test, `cosign.pub`,
 ## Hook framework: ublue-setup-services
 
 The base ships no `system-setup.hooks.d` dispatcher. One feature here needs a step that
-converges at every boot: the group memberships the container runtime needs.
+converges at every boot: the group memberships the container runtime and libvirt need.
 `ublue-setup-services` comes from the COPR `ublue-os/packages`, the way bazzite-dx installs it
 (`bazzite-dx/build_files/20-install-apps.sh`) and enables it
 (`bazzite-dx/build_files/40-services.sh`). Only the system unit is enabled here. Our hooks
@@ -109,7 +109,7 @@ instead fetches the file at build time and disables it with a `dnf5 config-manag
 silent no-op on a repository added from a file. `docker.socket` is enabled and `docker.service`
 left to socket activation, `podman.socket` with it, and `podman-machine`, `podman-tui`,
 `podman-compose` and `bcvk` come from Fedora in the same script; `bcvk` requires `qemu-kvm` and
-`qemu-img`, so the QEMU stack enters the image here.
+`qemu-img`, so the QEMU stack enters the image here, before the virtualization script.
 
 Two host-level effects need the image layer. `iptable_nat` is listed in `modules-load.d` for
 docker-in-docker, whose inner dockerd cannot load kernel modules itself
@@ -123,18 +123,23 @@ bazzite-dx choice, kept because the fleet's wheel users administer their own mac
 residual: the `%post` loads an SELinux module only where `selinuxenabled` answers true, which
 it does not in a build container, so hosts run without that AF_ALG denial. The boot hook only
 adds: an account taken out of wheel, as KDE's Users page does to an administrator made Standard
-(accountsservice, `src/user.c`), keeps `docker` until `sudo gpasswd -d <user> docker`. The
-group is allocated dynamically: the `%post` of `docker-ce` runs `groupadd --system`, and the
-`uidgid` table of `setup` lacks it, its packaging guidelines giving a fixed number only to ids
-shared between machines (Fedora Packaging Guidelines, «Users and Groups»). A host's
-`/etc/group` can so keep another number than the image's. The image fixes `docker` at 995, the
-number the `bazzite-mx` build gave it, created ahead of the packages from
+(accountsservice, `src/user.c`), keeps `docker` and `libvirt` until
+`sudo gpasswd -d <user> docker` and `sudo gpasswd -d <user> libvirt`. Both groups are allocated
+dynamically: the `%post` of `docker-ce` runs `groupadd --system`, libvirt's sysusers file reads
+`g libvirt -`, and the `uidgid` table of `setup` has neither, its packaging guidelines giving a
+fixed number only to ids shared between machines (Fedora Packaging Guidelines, «Users and
+Groups»). A host's `/etc/group` can so keep another number than the image's, and a `libvirt`
+line Bazzite's `virt-on` added with `groupadd --system` (its `84-bazzite-virt.just`) can hold
+the gid `docker` has in `/usr/lib/group`, every member of that `libvirt` then opening the
+Docker socket. The image fixes `docker` at 995 and `libvirt` at 954, the numbers the
+`bazzite-mx` build gave them, created ahead of the packages from
 `/usr/lib/sysusers.d/bazzite-mx-groups.conf`, and the boot hook moves a group of `/etc/group`
 on another number to the image's when no other group holds it, the files under `/run`
-(`docker.sock`) and `/etc` with the old gid following; the homes and the container stores are
-left, their files carrying gids of their own in the same range. The standards of other
-distributions fall in Fedora's static range: Gentoo's 48 (`api.gentoo.org/uid-gid.txt`) and
-NixOS's 131 (`nixos/modules/misc/ids.nix`), 48 being `apache` in `uidgid`.
+(`docker.sock`), `/etc` and `/var/lib/libvirt` with the old gid following; the homes and the
+container stores are left, their files carrying gids of their own in the same range. The
+standards of other distributions fall in Fedora's static range: Gentoo's 48 and 79
+(`api.gentoo.org/uid-gid.txt`) and NixOS's 131 and 67 (`nixos/modules/misc/ids.nix`), 48 and 67
+being `apache` and `webalizer` in `uidgid`.
 
 Files: `build_files/21-container-runtime.sh` and its test, `build_files/01-system-files.sh`,
 `system_files/usr/lib/sysusers.d/bazzite-mx-groups.conf`,
@@ -142,6 +147,102 @@ Files: `build_files/21-container-runtime.sh` and its test, `build_files/01-syste
 `system_files/etc/pki/rpm-gpg/RPM-GPG-KEY-docker-ce`,
 `system_files/usr/lib/modules-load.d/ip_tables.conf`,
 `system_files/usr/share/ublue-os/system-setup.hooks.d/10-bazzite-mx-groups.sh`.
+
+## Virtualization and quickemu
+
+Bazzite ships `edk2-ovmf` and the `kvmfr` module but no libvirt, QEMU or virt-manager: its
+`setup-virtualization` recipe installs the virt-manager Flatpak and enables the monolithic
+`libvirtd` per host. The hosts here run local VMs, so the stack belongs in the image, as an
+explicit package list on the modular daemons (weak dependencies are off in the base's
+`dnf.conf`; https://libvirt.org/daemons.html) that Fedora 44's own preset enables
+(`/usr/lib/systemd/system-preset/90-default.preset`). The build asserts `virtqemud.socket`
+enabled and `libvirtd.service` disabled, so a preset change stops the build, and the
+virt-manager Flatpak is denied through the base's Flatpak filter, the RPM being in the image.
+
+The preset enables more than the QEMU pair. `libvirt` is a metapackage, and the drivers it
+brings arrive with the preset lines that start them: `virtqemud`, `virtxend`, `virtlxcd` and
+`virtvboxd` are all enabled on a host, service (`90-default.preset:73-76`) and socket
+(`:80-91`), while `virtchd` and the monolithic `libvirtd` stay disabled. The LXC, Xen and
+VirtualBox daemons have nothing to drive on these hosts and are accepted rather than trimmed:
+they are the packaging's own shape, and a hand-picked driver list would have to be revisited at
+every base bump. The storage drivers bring an iSCSI initiator with them
+(`iscsi-initiator-utils`, `libiscsi`, `lsscsi`), whose `iscsid.socket`, `iscsiuio.socket`,
+`iscsi-starter.service` and `iscsi-onboot.service` the same preset enables
+(`90-default.preset:145-153`); accepted for the same reason, the sockets listening on the host
+alone. `quickemu` has the same shape: it requires the `qemu` metapackage, which requires every
+`qemu-system-*` and `qemu-user` (`rpm -q --requires qemu`), so the image carries the 17
+emulators of other architectures, `qemu-user` and their firmware (`edk2-aarch64`,
+`edk2-loongarch64`, `edk2-riscv64`, `openbios`, `SLOF`), 954 MiB installed that nothing else
+asks for; accepted as the packaging's shape too. quickemu forwards the guest's port 22 on
+`0.0.0.0:22220` and up (its `hostfwd=tcp::${ssh_port}-:22` names no host address,
+`/usr/bin/quickemu`), which the `FedoraWorkstation` zone admits, so a guest running `sshd` is
+reachable from the LAN while it runs.
+
+Four smaller choices go with it. `ublue-os-libvirt-workarounds` from the same COPR handles the
+`restorecon` of `/var/{lib,log}/libvirt` at boot, and a tmpfiles file recreates the `/var`
+directories the packages ship, rpm-ostree's autovar mechanism not recovering directories a
+build removed. The KVM options Bazzite adds as kernel arguments are set in `modprobe.d`
+instead, `kvm` being a module in the ogc kernel. quickemu needs `mesa-demos`, which the base's
+`exclude=mesa-*` filters out because Mesa comes from Terra. The build lifts that exclude for
+that one package and proves no other `mesa-*` package moved. The `libvirt` group reaches wheel
+members through the boot hook, like `docker`.
+
+Docker CE and libvirt share the host's forwarding path, and dockerd sets the iptables `FORWARD`
+policy to `DROP` when it enables IP forwarding itself as it starts
+(https://docs.docker.com/engine/network/packet-filtering-firewalls/ § Docker on a router).
+libvirt 12 writes its network rules with its nftables backend, in a table of its own: they
+accept a NAT guest's packets, Docker's policy then drops them, and a VM on the `default`
+network reaches the host and nothing beyond ([`gotchas.md`](gotchas.md) § Docker's `FORWARD`
+policy cuts libvirt's NAT guests off). Docker documents one ACCEPT per interface pair in its
+`DOCKER-USER` chain as the way to forward between host interfaces
+(https://docs.docker.com/engine/network/firewall-iptables/ § Allow forwarding between host
+interfaces): a drop-in on `docker.service` runs `bazzite-mx-libvirt-forward` once dockerd is
+ready. The helper keeps its rules in a chain of its own, `BAZZITE-MX-LIBVIRT`, emptied and
+refilled at every run so their order never depends on what an earlier run left, and makes
+`DOCKER-USER` jump to it once: a guest's packet to a Docker bridge (`docker0`, `br-*`) returns
+to Docker's own rules, which admit a published port and drop the rest, the way they treat any
+remote host; any other packet from a `virbr+` bridge is accepted, libvirt's own chains still
+rejecting what a network does not allow; a packet to a `virbr+` bridge is accepted only as the
+reply of a connection the guest opened. A plain `-i virbr+ -j ACCEPT` would have skipped
+Docker's ingress rules for every container. A daemon that writes no iptables rules (`iptables`
+off, or the nftables backend) has no `DOCKER-USER` chain and sets no DROP policy, and the
+helper says so and exits 0; a read of that chain or a check of the jump that fails for any
+other reason (iptables-nft's `Could not fetch rule set generation id` under a concurrent
+writer), or a rule that cannot be written, is an `ERROR:` line in the journal and exit 1, which
+the `-` prefix of the `ExecStartPost=` keeps from failing `docker.service`; on a read or a
+check it cannot trust the helper writes nothing, so no second jump accumulates. Docker never
+flushes `DOCKER-USER`, and the drop-in re-runs the helper at every start. The other documented
+route, `ip-forward-no-drop` in `daemon.json`, lifts the policy for every interface of the host
+and was not taken. IPv6 is out of scope: the `default` network has none and Docker leaves the
+`ip6tables` policy at ACCEPT.
+
+The recipe `setup-virtualization` replaces Bazzite's file of the same name, and the Portal's
+virtualization group, whose `virt-on` and `virt-off` it does not have, is removed. It reports
+status and runs the kvmfr setup, bazzite-dx's helper (commit a0f3842) in the form of
+`conventions.md` § Bash → Form: the same steps in the same order with the same text, one
+function per step, `set -euo pipefail`, and one shellcheck directive: the bold codes its notice
+prints, `b` and `n`, are readonly names of `ujust.sh`'s own `libformatting.sh`, which
+shellcheck cannot follow on a runner, and a copy that assigned them failed at every run
+([`gotchas.md`](gotchas.md) § `ujust.sh` declares its colour and formatting names readonly).
+Upstream's `qemu.conf` edit is not carried: it matches the commented `cgroup_device_acl` block
+of a libvirt this base does not ship, so it wrote nothing on any host
+([`gotchas.md`](gotchas.md) § The kvmfr helper's `qemu.conf` edit matches nothing on this
+base). Not carried over: Bazzite's enable and disable switches, whose work the image already
+does: `libvirtd` as the modular daemons, the Flatpak as the RPM, the kernel arguments as
+`modprobe.d` options, `/var/lib/swtpm-localca` and the `restorecon` as the tmpfiles file and
+the workarounds unit, the `libvirt` membership as the boot hook. The build removes the base's
+`bazzite-libvirtd-setup.service`, which Bazzite's `virt-on` enables and which would enable and
+start the monolithic `libvirtd` at the first boot of a host that ran `virt-on` before it came
+to the image. The recipe's help (`ujust setup-virtualization help`) gives the kvmfr undo, which
+frees the 128 MiB the module holds at every boot.
+
+Files: `build_files/22-virtualization.sh` and its test, `build_files/lib/flatpak.sh`,
+`build_files/lib/just.sh`, `system_files/usr/lib/modprobe.d/bazzite-mx-kvm.conf`,
+`system_files/usr/lib/tmpfiles.d/bazzite-mx-virt.conf`,
+`system_files/usr/share/ublue-os/just/84-bazzite-virt.just`,
+`system_files/usr/libexec/bazzite-dx-kvmfr-setup`,
+`system_files/usr/libexec/bazzite-mx-libvirt-forward`,
+`system_files/usr/lib/systemd/system/docker.service.d/bazzite-mx-libvirt.conf`.
 
 ## The cleaned stage
 
@@ -156,6 +257,11 @@ are left where they are: the base ships that file with dozens of entries whose a
 through `altfiles`, and `/etc` goes back to `root` and `wheel` alone. Without the move
 `bootc container lint --fatal-warnings` refuses the image, its sysusers check reading an
 account line in `/etc` as machine state (§ Docker CE for what the boot hook then copies back).
+A package's sysusers `m` line on a group of the base, `qemu` in `kvm` and `clevis` in `tss`,
+reaches only `/etc/gshadow`, the group's line living in `/usr/lib/group`: the stage carries the
+member there, or `qemu:///system` would run QEMU outside `kvm` and away from `/dev/udmabuf`
+(`0660 root:kvm`; [`gotchas.md`](gotchas.md) § A sysusers `m` line on a group of the base
+reaches only `/etc/gshadow`).
 
 The dnf5 system state under `/usr/lib/sysimage/libdnf5/` is emptied. It is the record of the
 build's own transactions (install reasons, repository attribution, the transaction history),

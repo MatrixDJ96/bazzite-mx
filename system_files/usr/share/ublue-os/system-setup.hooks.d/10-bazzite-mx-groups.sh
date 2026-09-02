@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Every wheel member gets the group of the service this image ships, docker.
-# Root, from ublue-system-setup.service, on every boot: no state file, so a
-# user created later is picked up at the next boot. The hook only adds:
-# leaving wheel does not take docker away.
+# Every wheel member gets the groups of the services this image ships, docker
+# and libvirt. Root, from ublue-system-setup.service, on every boot: no state
+# file, so a user created later is picked up at the next boot. The hook only
+# adds: leaving wheel does not take docker and libvirt away.
 # A group whose /etc/group gid differs from the image's (the image fixes it,
 # usr/lib/sysusers.d/bazzite-mx-groups.conf) takes the image's number when no
 # other group holds it, and the files under /run (docker.sock, created before
-# this hook) and /etc with the old gid follow first, so a
+# this hook), /etc and /var/lib/libvirt with the old gid follow first, so a
 # walk cut short by a poweroff runs again. Each is walked on its own
 # filesystem; the homes and the container stores are not walked, their
 # files carrying gids of their own in the same range; a file the old gid gave
@@ -18,13 +18,13 @@
 # Output: `bazzite-mx-groups: …` lines, the last one the count of wheel users
 #   and the groups.
 # Writes: /etc/group and /etc/gshadow (groupmod, usermod), the group of the
-#   files under /run and /etc that carried a realigned
+#   files under /run, /etc and /var/lib/libvirt that carried a realigned
 #   group's old gid.
 # Exit status: 0 done; non-zero when groupmod or usermod fails, their own
 #   message on stderr.
 set -euo pipefail
 
-GROUPS_TARGET=(docker)
+GROUPS_TARGET=(docker libvirt)
 
 PREFIX=${BAZZITE_MX_GROUPS_PREFIX:-}
 ETC_GROUP=$PREFIX/etc/group
@@ -91,9 +91,9 @@ realign_gids() {
 
         echo "bazzite-mx-groups: moving $group from gid $etc_gid to $lib_gid"
 
-        if ! find "$PREFIX/run" "$PREFIX/etc" -xdev -gid "$etc_gid" \
+        if ! find "$PREFIX/run" "$PREFIX/etc" "$PREFIX/var/lib/libvirt" -xdev -gid "$etc_gid" \
             -exec chgrp -h "$lib_gid" {} +; then
-            echo "bazzite-mx-groups: some files under /run and /etc" \
+            echo "bazzite-mx-groups: some files under /run, /etc and /var/lib/libvirt" \
                 "kept gid $etc_gid" >&2
         fi
 

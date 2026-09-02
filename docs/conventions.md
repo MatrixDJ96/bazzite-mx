@@ -1,10 +1,10 @@
 # Conventions
 
-Rules for writing build scripts, tests, boot hooks, CI and prose in this repo. A rule a file
-enforces names that file; the rest is checked by hand at review.
+Rules for writing build scripts, tests, ujust recipes, boot hooks, CI and prose in this repo. A
+rule a file enforces names that file; the rest is checked by hand at review.
 
-Contents: Bash (Form) · build scripts · boot hooks · tests · positive control · CI · prose ·
-commits.
+Contents: Bash (Form) · build scripts · ujust recipes · boot hooks · tests · positive control ·
+CI · prose · commits.
 
 ## Bash
 
@@ -14,7 +14,8 @@ commits.
   `shfmt --indent 4 --case-indent --binary-next-line --space-redirects`. `-x -P SCRIPTDIR`
   follows the sourced libraries, so a variable a library sets is not reported as undefined.
 - The `lint` job of `build.yml` runs both over every `.sh` git tracks plus every file carrying
-  the repo's shebang, so an extensionless script is covered too.
+  the repo's shebang, which is how the extensionless helpers under `system_files/usr/libexec/`
+  are covered.
 - The shfmt release is fixed at Fedora 44's, so the hook and the lint job cannot disagree on a
   diff. CI installs it in `quay.io/fedora/fedora:44`. The edit hook
   `.claude/hooks/lint-edit.sh` uses the host binary only when its minor matches, and the same
@@ -29,19 +30,37 @@ commits.
 ### Form
 
 A script is read by a person before bash runs it, and the person is not the author. These rules
-hold for every file the lint job covers: build scripts, libraries, tests, the boot hooks, the
-CI scripts and the edit hook. They hold in the same spirit for every other file of the repo: a
-workflow, the Containerfile, a `.repo` or `.conf` file gets the same blank lines between its
-steps, the same 100 columns and comments that carry a reason, never a restatement. The shapes
-and the width are checked by `.github/scripts/check-form.sh`, which the edit hook runs on every
-shell file an edit touches and the `lint` job on the whole shell catalogue; a line that holds a
-banned shape as data ends in `# form: literal`. The rest is checked by hand at review, like §
-Prose.
+hold for every file the lint job covers: build scripts, libraries, tests, the libexec helpers,
+the boot hooks, the CI scripts and the edit hook. They hold in the same spirit for every other
+file of the repo: a workflow, the Containerfile, a justfile, a `.repo` or `.conf` file gets the
+same blank lines between its steps, the same 100 columns and comments that carry a reason,
+never a restatement. The shapes and the width are checked by `.github/scripts/check-form.sh`,
+which the edit hook runs on every shell file an edit touches and the `lint` job on the whole
+shell catalogue; a line that holds a banned shape as data ends in `# form: literal`. The rest
+is checked by hand at review, like § Prose.
 
 - **Control flow is written as `if … then … fi`.** `cmd || return 1`, `a && b || c`,
   `! cmd || die`, `cmd || { … }` and a subshell `( … ) ||` used as a guard are out: they hide
   the branch in a trailing operator and read backwards. `set -e` keeps its role, a command that
   fails outside an `if` still stops the script.
+
+  ```bash
+  # before, lib/just.sh
+  out=$(just --justfile "$1" --summary 2> /dev/null) || return 1
+  # after
+  if ! summary=$(just --justfile "$justfile" --summary 2> /dev/null); then
+      return 1
+  fi
+  ```
+
+  ```bash
+  # before, 22-virtualization.sh
+  ! rpm -q "$pkg" > /dev/null || die "$pkg was pulled in (the image keeps binfmt out)"
+  # after
+  if rpm -q "$package" > /dev/null; then
+      fail_build "$package was pulled in (the image keeps binfmt out)"
+  fi
+  ```
 
 - **Output is captured before `grep -q`.** `cmd | grep -q` is refused by `check-form.sh`:
   `grep -q` exits at the first match and closes the pipe, the writer dies of SIGPIPE and
@@ -91,7 +110,7 @@ Prose.
   `exit_with_error` in the CI scripts (`.github/scripts/lib.sh`, prints `<script>: …`, the
   script stops), where `print_error` prints the same line and returns 1 for a function a caller
   runs under `if`. A function a caller runs under `if` is named as the question its status
-  answers.
+  answers: `has_recipe`.
 
 - **Every script opens with a header**: what it does in one or two sentences; `Usage:` with
   each argument and option on its own line; the exit status; what it writes, files and the
@@ -156,6 +175,21 @@ known-bad still red after it. The rules above add to the earlier bullets of this
   `rsync`) where it costs nothing. What a runner change would reopen is in
   [`gotchas.md`](gotchas.md) § Torn writeback on a 6.17-azure runner kernel.
 
+## ujust recipes
+
+- A recipe that replaces one of Bazzite's ships in a file with the same name under
+  `system_files/usr/share/ublue-os/just/`. The base justfile imports the path, so our file
+  takes the base file's place and nothing else changes. It only works when the base file holds
+  exactly the recipes we replace.
+- Recipes are `just --unstable --fmt --check` clean and start with
+  `source /usr/lib/ujust/ujust.sh`, which brings the colours and `Choose`. The `help` action
+  comes before the not-as-root check so the smoke test can run the recipe body in the build.
+  The `lint` job checks every tracked `.just` file with Fedora 44's `just`, the release the
+  image ships.
+- What the image already does, a unit enabled or a package installed or a module option, is not
+  redone by a recipe: the recipe reports it under `status` and does only what needs the host,
+  an opt-in module or a per-user choice.
+
 ## Boot hooks
 
 Scripts under `system_files/usr/share/ublue-os/system-setup.hooks.d/` run as root at every boot
@@ -183,8 +217,9 @@ through `ublue-system-setup.service`, before user sessions. The dispatcher is a 
   build had, and a test that touches dnf5 cannot leave a log behind for `bootc container lint`.
 - A check several tests make is a function of `tests/lib.sh`, sourced first: `check_pkg`,
   `check_unit_state`, `check_rpm_key`, `check_key_fingerprint`, `check_repo_reads_key`,
-  `check_self_test`, and `on_one_line` for a probe's output quoted in a `FAIL:` line. A check
-  made once stays in its test.
+  `check_self_test`, `check_recipe_help`, `check_flatpak_deny`, `check_portal_group_removed`,
+  and `on_one_line` for a probe's output quoted in a `FAIL:` line. A check made once stays in
+  its test.
 
 ## Positive control
 
@@ -202,12 +237,14 @@ covering it, and the case stays: shellcheck sees the repo alone, so "the lint al
 that file" is no owner of a `declare -r` name the base image's libraries set.
 
 An assertion also has to be able to go red, and the shape that quietly cannot is not the one a
-reader expects. A count is safe or not by where its subject comes from, never by being a count.
-A check that counts or walks a list read out of the very thing it tests shrinks with the defect
-and stays green: a required number of `OK:` lines lets a check stop reporting unnoticed, and a
-group list read from the hook's own summary shrinks with the hook. Name what a count stands
-for. The same reading condemns a tolerant `else` that prints `OK:` on the failure it meant to
-excuse. Neither shape holds a counter, so neither is found by grepping for one.
+reader expects. A count is safe or not by where its subject comes from, never by being a count:
+`tests/22-virtualization.sh` walks the `/var` directories rpm lists for the libvirt and swtpm
+packages, with the mode, user and group of each, and catches a missing one, while a check that
+counts or walks a list read out of the very thing it tests shrinks with the defect and stays
+green: a required number of `OK:` lines lets a check stop reporting unnoticed, and a group list
+read from the hook's own summary shrinks with the hook. Name what a count stands for. The same
+reading condemns a tolerant `else` that prints `OK:` on the failure it meant to excuse. Neither
+shape holds a counter, so neither is found by grepping for one.
 
 Where each one runs:
 
@@ -225,8 +262,8 @@ Where each one runs:
   `Install Cosign`). Workflow `name:` Title Case. A job name is the phase in one Title Case
   word: `Lint`, `Build`; the matrix job of the reusable build is named by its flavour, so a run
   reads `Build / bazzite-nvidia`. A step name is Title Case, verb + object, no article, a tool
-  in its own casing: `Checkout`, `Resolve Base`, `Build Image`, `Run shfmt and yamllint`. Env
-  vars `SCREAMING_SNAKE_CASE`; outputs `snake_case`, one key name across workflows.
+  in its own casing: `Checkout`, `Resolve Base`, `Build Image`, `Run shfmt, yamllint and just`.
+  Env vars `SCREAMING_SNAKE_CASE`; outputs `snake_case`, one key name across workflows.
 - Concurrency groups are literal `bazzite-mx-<phase>[-<key>]` and never built from
   `${{ github.workflow }}`. A called workflow reports the caller's name there, so a group built
   from it would put caller and callee in the same group and the callee would wait for the run

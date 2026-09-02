@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The kernel helper of tests/21-container-runtime.sh: the image's one kernel.
-# Needs lib/log.sh for fail_build.
+# The kernel helper of tests 21 and 22: they must agree on the image's one
+# kernel. Needs lib/log.sh for fail_build.
 
 # The one kernel under <modules-dir>; two or none is a build error, because a
 # module built for another kernel would never load.

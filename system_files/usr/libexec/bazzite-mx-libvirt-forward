@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# Forwarding for the libvirt bridges under Docker's firewall. When dockerd
+# starts and enables IP forwarding itself, it sets the iptables FORWARD
+# policy to DROP, so a guest on a libvirt NAT network loses the outside:
+# libvirt's own nftables chains accept its packets and Docker's policy drops
+# them next. Docker evaluates its
+# DOCKER-USER chain first and never flushes it, and documents an ACCEPT there
+# as the way to forward between host interfaces
+# (https://docs.docker.com/engine/network/firewall-iptables/). docker.service
+# runs this after dockerd is ready, from the drop-in
+# /usr/lib/systemd/system/docker.service.d/bazzite-mx-libvirt.conf.
+#
+# The rules live in a chain of their own, rebuilt at every run so their order
+# is always the one below, and DOCKER-USER jumps to it:
+#   a guest's packet to a Docker bridge (docker0, br-*) returns to Docker's
+#     own rules, which admit a published port and drop the rest, the way they
+#     treat any remote host;
+#   any other packet from a virbr+ bridge is accepted (libvirt's chains still
+#     reject what a network does not allow);
+#   a packet to a virbr+ bridge is accepted only as the reply of a connection
+#     the guest opened.
+#
+# Usage: bazzite-mx-libvirt-forward   (root; the ExecStartPost of docker.service)
+# Fixture knob for the smoke test: IPTABLES replaces /usr/sbin/iptables.
+# Output: one line per step, `rebuilt`, `inserted` or `present`; the one
+#   line `no DOCKER-USER chain (…): nothing to do` when there is no chain.
+# Exit status: 0 the chain rebuilt and the jump present, or no DOCKER-USER
+#   chain to fill (Docker writing no iptables rules sets no DROP policy
+#   either); 1 when the chain cannot be read or a rule cannot be written,
+#   the reason on stderr as `ERROR: …` (a rule refused mid-rebuild leaves the
+#   rules before it, the next start rebuilding the chain).
+set -euo pipefail
+
+IPTABLES=${IPTABLES:-/usr/sbin/iptables}
+DOCKER_CHAIN=DOCKER-USER
+CHAIN=BAZZITE-MX-LIBVIRT
+BRIDGES='virbr+'
+
+# Ends every ERROR line: what the failure costs and the way out.
+GUESTS_CUT_OFF='guests on a libvirt NAT network may have no outside until docker starts again,'
+GUESTS_CUT_OFF+=' or sudo /usr/libexec/bazzite-mx-libvirt-forward'
+
+# The Docker chain exists once dockerd has written its iptables rules; a
+# daemon that writes none (iptables off, or the nftables backend) sets no
+# DROP policy either, so there is nothing to lift. Only status 1 means the
+# chain is absent (iptables(8)); any other failure is a read the helper
+# cannot trust, and it stops rather than report a chain it did not see.
+skip_without_docker_chain() {
+    local status
+
+    # `$?` after a negated command is the negation: the status is read in
+    # the else branch, where it is the command's own.
+    if "$IPTABLES" -S "$DOCKER_CHAIN" > /dev/null 2>&1; then
+        return 0
+    else
+        status=$?
+    fi
+
+    if [ "$status" -ne 1 ]; then
+        echo "ERROR: cannot read iptables chain $DOCKER_CHAIN (iptables exit $status):" \
+            "$GUESTS_CUT_OFF" >&2
+        exit 1
+    fi
+
+    echo "libvirt-forward: no $DOCKER_CHAIN chain (Docker writes no iptables rules):" \
+        "nothing to do"
+    exit 0
+}
+
+# write <iptables arguments…>: one rule, or the script stops with the reason.
+# iptables' own diagnostic is folded into the ERROR line, the way the read of
+# the chain reports its status, so nothing reaches the journal unprefixed.
+write() {
+    local error
+
+    if ! error=$("$IPTABLES" "$@" 2>&1); then
+        error=${error//$'\n'/ }
+        echo "ERROR: cannot write iptables rule: $* (${error:-no output from iptables}):" \
+            "$GUESTS_CUT_OFF" >&2
+        exit 1
+    fi
+}
+
+# Created once, emptied and refilled at every run. Only status 1 of the read
+# means the chain is absent (iptables(8)), so it is created on that status
+# alone; on any other the writes below report iptables' own reason.
+rebuild_chain() {
+    local status
+
+    if "$IPTABLES" -S "$CHAIN" > /dev/null 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+
+    if [ "$status" -eq 1 ]; then
+        write -N "$CHAIN"
+    fi
+
+    write -F "$CHAIN"
+    write -A "$CHAIN" -i "$BRIDGES" -o docker0 -j RETURN
+    write -A "$CHAIN" -i "$BRIDGES" -o 'br-+' -j RETURN
+    write -A "$CHAIN" -i "$BRIDGES" -j ACCEPT
+    write -A "$CHAIN" -o "$BRIDGES" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    echo "libvirt-forward: chain $CHAIN rebuilt, 4 rules"
+}
+
+# The jump from Docker's chain, inserted once. Only status 1 of `-C` means
+# the jump is absent; any other status is a read the helper cannot trust
+# (iptables-nft's `Could not fetch rule set generation id` under a
+# concurrent writer, libvirt or dockerd at the same start), and inserting
+# on it would add a second jump at every start.
+ensure_jump() {
+    local status
+
+    if "$IPTABLES" -C "$DOCKER_CHAIN" -j "$CHAIN" > /dev/null 2>&1; then
+        echo "libvirt-forward: $DOCKER_CHAIN jump to $CHAIN present"
+        return 0
+    else
+        status=$?
+    fi
+
+    if [ "$status" -ne 1 ]; then
+        echo "ERROR: cannot check the $DOCKER_CHAIN jump to $CHAIN (iptables exit $status):" \
+            "$GUESTS_CUT_OFF" >&2
+        exit 1
+    fi
+
+    write -I "$DOCKER_CHAIN" -j "$CHAIN"
+    echo "libvirt-forward: $DOCKER_CHAIN jump to $CHAIN inserted"
+}
+
+skip_without_docker_chain
+rebuild_chain
+ensure_jump
