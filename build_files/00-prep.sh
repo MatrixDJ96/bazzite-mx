@@ -6,9 +6,9 @@
 # Usage: run by build.sh as the first script; no arguments.
 # Writes: $BUILD_TMP/dnf.conf.base, restored by 95-clean-stage.sh;
 #   $BUILD_STATE/repos.base.sha256 and repos.base.enabled, read by
-#   90-validate-repos.sh; $BUILD_STATE/just.base.summary, read by
-#   70-justfile.sh; $BUILD_STATE/modules.base.dep.gz, read by
-#   tests/50-kmods.sh.
+#   90-validate-repos.sh, the first also by bazzite-mx-verify-host on every
+#   host; $BUILD_STATE/just.base.summary, read by 70-justfile.sh;
+#   $BUILD_STATE/modules.base.dep.gz, read by tests/50-kmods.sh.
 # Exit status: 0 done; the build stops on a `FAIL: …` line.
 
 # shellcheck source=lib/env.sh

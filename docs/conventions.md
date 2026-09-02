@@ -139,13 +139,22 @@ as data ends in `# form: literal`. The rest is checked by hand at review, like �
   single line ([`gotchas.md`](gotchas.md) § A recipe's description is the LAST comment line
   above it).
 
+  ```bash
+  # before (123 columns)
+  CONFIG_HITS=$(grep -E '^M[[:space:]]+containers/(policy\.json|registries\.d/matrixdj96\.yaml)$' <<< "$config_diff" || true)
+  # after, bazzite-mx-migrate
+  local shadowing='^M[[:space:]]+containers/(policy\.json|registries\.d/matrixdj96\.yaml)$'
+  …
+  CONFIG_HITS=$(grep -E "$shadowing" <<< "$config_diff" || true)
+  ```
+
 - **A name says what the function does or what the variable holds.** No private vocabulary:
-  `need_root` is `require_root`. `die` is named by its effect: `fail_build` in `lib/log.sh`
-  (prints `FAIL:`, the build stops), `exit_with_error` in the host helpers (prints `ERROR:`,
-  the command stops) and in the CI scripts (`.github/scripts/lib.sh`, prints `<script>: …`, the
-  script stops), where `print_error` prints the same line and returns 1 for a function a caller
-  runs under `if`. A function a caller runs under `if` is named as the question its status
-  answers: `has_recipe`.
+  `need_root` is `require_root`, `f` is `host_file`. `die` is named by its effect: `fail_build`
+  in `lib/log.sh` (prints `FAIL:`, the build stops), `exit_with_error` in the host helpers
+  (prints `ERROR:`, the command stops) and in the CI scripts (`.github/scripts/lib.sh`, prints
+  `<script>: …`, the script stops), where `print_error` prints the same line and returns 1 for
+  a function a caller runs under `if`. A function a caller runs under `if` is named as the
+  question its status answers: `module_loaded`, `has_recipe`.
 
   ```bash
   # before
@@ -184,6 +193,17 @@ as data ends in `# form: literal`. The rest is checked by hand at review, like �
 
 - **Output to the user is a complete sentence**: what happened, and for a failure what to do
   next. The prefixes a contract reads (`OK:`, `FAIL:`, `ERROR:`, `self-test ok`) stay.
+
+  ```bash
+  # before, bazzite-mx-migrate
+  abort "step 5 not confirmed; the pending deployment keeps the changes made so far"
+  # after, describe_what_the_run_changed and abort_declined_step
+  next="reboot into it, or rpm-ostree cleanup -p, then apply again"
+  …
+  echo "what the run changed stands ($changed): $next"
+  …
+  abort "step $step not confirmed; $(describe_what_the_run_changed)"
+  ```
 
 A rewrite for form proves behaviour unchanged: the same arguments, the same exit status, the
 same messages where a test or a doc cites them, every self-test green before and after, every
@@ -255,6 +275,10 @@ known-bad still red after it. The rules above add to the earlier bullets of this
   takes the base file's place and nothing else changes. It only works when the base file holds
   exactly the recipes we replace, and `70-justfile.sh` refuses the build when the base's recipe
   set, recorded by `00-prep.sh` before the copy, differs from ours.
+- When the base file holds other recipes too, the recipe goes in the `OVERRIDES` list of
+  `70-justfile.sh`. That cuts the recipe out of the base file, proves the removal changed
+  nothing else and proves our file defines the name. `install-jetbrains-toolbox` is the one
+  entry.
 - Our own recipes live in `95-bazzite-mx.just`, imported last into the master justfile on a
   fresh inode. With `allow-duplicate-recipes` the earlier import wins
   ([`gotchas.md`](gotchas.md) § `just`: the earlier import wins on a duplicate recipe name), so
@@ -265,8 +289,8 @@ known-bad still red after it. The rules above add to the earlier bullets of this
   the not-as-root check, `sudo` where root is needed, the call. A recipe that prints a line
   after the call prints it only when the call succeeded, so a failed helper is the recipe's own
   status (`tests/70` runs those recipes as `nobody` against a stub). The helper takes fixture
-  knobs (`ROOT=`, `DMI_VENDOR_FILE=`) so the smoke test runs the real code, positive and
-  known-bad, inside the build.
+  knobs (`ROOT=`, `FIXTURE=`, `DMI_VENDOR_FILE=`, a `file://` feed) so the smoke test runs the
+  real code, positive and known-bad, inside the build.
 - Recipes are `just --unstable --fmt --check` clean and start with
   `source /usr/lib/ujust/ujust.sh`, which brings the colours and `Choose`. The `help` action
   comes before the not-as-root check so the smoke test can run the recipe body in the build.
@@ -300,6 +324,10 @@ in `PATH`.
 - `tests/NN-<feature>.sh` with the same stem as the build script. `tests/run.sh` refuses a
   build script without a test and a test without a build script, so a feature cannot land
   without its test.
+- `tests/helpers/<name>.sh` for the helper `system_files/usr/libexec/bazzite-mx-<name>`, when
+  its cases need fixtures rather than the helper's own `--self-test`. The runner runs both
+  classes and counts them in one `tests: N passed` line, and its guard holds one way here: a
+  test must name an installed helper, a helper need not have a test.
 - A test prints `OK: <what>` or `FAIL: <what>` per check and exits 0. The runner fails the
   build on any `FAIL:` line and on a non-zero exit. It also fails on a test that printed no
   `OK:` line, which is what catches a test whose checks never ran.
@@ -346,6 +374,7 @@ Where each one runs:
 | `check-form.sh`                                           | `lint` job, `build.yml`, which then runs the check itself over the whole shell catalogue; `.claude/hooks/lint-edit.sh` runs it on every edited shell file |
 | `kmods/build-kmods.sh`                                    | kmod-builder stage, before the real build                                                                                                                 |
 | `70-justfile.sh`, `80-fix-opt.sh`, `90-validate-repos.sh` | the test RUN, called by their paired test                                                                                                                 |
+| `bazzite-mx-migrate`                                      | the test RUN, called by `tests/70-justfile.sh`; its cases live here, so it has no file under `tests/helpers/`                                             |
 | `tests/run.sh`                                            | `lint` job, `build.yml`, after the CI scripts                                                                                                             |
 
 ## CI

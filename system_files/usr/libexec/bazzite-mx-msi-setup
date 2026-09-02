@@ -21,7 +21,9 @@
 #   /usr/local and /etc/dbus-1/system.d (the list: installed_paths).
 set -euo pipefail
 
-# exit_with_error, require_root, reason_on_one_line and MSI_MODULES_LOAD.
+# exit_with_error, require_root, reason_on_one_line and MSI_MODULES_LOAD, the
+# last shared with verify-host and migrate, which treat that file as this
+# helper's and not as residue.
 # shellcheck source=../lib/bazzite-mx/host.sh
 source /usr/lib/bazzite-mx/host.sh
 

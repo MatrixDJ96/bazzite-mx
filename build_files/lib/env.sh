@@ -5,8 +5,9 @@
 # under any mount point.
 #
 # Exports: BUILD_FILES, CTX (the repo root), BUILD_TMP (tmpfs, dies with the
-# RUN), BUILD_STATE (ships in the image: the test RUN reads it back),
-# PYTHONDONTWRITEBYTECODE (dnf5 and its scriptlets inherit it).
+# RUN), BUILD_STATE (ships in the image: the test RUN and, on every host,
+# bazzite-mx-verify-host read it back), PYTHONDONTWRITEBYTECODE (dnf5 and
+# its scriptlets inherit it).
 set -euo pipefail
 
 BUILD_FILES=$(dirname "$(realpath "${BASH_SOURCE[0]}")")

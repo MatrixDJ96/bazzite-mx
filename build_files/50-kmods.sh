@@ -54,7 +54,8 @@ names=()
 versions=()
 
 # The one walk of the source.env files, in this shell: what a walk inside
-# `$( )` reads does not survive it, and the resolve pass needs the
+# `$( )` reads does not survive it (docs/gotchas.md § A step run in a command
+# substitution sets its flags in a subshell), and the resolve pass needs the
 # names again after depmod has indexed them.
 for source_env in "$KMODS_DIR"/*/source.env; do
     unset KO_NAME KO_VERSION
