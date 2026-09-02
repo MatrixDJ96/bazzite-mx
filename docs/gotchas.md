@@ -10,17 +10,18 @@ command | grep -q · modinfo /lib/modules path · modprobe -n -v on a loaded mod
 build labels · stub-resolv.conf left in the image · remove-unwanted-software v9 · skopeo and
 containers-storage · workflow off the default branch · setup-oras versions · cosign verify and
 referrers · inactive package request · 1Password BrowserSupport gid · local RPM blocks the
-rebase · EXIT trap and local · private install marker · mise dotnet SDK · rollback onto a
-pruned tag · ghcr-cleanup-action patterns · kbuild fragment compiles nothing · mount -t ntfs
-helper · module panics at first use · NTFS drivers' modes and case · udisks defaults outside
-allow · pre-flight without the changed script · OGC kernel changelog · NTFSPLUS EINVAL · skel
-and existing accounts · KXmlGui write-back · flags in a command substitution · findmnt --verify
-on nofail · fstab row with leading whitespace · findmnt -t exit status · automount over autofs
-· root's flatpak list · SBOM media type · image-info.json vs OCI label day · FAIL branch before
-its verdict · sunshine --version home · Docker FORWARD policy and libvirt · # inside an fstab
-field · 2> /dev/null on a failed redirection · recipe description line · cosign 3.1.3 bundle
-flag · vendor build-log warnings · no BTF from kernel-devel · arithmetic error escapes set -e ·
-scriptlet rewrote a .pyc · anonymous GHCR 403 · sysusers m line on a base group.
+rebase · EXIT trap and local · private install marker · mise dotnet SDK · rollback onto a pruned
+tag · blob/main link · ghcr-cleanup-action patterns · kbuild fragment compiles nothing ·
+mount -t ntfs helper · module panics at first use · NTFS drivers' modes and case · udisks
+defaults outside allow · pre-flight without the changed script · OGC kernel changelog ·
+NTFSPLUS EINVAL · skel and existing accounts · KXmlGui write-back · flags in a command
+substitution · findmnt --verify on nofail · fstab row with leading whitespace · findmnt -t exit
+status · automount over autofs · root's flatpak list · SBOM media type · image-info.json vs OCI
+label day · FAIL branch before its verdict · sunshine --version home · Docker FORWARD policy
+and libvirt · # inside an fstab field · 2> /dev/null on a failed redirection · recipe
+description line · cosign 3.1.3 bundle flag · vendor build-log warnings · no BTF from
+kernel-devel · arithmetic error escapes set -e · scriptlet rewrote a .pyc · anonymous GHCR 403
+· sysusers m line on a base group.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -259,6 +260,13 @@ went away with the next upgrade of the booted one, which is the only thing a dat
 needs. `verify-host` reads the booted deployment only: a rollback on a dated tag shows in
 `rpm-ostree status` and nowhere else.
 
+## A `blob/main` link is dead until the file is on `main`
+
+`https://github.com/<owner>/<repo>/blob/main/<path>` and the raw form answer 404 while `<path>`
+exists only on a branch (measured 2026-09-02 on the home page's link to `docs/migration.md`, a
+file not yet on `main`). `check-site.sh` resolves such links on the checkout instead of
+fetching them, so the page and the file it points at ship in the same push.
+
 ## `ghcr-cleanup-action` matches `packages` by pattern only with `expand-packages`
 
 `use-regex: true` reaches `delete-tags` and `exclude-tags`; `packages` stays a comma-separated
@@ -455,11 +463,12 @@ through `runuser -u "$SUDO_USER"`, each status kept.
 
 `reusable-build.yml` writes the SBOM with `syft -o syft-json` and attaches it with
 `--artifact-type application/vnd.spdx+json`, the shape of `ublue-os/bazzite`'s build.yml
-(`Generate SBOM` and `Upload SBOM` steps), and `changelog.sh` selects the referrer by that
-type. The document is syft's own format (`{"artifacts": […]}`, no `spdxVersion`; syft calls its
-media type `vnd.syft+json`), so an SPDX parser does not open the file a reader pulls by
-following the type. Measured 2026-09-12 on `:stable` with `oras discover` and `oras pull`. Kept
-as upstream's shape on purpose: the diff `changelog.sh` prints reads `.artifacts[]`.
+(`Generate SBOM` and `Upload SBOM` steps), and `changelog.sh` and site/verify.html select the
+referrer by that type. The document is syft's own format (`{"artifacts": […]}`, no
+`spdxVersion`; syft calls its media type `vnd.syft+json`), so an SPDX parser does not open the
+file a reader pulls by following the type. Measured 2026-09-12 on `:stable` with
+`oras discover` and `oras pull`. Kept as upstream's shape on purpose: verify.html says the
+document is syft JSON, and the diff `changelog.sh` prints reads `.artifacts[]`.
 
 ## The base's image-info.json and its OCI label can name different days
 

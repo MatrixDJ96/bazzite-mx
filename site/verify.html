@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Verify, bazzite-mx</title>
+<meta name="description"
+  content="How to verify a bazzite-mx image from any machine: signature, attestation, SBOM, and what
+  the host checks on every pull." />
+<link rel="icon" href="logo.svg" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="top">
+  <div class="row">
+    <a class="brand" href="index.html" aria-label="bazzite-mx">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <defs>
+          <linearGradient id="mx-bar" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#60a5fa" />
+            <stop offset="0.52" stop-color="#7657ff" />
+            <stop offset="1" stop-color="#a855f7" />
+          </linearGradient>
+        </defs>
+        <rect x="2" y="2" width="60" height="60" rx="15" fill="#0b1020" stroke="url(#mx-bar)"
+          stroke-width="2.5" />
+        <text x="32" y="43" text-anchor="middle" font-family="ui-monospace, Menlo, monospace"
+          font-size="27" font-weight="700" fill="url(#mx-bar)">MX</text>
+      </svg>
+      <span>bazzite-mx</span>
+    </a>
+    <nav aria-label="Site">
+      <ul>
+        <li><a href="index.html">Home</a></li>
+        <li><a href="images.html">Images</a></li>
+        <li><a href="install.html">Install</a></li>
+        <li><a href="changes.html">What changes</a></li>
+        <li><a href="verify.html" aria-current="page">Verify</a></li>
+        <li><a href="recipes.html">Recipes</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </nav>
+    <a class="button cta" href="index.html#images">Get the image</a>
+  </div>
+</header>
+<main>
+  <div class="page-head">
+    <h1>Verify</h1>
+    <p class="lead">Every published image is signed by digest with one key and attested by the run
+      that built it. A migrated host repeats the signature check on every pull.</p>
+  </div>
+
+  <section id="signature">
+    <h2>From any machine</h2>
+    <p>The key is
+      <a href="https://github.com/MatrixDJ96/bazzite-mx/blob/main/cosign.pub">cosign.pub</a> in
+      the repository, the same file the image installs as
+      <code>/etc/pki/containers/matrixdj96.pub</code>. The signature sits on the digest, so it holds
+      whichever tag you name. Each release run also records a build provenance attestation in
+      GitHub's store, tied to this repository and to the digest it built.</p>
+<pre tabindex="0"><code>cosign verify --key https://raw.githubusercontent.com/MatrixDJ96/bazzite-mx/main/cosign.pub \
+  ghcr.io/matrixdj96/bazzite-mx:stable
+
+gh attestation verify oci://ghcr.io/matrixdj96/bazzite-mx:stable --repo MatrixDJ96/bazzite-mx</code></pre>
+    <p>Name another image or a dated tag to check that one. <code>gh attestation verify</code>
+      wants a GitHub login first (<code>gh auth login</code>, or <code>GH_TOKEN</code> in the
+      environment), public repository or not.</p>
+  </section>
+
+  <section id="sbom">
+    <h2>The SBOM</h2>
+    <p>The packages of each image are listed in a syft JSON document, attached to the image as a
+      referrer under the type <code>application/vnd.spdx+json</code> and signed with the same key.
+      The release notes print the changes since the previous release, one package per new version
+      as Bazzite's notes show them; the document itself is two <code>oras</code> calls away:
+      <code>discover</code> for its digest, <code>pull</code> of that digest for the file. The
+      image does not carry <code>oras</code>: the repo's
+      <code>.github/scripts/install-oras.sh &lt;version&gt; &lt;dir&gt;</code> installs it into a
+      directory of your choice, at the version the workflows set in <code>ORAS_VERSION</code>.</p>
+<pre tabindex="0"><code>digest=$(oras discover --format json ghcr.io/matrixdj96/bazzite-mx:stable \
+  | jq -r '.referrers[] | select(.artifactType == "application/vnd.spdx+json") | .digest')
+oras pull --output sbom "ghcr.io/matrixdj96/bazzite-mx@$digest"</code></pre>
+  </section>
+
+  <section id="host">
+    <h2>What the host verifies</h2>
+    <p>After <code>ujust migrate</code> the origin is
+      <code>ostree-image-signed:docker://ghcr.io/matrixdj96/&lt;image&gt;:stable</code>. The
+      image's <code>/etc/containers/policy.json</code> carries the
+      <code>ghcr.io/matrixdj96</code> scope as <code>sigstoreSigned</code> with the key above, and
+      keeps <code>default</code> on <code>reject</code>. That default covers no container pull:
+      <code>containers-common</code> leaves the empty <code>docker</code> scope on
+      <code>insecureAcceptAnything</code>, so a pull is verified only under a scope the policy
+      names: ours, and the ones Bazzite ships (<code>ghcr.io/ublue-os</code>,
+      <code>quay.io/toolbx-images</code>, the two Red Hat registries). The tag
+      stays free while the signature is checked on the digest, and a failing pull is refused
+      before anything is staged.</p>
+    <p><code>ujust verify-host</code> checks the policy in force
+      (<a href="install.html">install</a>). A local copy of <code>policy.json</code> shadows the
+      image's, which is why the migration recipe offers to restore it first.</p>
+  </section>
+
+  <section id="pipeline">
+    <h2>How a release is gated</h2>
+    <p>A push never publishes. A release is a dispatched run: by hand, by the weekly trigger, or
+      by the watcher that compares the base's digest with the one the current
+      <code>:stable</code> was built from.</p>
+    <div class="grid two">
+      <div class="card">
+        <h3>Build and stage</h3>
+        <p>The run builds the three images, probes each one, pushes it to <code>:staging</code>,
+          signs it and records the attestation.</p>
+      </div>
+      <div class="card">
+        <h3>Gate and tag</h3>
+        <p>A separate job verifies all of that again by digest, with two negative controls. Only
+          then does the run write the dated tag; <code>:stable</code> moves only when the dispatch
+          asks for it and the repository's <code>PROMOTE_STABLE</code> variable allows it, or on a
+          dispatch of <code>promote.yml</code>, which runs the same verification first.</p>
+      </div>
+    </div>
+    <p>Branches, the release run and the promotion, in full:
+      <a href="https://github.com/MatrixDJ96/bazzite-mx/blob/main/docs/workflow.md">docs/workflow.md</a>.</p>
+  </section>
+</main>
+<footer>
+  <p>A single-maintainer image, built in the open, not affiliated with Bazzite or Universal
+    Blue. Rebase at your own risk. Source under Apache-2.0.</p>
+  <ul>
+    <li><a href="https://github.com/MatrixDJ96/bazzite-mx">Source</a></li>
+    <li><a href="https://github.com/MatrixDJ96/bazzite-mx/releases">Releases</a></li>
+    <li><a href="https://github.com/MatrixDJ96/bazzite-mx/issues">Issues</a></li>
+  </ul>
+</footer>
+</body>
+</html>

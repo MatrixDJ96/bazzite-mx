@@ -1,11 +1,11 @@
 # Workflow
 
-How a change reaches a host: the branches, the release run, the retention and the pin refresh.
-The build itself is in [`architecture.md`](architecture.md).
+How a change reaches a host: the branches, the release run, the retention, the site and the pin
+refresh. The build itself is in [`architecture.md`](architecture.md).
 
 Contents: branches and profiles · run the lint job locally · probe a pre-flight image by hand ·
-the release run · promotion and the recovery signer ·
-the weekly trigger and the upstream watcher · GHCR retention · keeping the pins fresh.
+the release run · promotion and the recovery signer · the weekly trigger and the upstream
+watcher · GHCR retention · the site · keeping the pins fresh.
 
 ## Branches and profiles
 
@@ -18,9 +18,9 @@ the weekly trigger and the upstream watcher · GHCR retention · keeping the pin
 The `lint` job runs shellcheck, `check-form.sh` and `check-commits.sh` (every commit of the
 pushed ref, `conventions.md` § Commits) on the runner, then shfmt, yamllint and
 `just --fmt --check` on the recipe files inside `quay.io/fedora/fedora:44`, the `just` release
-the image ships. It also runs `node --check` on the Plasma update scripts. The `--self-test` of
-every script under `.github/scripts/` and of `tests/run.sh` runs right after ShellCheck, before
-the checks it proves.
+the image ships. It also runs `node --check` on the Plasma update scripts and `check-site.sh`
+on `site/`. The `--self-test` of every script under `.github/scripts/` and of `tests/run.sh`
+runs right after ShellCheck, before the checks it proves.
 
 A push never releases: `release.yml` has one trigger, `workflow_dispatch`. The main profile is
 proven on a branch before it reaches `main`, naming the branch you want it to run on:
@@ -29,14 +29,14 @@ proven on a branch before it reaches `main`, naming the branch you want it to ru
 gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref develop -f rechunk=true
 ```
 
-`build.yml` ignores pushes that touch only `**.md`, `docs/`, `.claude/` or `LICENSE`.
+`build.yml` ignores pushes that touch only `**.md`, `docs/`, `site/`, `.claude/` or `LICENSE`.
 
 ## Run the lint job locally
 
 The shell catalogue is every `.sh` git does not ignore, tracked or not, plus the extensionless
 libexec helpers, found by their shebang; shfmt, yamllint and `just` run in the container the
-job uses, so the releases match the image's. The job's self-tests and `check-commits.sh` are
-the lines of `AGENTS.md` § Build & run.
+job uses, so the releases match the image's. The job's self-tests, `check-commits.sh` and
+`check-site.sh` are the lines of `AGENTS.md` § Build & run.
 
 ```bash
 scripts=$({ git ls-files -co --exclude-standard '*.sh'
@@ -193,6 +193,22 @@ run:
 gh workflow run clean.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=true   # read the log
 gh workflow run clean.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=false
 ```
+
+## The site
+
+`site/` holds seven hand-written pages, one stylesheet and `logo.svg`, no script and no
+external asset. `deploy-pages.yml` publishes the directory on a push to `main` that touches
+`site/`, `.github/scripts/check-site.sh` or the workflow itself, and on a dispatch. `build.yml`
+ignores `site/`, so a site-only push runs the deployment alone. `check-site.sh` walks every
+page before the upload and on every sandbox run.
+
+```bash
+./.github/scripts/check-site.sh site             # what CI runs, links fetched
+python3 -m http.server 8765 --bind 127.0.0.1 --directory site   # look at it on port 8765
+```
+
+Only `main` deploys: the branch policy of the `github-pages` environment admits no other ref,
+whose deployment would replace the published site.
 
 ## Keeping the pins fresh
 
