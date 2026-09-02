@@ -509,7 +509,8 @@ refused when it is on, the IMA architecture policy then enforcing module signatu
 (`security/integrity/ima/ima_efi.c`); the recipe prints that reason when modprobe fails. MOK
 enrolment is out of scope. Nothing loads them at boot, since every other host never touches
 them. `ujust setup-msi enable`, gated on the DMI vendor `Micro-Star`, writes the modules-load
-file and loads them now. They stay out of the initramfs by design.
+file and loads them now. `verify-host` fails on any other modules-load file naming them. They
+stay out of the initramfs by design.
 
 MControlCenter (dmitry-s93/MControlCenter) is installed per host from the tarball of its latest
 GitHub release, with no pin, being neither on Flathub nor shipped as an AppImage. Upstream's
@@ -528,8 +529,9 @@ Files: `build_files/50-kmods.sh` and its test, `build_files/kmods/build-kmods.sh
 ## ujust recipes
 
 Bazzite's `ujust` is `just` run on `/usr/share/ublue-os/justfile`, which imports every file
-under `/usr/share/ublue-os/just/` by name and sets `allow-duplicate-recipes`. Two recipes of
-ours join it: `setup-panels` and `setup-msi`.
+under `/usr/share/ublue-os/just/` by name and sets `allow-duplicate-recipes`. Six recipes of
+ours join it: `setup-panels`, `setup-msi`, `setup-dev`, `install-jetbrains-toolbox`,
+`verify-host` and `migrate`.
 
 `95-bazzite-mx.just` is appended as one more `import` line, the way bazzite-dx adds its own
 file (`bazzite-dx/build_files/60-clean-base.sh`). With duplicate names across imports the
@@ -537,12 +539,34 @@ earlier import wins ([`gotchas.md`](gotchas.md) § `just`: the earlier import wi
 duplicate recipe name), so an appended import can never override a base recipe. A recipe of
 ours that carries an upstream name therefore takes the upstream file's place, as
 `84-bazzite-virt.just` and `82-bazzite-sunshine.just` do, each holding exactly the one recipe
-we replace. `00-prep.sh` records every base recipe file's recipe set before `system_files` is
-copied. `70-justfile.sh` then refuses a replaced file whose set differs from ours and any name
-defined in two files.
+we replace. When the upstream file holds other recipes too, the upstream recipe is cut out of
+it with its neighbours proven unchanged. `00-prep.sh` records every base recipe file's recipe
+set before `system_files` is copied. `70-justfile.sh` then refuses a replaced file whose set
+differs from ours, an override whose recipe the base no longer has, and any name defined in two
+files.
+
+`verify-host` answers whether a host is where the image expects it. The name is ours, after
+Bazzite's `verify-image`, which only rewrites the transport for `ghcr.io/ublue-os`. `migrate`
+brings a host to the state this image expects, in one pending deployment, with a confirmation
+per mutating step except step 2, which writes the backups, pins the booted deployment and stops
+`uupd.timer` unasked, and the reboot left to the user. It uses rpm-ostree rather than
+`bootc switch`: rpm-ostree is visible and produces the same origin. What both check and do is
+[`migration.md`](migration.md). `setup-dev` runs `mise ls` for status or `mise install` after
+seeding the config from `/etc/skel`. `install-jetbrains-toolbox` replaces Bazzite's Homebrew
+cask with JetBrains' documented Linux install: read the release feed, download the tarball,
+compare its sha256 with the feed's checksum file, unpack and start it once. The build of a
+Toolbox already unpacked there is read from the tarball's own `bin/build.txt` (the feed's
+`build` field), so a Toolbox of the same build is left alone whoever put it there
+([`gotchas.md`](gotchas.md) § A private marker does not identify an installation the recipe did
+not make). The Portal still offers JetBrains Toolbox through the Homebrew cask (its
+`jetbrains-toolbox-linux` entry); the recipe is the image's route, and using both leaves two
+installs.
 
 Files: `build_files/70-justfile.sh` and its test,
-`system_files/usr/share/ublue-os/just/95-bazzite-mx.just`.
+`system_files/usr/share/ublue-os/just/95-bazzite-mx.just`, and the helpers
+`bazzite-mx-verify-host`, `bazzite-mx-migrate` and `bazzite-mx-jetbrains-toolbox` under
+`system_files/usr/libexec/`; the first two source `system_files/usr/lib/bazzite-mx/host.sh`,
+which the MSI helper shares, and the Toolbox helper runs as the user and sources nothing.
 
 ## The cleaned stage
 

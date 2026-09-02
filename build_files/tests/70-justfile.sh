@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test of 70-justfile.sh: our recipe file imported once, every recipe
-# reachable exactly once, and the self-test of 70-justfile.sh run; then the
+# reachable exactly once, the overridden base recipe cut out with the rest
+# intact, and the self-tests of migrate and 70-justfile.sh run; then the
 # recipes that print more after their call print it only when the call
 # succeeded, run as nobody against stubs. The helpers' own cases live in
 # their tests and self-tests (docs/conventions.md § Positive control), their
@@ -20,8 +21,10 @@ CTX=$(dirname "$(realpath "$0")")/../..
 JUST_DIR=/usr/share/ublue-os/just
 MASTER=/usr/share/ublue-os/justfile
 OURS=$JUST_DIR/95-bazzite-mx.just
+APPS=$JUST_DIR/82-bazzite-apps.just
 SNAPSHOT=$BUILD_STATE/just.base.summary
-OUR_RECIPES="setup-msi setup-panels"
+OUR_RECIPES="install-jetbrains-toolbox migrate setup-dev setup-msi setup-panels"
+OUR_RECIPES+=" verify-host"
 REPLACING_RECIPES="setup-sunshine setup-virtualization"
 
 # --- the recipe files ---------------------------------------------------------
@@ -92,6 +95,30 @@ recorded_recipes_of() {
         | sort
 }
 
+# The base's recipe is gone from its file and ours is what ujust runs.
+check_base_recipe_cut_out() {
+    local recorded shown
+
+    recorded=$(recorded_recipes_of 82-bazzite-apps.just \
+        | grep -vx install-jetbrains-toolbox || true)
+
+    if [ -n "$recorded" ] && [ "$(recipe_set "$APPS")" = "$recorded" ]; then
+        echo "OK: $APPS keeps the base's other $(wc -l <<< "$recorded") recipes"
+    else
+        echo "FAIL: $APPS recipes: $(recipe_set "$APPS" | on_one_line none)" \
+            "vs recorded $(on_one_line none <<< "$recorded")"
+    fi
+
+    shown=$(just --justfile "$MASTER" --show install-jetbrains-toolbox 2>&1 || true)
+
+    if grep -q 'bazzite-mx-jetbrains-toolbox' <<< "$shown"; then
+        echo "OK: ujust install-jetbrains-toolbox is our recipe"
+    else
+        echo "FAIL: ujust --show install-jetbrains-toolbox:" \
+            "$(head -n3 <<< "$shown" | on_one_line 'no output')"
+    fi
+}
+
 # The two files that replace a base file hold the recipes the base's held.
 check_replacing_files() {
     local file recorded
@@ -117,12 +144,12 @@ check_help() {
 }
 
 # --- a failed call is the recipe's status -------------------------------------
-# setup-msi enable prints a
-# `Done.` line after its call, setup-panels prints what plasmashell
+# setup-msi enable and setup-dev install print a
+# `Done.` line after their call, setup-panels prints what plasmashell
 # answered, setup-sunshine enable and disable report the service and its
 # status reads the unit: the recipe runs as nobody (the recipes refuse root)
-# with stubs of sudo, gdbus, systemctl and getcap first on PATH: under
-# STUB_FAILS the first three refuse and getcap prints no capability, so the
+# with stubs of sudo, mise, gdbus, systemctl and getcap first on PATH: under
+# STUB_FAILS the first four refuse and getcap prints no capability, so the
 # line and the status can be read in the build.
 # Known-bad: the recipes printed `Done.` and exited 0 after a helper that had
 # printed `ERROR:` and exited 1; setup-panels exited 0 after a failed gdbus
@@ -143,6 +170,15 @@ if [ "${STUB_FAILS:-0}" = 1 ]; then
 fi
 
 echo "stub ran $*"
+STUB
+    cat > "$dir/bin/mise" << 'STUB'
+#!/usr/bin/bash
+if [ "$1" = install ] && [ "${STUB_FAILS:-0}" = 1 ]; then
+    echo "ERROR: stub refused mise $*"
+    exit 1
+fi
+
+echo "stub mise $*"
 STUB
     cat > "$dir/bin/gdbus" << 'STUB'
 #!/usr/bin/bash
@@ -223,7 +259,8 @@ fi
 
 exec /usr/sbin/getcap "$@"
 STUB
-    chmod 755 "$dir/bin/sudo" "$dir/bin/gdbus" "$dir/bin/systemctl" "$dir/bin/getcap"
+    chmod 755 "$dir/bin/sudo" "$dir/bin/mise" "$dir/bin/gdbus" "$dir/bin/systemctl" \
+        "$dir/bin/getcap"
 }
 
 # run_recipe_as_nobody <stubs> <recipe> <action>: the recipe's output; its
@@ -449,7 +486,7 @@ check_virtualization_status_lines() {
 
 # Every recipe that takes an ACTION, the two replacing files' included,
 # answers `Unknown option:` and fails on one it does not know, before any
-# call. Known-bad: setup-panels ran on any argument.
+# call. Known-bad: setup-panels and verify-host ran on any argument.
 check_recipes_reject_an_unknown_option() {
     local dir=$1
     local recipe output failed=""
@@ -468,14 +505,14 @@ check_recipes_reject_an_unknown_option() {
     fi
 }
 
-# The three recipes with a Choose menu exit 0 and print no `Unknown option:`
+# The four recipes with a Choose menu exit 0 and print no `Unknown option:`
 # when the menu answers nothing, as on a cancel or without a terminal.
 # Known-bad: the empty answer fell to `*)`, `Unknown option:` and exit 1.
 check_menu_recipes_accept_an_empty_answer() {
     local dir=$1
     local recipe output failed=""
 
-    for recipe in setup-msi setup-sunshine setup-virtualization; do
+    for recipe in setup-dev setup-msi setup-sunshine setup-virtualization; do
         if ! output=$(STUB_FAILS=1 run_recipe_as_nobody "$dir" "$recipe" "") \
             || grep -q '^Unknown option:' <<< "$output"; then
             failed+=" $recipe"
@@ -493,14 +530,17 @@ check_menu_recipes_accept_an_empty_answer() {
 
 check_our_recipe_file
 check_master_justfile
+check_base_recipe_cut_out
 check_replacing_files
 check_help
 
+check_self_test migrate /usr/libexec/bazzite-mx-migrate
 check_self_test 70-justfile.sh bash "$CTX/build_files/70-justfile.sh"
 
 stubs=$(mktemp -d)
 fixture_recipe_stubs "$stubs"
 check_recipe_stops_on_a_failed_call "$stubs" setup-msi enable Done.
+check_recipe_stops_on_a_failed_call "$stubs" setup-dev install Done.
 check_recipe_stops_on_a_failed_call "$stubs" setup-panels "" "stub applied the panels"
 check_recipe_stops_on_a_failed_call "$stubs" setup-sunshine enable "Sunshine enabled for"
 check_recipe_stops_on_a_failed_call "$stubs" setup-sunshine disable "Sunshine disabled for"

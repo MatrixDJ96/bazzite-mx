@@ -80,4 +80,5 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 - `docs/conventions.md` — before writing a script, recipe, boot hook, test or workflow.
 - `docs/divergences.md` — what the image changes over Bazzite and why, one entry per feature.
 - `docs/gotchas.md` — a failure that looks familiar, by heading.
+- `docs/migration.md` — bringing a host onto the image; a `verify-host` `FAIL:` line.
 - `docs/workflow.md` — branches and the local lint run.

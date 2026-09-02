@@ -1,0 +1,1230 @@
+#!/usr/bin/env bash
+# Move a host from a Bazzite-style deployment (unsigned transport, layered
+# packages, local initramfs, NTFS volumes on the `ntfs` driver) to the state
+# this image expects, in one pending deployment, the reboot left to the user.
+# Every mutating step asks first except step 2, which writes the backups, pins
+# the booted deployment and stops uupd.timer. The root half of `ujust migrate`.
+#
+# Usage: bazzite-mx-migrate plan [TAG]            read-only: what apply would do
+#                                                 (root: ostree admin config-diff)
+#        bazzite-mx-migrate apply [TAG]           do it, asking before each step but 2
+#        bazzite-mx-migrate --self-test           prove the plan on good and bad hosts,
+#                                                 the fstab rewrite and its verify, and
+#                                                 apply's update, timer and backup guards
+#   TAG defaults to stable; a dated release tag pins the host to that release.
+#   FIXTURE=<dir> (plan only): files read under <dir>, command outputs under
+#   <dir>/cmd/ (host.sh).
+# Exit status: 0 done; 1 failed or refused, `ERROR: …` on stderr; 2 a
+#   precondition or a declined step stopped the run, `ABORT: …` on stderr.
+#   A failed self-test prints `self-test: …` on stdout instead.
+# Writes (apply): /var/tmp/bazzite-mx-migrate/<timestamp>/ with the backups,
+#   the root taken to 0700 root:root so no second account reaches them,
+#   the origin through rpm-ostree, /etc/fstab, /etc/containers when restored,
+#   the residue files moved from /etc/modprobe.d and /etc/modules-load.d into
+#   the backup, the ntfsplus kernel arguments deleted from the pending
+#   deployment (step 6b).
+# Output: the plan's step numbers and the `plan: ready …` line are what the
+#   self-test and docs/migration.md read; a message either cites stays as it is.
+set -euo pipefail
+
+# shellcheck source=../lib/bazzite-mx/host.sh
+source /usr/lib/bazzite-mx/host.sh
+
+SIGNED="ostree-image-signed:docker://$VENDOR_SCOPE"
+UNSIGNED="ostree-unverified-registry:$VENDOR_SCOPE"
+BACKUP_ROOT=/var/tmp/bazzite-mx-migrate
+
+# Script level, not a local of cmd_apply: the EXIT trap runs after cmd_apply
+# has returned, where a local is unbound under set -u and the trap would die
+# with uupd.timer left stopped (docs/gotchas.md § An EXIT trap cannot read a
+# `local` of the function that armed it). Step 2 sets both in the main shell:
+# called as `$(step_2 …)` it would set them in a subshell and the timer would
+# stay stopped (docs/gotchas.md § A step run in a command substitution sets
+# its flags in a subshell).
+TIMER_WAS_ACTIVE=0
+BACKUP=
+
+# CONTAINERS_RESTORED set by step 0, DEPLOYMENT_QUEUED by steps 3, 4, 5
+# and 6b, FSTAB_REWRITTEN by step 6; read by describe_what_the_run_changed.
+CONTAINERS_RESTORED=0
+DEPLOYMENT_QUEUED=0
+FSTAB_REWRITTEN=0
+
+# Filled by detect_host_state, read by the plan and every apply step.
+BOOTED=
+PENDING=
+REF=
+LAYERED=
+REGEN=
+PINNED=
+IMAGE=
+TARGET=
+SCOPE_OK=0
+CONFIG_HITS=
+NTFS_ROWS=
+RESIDUE_FILES=
+RESIDUE_KARGS=
+
+# --- stopping, asking, reading the host ---------------------------------------
+
+# A precondition or a declined step: exit 2, distinct from a failure.
+abort() {
+    echo "ABORT: $*" >&2
+    exit 2
+}
+
+# What a run stopped after step 2 changed and what a second apply needs, for
+# the line that stops it.
+describe_what_the_run_changed() {
+    local changed="the backups of step 2, the booted deployment pinned"
+    local next="nothing is pending, so apply can run again at once"
+
+    if [ "$CONTAINERS_RESTORED" -eq 1 ]; then
+        changed+=", the /etc/containers restore of step 0"
+    fi
+
+    if [ "$DEPLOYMENT_QUEUED" -eq 1 ]; then
+        changed+=", the pending deployment the steps before it queued"
+        next="reboot into it, or rpm-ostree cleanup -p, then apply again"
+    fi
+
+    if [ "$FSTAB_REWRITTEN" -eq 1 ]; then
+        changed+=", the fstab rewrite of step 6"
+    fi
+
+    echo "what the run changed stands ($changed): $next"
+}
+
+abort_declined_step() {
+    local step=$1
+
+    abort "step $step not confirmed; $(describe_what_the_run_changed)"
+}
+
+# confirm <question>: without a terminal nothing is confirmed.
+confirm() {
+    local question=$1
+
+    if [ -t 0 ]; then
+        ugum confirm "$question"
+    else
+        echo "no terminal: '$question' not confirmed" >&2
+        return 1
+    fi
+}
+
+# The command sources of this helper alone; the shared ones are host.sh's.
+src_config_diff() {
+    if [ -n "$FIXTURE" ]; then
+        cat "$FIXTURE/cmd/config-diff"
+    else
+        ostree admin config-diff
+    fi
+}
+
+# --- fstab --------------------------------------------------------------------
+
+ntfs_rows() {
+    local fstab=$1
+
+    fstab_entries "$fstab" | awk '$3 == "ntfs"'
+}
+
+# --- what the host has --------------------------------------------------------
+
+detect_deployment() {
+    local status
+    local pending_version='if .deployments[0].booted == true then ""
+        else (.deployments[0].version // .deployments[0].checksum) end'
+
+    if ! status=$(src_rpm_ostree_status 2>&1); then
+        exit_with_error "cannot read rpm-ostree status: $(reason_on_one_line "$status")"
+    fi
+
+    if ! BOOTED=$(booted_deployment "$status" 2>&1); then
+        exit_with_error "cannot read the deployments of rpm-ostree status:" \
+            "$(reason_on_one_line "$BOOTED")"
+    fi
+
+    if [ -z "$BOOTED" ]; then
+        exit_with_error "rpm-ostree status lists no booted deployment"
+    fi
+
+    PENDING=$(jq -r "$pending_version" <<< "$status")
+    REF=$(jq -r '."container-image-reference" // ""' <<< "$BOOTED")
+    LAYERED=$(layered_requests "$BOOTED")
+    REGEN=$(jq -r '."regenerate-initramfs" // false' <<< "$BOOTED")
+    PINNED=$(jq -r '.pinned // false' <<< "$BOOTED")
+}
+
+# `M`: a local copy in /etc of a file verify-host reads shadows the image's,
+# which the three-way merge never replaces.
+detect_image_and_policy() {
+    local config_diff
+    local shadowing='^M[[:space:]]+containers/(policy\.json|registries\.d/matrixdj96\.yaml)$'
+
+    IMAGE=$(image_name)
+
+    if [ -z "$IMAGE" ]; then
+        exit_with_error "$(host_file $IMAGE_INFO) unreadable:" \
+            "the booted image is not a bazzite-mx image"
+    fi
+
+    TARGET="$SIGNED/$IMAGE:$TAG"
+
+    SCOPE_OK=0
+
+    if [ "$(policy_scope_type)" = sigstoreSigned ]; then
+        SCOPE_OK=1
+    fi
+
+    if ! config_diff=$(src_config_diff 2>&1); then
+        exit_with_error "cannot read the config diff: $(reason_on_one_line "$config_diff")"
+    fi
+
+    CONFIG_HITS=$(grep -E "$shadowing" <<< "$config_diff" || true)
+}
+
+detect_fstab_and_residue() {
+    local kargs
+
+    NTFS_ROWS=$(ntfs_rows "$(host_file /etc/fstab)")
+
+    RESIDUE_FILES=$({
+        ntfsplus_files
+        msi_files
+    } | sort -u || true)
+
+    if ! kargs=$(src_kargs 2>&1); then
+        exit_with_error "cannot read the kernel arguments: $(reason_on_one_line "$kargs")"
+    fi
+
+    RESIDUE_KARGS=$(ntfsplus_kargs "$kargs")
+}
+
+# Fills the globals every step reads; apply calls it again after step 0.
+detect_host_state() {
+    detect_deployment
+    detect_image_and_policy
+    detect_fstab_and_residue
+}
+
+# --- the plan -----------------------------------------------------------------
+
+# The values the summary prints for the states that are not plain strings.
+
+scope_state() {
+    if [ "$SCOPE_OK" -eq 1 ]; then
+        echo present
+    else
+        echo MISSING
+    fi
+}
+
+# The points as libmount reads them (a space is a space, not `\040`).
+ntfs_mount_points() {
+    if [ -n "$NTFS_ROWS" ]; then
+        awk '{ print $2 }' <<< "$NTFS_ROWS" | unescaped_on_one_line
+    else
+        echo none
+    fi
+}
+
+# config_hits_on_one_line: the local copies under /etc/containers joined
+# for the summary, `none` when there is none.
+config_hits_on_one_line() {
+    local hits=${CONFIG_HITS//$'\n'/ }
+
+    echo "${hits:-none}"
+}
+
+# One line, one blank between items, none at either end; `none` without any.
+residue_on_one_line() {
+    local residue
+
+    residue=$(printf '%s %s' "${RESIDUE_FILES//$'\n'/ }" "${RESIDUE_KARGS//$'\n'/ }" \
+        | sed 's/^ *//;s/ *$//' || true)
+    printf '%s' "${residue:-none}"
+}
+
+print_host_summary() {
+    echo "bazzite-mx migrate: plan for $IMAGE, target $TARGET"
+    echo
+    printf '  %-31s %s\n' "booted origin" "${REF:-none}"
+    printf '  %-31s %s\n' "pending deployment" "${PENDING:-none}"
+    printf '  %-31s %s\n' "layered / local packages" "${LAYERED:-none}"
+    printf '  %-31s %s\n' "local initramfs" "$REGEN"
+    printf '  %-31s %s\n' "booted deployment pinned" "$PINNED"
+    printf '  %-31s %s\n' "policy scope $VENDOR_SCOPE" "$(scope_state)"
+    printf '  %-31s %s\n' "local policy/registries.d" "$(config_hits_on_one_line)"
+    printf '  %-31s %s\n' "fstab rows on type ntfs" "$(ntfs_mount_points)"
+    printf '  %-31s %s\n' "residue" "$(residue_on_one_line)"
+    echo
+}
+
+# No step 1: it is the scope precondition, checked between 0 and 2
+# (docs/migration.md).
+print_steps() {
+    local already_pinned=""
+
+    if [ "$PINNED" = true ]; then
+        already_pinned=' (already pinned)'
+    fi
+
+    echo "steps apply would run:"
+
+    if [ -n "$CONFIG_HITS" ]; then
+        echo "  0. restore /etc/containers/policy.json and registries.d from the image" \
+            "(/usr/etc), backup under $BACKUP_ROOT"
+    fi
+
+    echo "  2. back up status and fstab under $BACKUP_ROOT;" \
+        "ostree admin pin booted$already_pinned; uupd.timer stopped meanwhile"
+
+    if [ -n "$LAYERED" ]; then
+        echo "  3. rpm-ostree uninstall --all  ($LAYERED)"
+    else
+        echo "  3. (nothing layered: skipped)"
+    fi
+
+    if [ "$REGEN" = true ]; then
+        echo "  4. rpm-ostree initramfs --disable"
+    else
+        echo "  4. (initramfs already the image's: skipped)"
+    fi
+
+    if [ "$REF" != "$TARGET" ]; then
+        echo "  5. rpm-ostree rebase $TARGET"
+    else
+        echo "  5. (origin already $TARGET: skipped)"
+    fi
+
+    if [ -n "$NTFS_ROWS" ]; then
+        echo "  6. /etc/fstab: type ntfs -> ntfs3 on $(wc -l <<< "$NTFS_ROWS") row(s)," \
+            "daemon-reload; findmnt --verify"
+    else
+        echo "  6. (no ntfs row in fstab: skipped)"
+    fi
+
+    if [ -n "$RESIDUE_FILES$RESIDUE_KARGS" ]; then
+        echo "  6b. remove residue: $(residue_on_one_line)"
+    fi
+
+    echo "  7. print the per-user Firefox profile copy, reboot, rollback and unpin"
+}
+
+# Conditions that stop both plan and apply, after the host summary. apply
+# offers step 0 before them, so on a host with a pending deployment it may
+# restore /etc/containers first and stop here after. The signed pull is
+# checked against the running deployment's policy, so an image predating that
+# policy is reached once through the unsigned transport.
+check_preconditions() {
+    if [ -n "$PENDING" ]; then
+        abort "a pending deployment ($PENDING) exists: rpm-ostree would queue these changes" \
+            "on it. Reboot into it or run 'rpm-ostree cleanup -p', then start again"
+    fi
+
+    if [ "$SCOPE_OK" -eq 1 ]; then
+        return 0
+    fi
+
+    if [ -n "$CONFIG_HITS" ]; then
+        abort "/etc/containers carries a local copy ($(paste -sd ' ' <<< "$CONFIG_HITS")):" \
+            "the image's policy never reaches /etc through the merge." \
+            "apply offers the restore from /usr/etc; run it first"
+    fi
+
+    abort "the booted image has no signing policy for $VENDOR_SCOPE (an image predating the" \
+        "policy). Reach this image through the unsigned transport once, then reboot and run" \
+        "this again:
+  sudo rpm-ostree rebase $UNSIGNED/$IMAGE:$TAG
+  systemctl reboot"
+}
+
+# --- the apply steps ----------------------------------------------------------
+
+# Every step but 2 and 7 prints `step N: …` first, then asks; a declined 3, 4
+# or 5 aborts, a declined 0, 6 or 6b only skips (docs/migration.md).
+
+new_backup_directory() {
+    local timestamp
+
+    # The root has a fixed name under a world-writable sticky directory, so a
+    # second account can own it before the first apply and then rename the
+    # timestamped directory away, leaving its own files under the path the
+    # user is told to restore from. install -d takes a planted root back but
+    # keeps its content: a symlink planted inside under a guessed timestamp is
+    # an existing entry, which mkdir without -p refuses instead of following.
+    if ! install -d -m 0700 -o root -g root "$BACKUP_ROOT" 2> /dev/null; then
+        exit_with_error "cannot create $BACKUP_ROOT"
+    fi
+
+    timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+
+    if ! mkdir "$BACKUP_ROOT/$timestamp" 2> /dev/null; then
+        exit_with_error "cannot create $BACKUP_ROOT/$timestamp"
+    fi
+
+    echo "$BACKUP_ROOT/$timestamp"
+}
+
+step_0_restore_containers_config() {
+    local backup
+
+    if [ -z "$CONFIG_HITS" ]; then
+        return 0
+    fi
+
+    echo "step 0: local copies in /etc/containers: $(tr '\n' ' ' <<< "$CONFIG_HITS")"
+
+    if ! confirm "Restore policy.json and registries.d from the image (backup kept)?"; then
+        return 0
+    fi
+
+    BACKUP=$(new_backup_directory)
+    backup=$BACKUP
+
+    if ! cp -a /etc/containers/policy.json "$backup/policy.json" 2> /dev/null \
+        || ! cp -a /etc/containers/registries.d "$backup/registries.d" 2> /dev/null; then
+        exit_with_error "cannot back up /etc/containers under $backup: nothing restored"
+    fi
+
+    if ! cp -a /usr/etc/containers/policy.json /etc/containers/policy.json 2> /dev/null \
+        || ! cp -a /usr/etc/containers/registries.d/. /etc/containers/registries.d/ \
+            2> /dev/null; then
+        exit_with_error "cannot restore /etc/containers from /usr/etc: the backup under" \
+            "$backup holds the copies to put back"
+    fi
+
+    CONTAINERS_RESTORED=1
+    echo "restored from /usr/etc; backup under $backup"
+
+    detect_host_state
+}
+
+# Sets BACKUP, unless step 0 already opened it, and TIMER_WAS_ACTIVE for the
+# steps and the EXIT trap. One apply writes into one timestamped directory:
+# the errors of every later step send the reader to that one name.
+step_2_backup_pin_and_stop_timer() {
+    if [ -z "$BACKUP" ]; then
+        BACKUP=$(new_backup_directory)
+    fi
+
+    if ! rpm-ostree status --json > "$BACKUP/rpm-ostree-status.json" 2> /dev/null \
+        || ! cp -a /etc/fstab "$BACKUP/fstab" 2> /dev/null; then
+        exit_with_error "cannot write the backups under $BACKUP"
+    fi
+
+    echo "step 2: backups under $BACKUP"
+
+    if [ "$PINNED" != true ]; then
+        ostree admin pin booted
+        echo "step 2: booted deployment pinned (unpin it after 24 h of use: step 7)"
+    fi
+
+    if systemctl is-active --quiet uupd.timer; then
+        TIMER_WAS_ACTIVE=1
+        systemctl stop uupd.timer
+        echo "step 2: uupd.timer stopped for the duration"
+    fi
+}
+
+step_3_uninstall_layered() {
+    if [ -z "$LAYERED" ]; then
+        return 0
+    fi
+
+    echo "step 3: rpm-ostree uninstall --all ($LAYERED)"
+
+    if ! confirm "Remove every layered and local package from the origin?"; then
+        abort_declined_step 3
+    fi
+
+    if ! rpm-ostree uninstall --all; then
+        exit_with_error "rpm-ostree uninstall --all failed; $(describe_what_the_run_changed)"
+    fi
+
+    DEPLOYMENT_QUEUED=1
+}
+
+step_4_disable_local_initramfs() {
+    local question="Stop regenerating the initramfs locally (the image's initramfs boots instead)?"
+
+    if [ "$REGEN" != true ]; then
+        return 0
+    fi
+
+    echo "step 4: rpm-ostree initramfs --disable"
+
+    if ! confirm "$question"; then
+        abort_declined_step 4
+    fi
+
+    if ! rpm-ostree initramfs --disable; then
+        exit_with_error "rpm-ostree initramfs --disable failed; $(describe_what_the_run_changed)"
+    fi
+
+    DEPLOYMENT_QUEUED=1
+}
+
+step_5_rebase() {
+    if [ "$REF" = "$TARGET" ]; then
+        return 0
+    fi
+
+    echo "step 5: rpm-ostree rebase $TARGET"
+
+    if ! confirm "Rebase to $TARGET (signature verified against the image's policy)?"; then
+        abort_declined_step 5
+    fi
+
+    if ! rpm-ostree rebase "$TARGET"; then
+        exit_with_error "rpm-ostree rebase $TARGET failed; $(describe_what_the_run_changed)"
+    fi
+
+    DEPLOYMENT_QUEUED=1
+}
+
+# write_rewritten_fstab <rewritten> <backup>: refuses a table that adds a
+# findmnt --verify error to the current one (nothing written then), installs
+# it otherwise, reloads systemd and prints the verdict, pre-existing errors
+# counted, not fatal. A `daemon-reload` that fails after the write leaves the
+# table installed, the ERROR naming the reload to run by hand. The comparison
+# (host.sh) is trusted only once findmnt has answered on both tables: an
+# empty error set is not a clean one.
+write_rewritten_fstab() {
+    local rewritten=$1
+    local backup=$2
+    local added kept
+
+    # The rewritten table has the current one's rows with the type column
+    # switched, so the current table's
+    # diagnostic names the row to fix.
+    if ! fstab_verify_answers /etc/fstab || ! fstab_verify_answers "$rewritten"; then
+        rm -f "$rewritten"
+        fstab_verify_output /etc/fstab
+        exit_with_error "findmnt --verify gave no verdict: the rewrite cannot be judged," \
+            "fstab not written; $(describe_what_the_run_changed)"
+    fi
+
+    added=$(new_verify_errors /etc/fstab "$rewritten")
+
+    if [ -n "$added" ]; then
+        echo "$added"
+        rm -f "$rewritten"
+        exit_with_error "the rewritten fstab adds findmnt --verify error(s), fstab not written;" \
+            "$(describe_what_the_run_changed)"
+    fi
+
+    # Written beside and renamed, so a write cut short by a full disk leaves
+    # /etc/fstab as it was.
+    if ! install -m 0644 -o root -g root "$rewritten" /etc/fstab.new 2> /dev/null \
+        || ! mv -f /etc/fstab.new /etc/fstab 2> /dev/null; then
+        rm -f "$rewritten" /etc/fstab.new
+        exit_with_error "could not write /etc/fstab, left as it was;" \
+            "$(describe_what_the_run_changed)"
+    fi
+
+    FSTAB_REWRITTEN=1
+
+    if ! systemctl daemon-reload; then
+        rm -f "$rewritten"
+        exit_with_error "systemctl daemon-reload failed after writing /etc/fstab" \
+            "(backup $backup/fstab): run it by hand; $(describe_what_the_run_changed)"
+    fi
+
+    kept=$(fstab_verify_errors /etc/fstab | grep -c '' || true)
+    echo "findmnt --verify: no error added by the rewrite, $kept pre-existing error(s) kept"
+}
+
+step_6_fstab_ntfs_to_ntfs3() {
+    local backup=$1
+    local rewritten rows_left
+
+    if [ -z "$NTFS_ROWS" ]; then
+        return 0
+    fi
+
+    echo "step 6: fstab rows on the ntfs driver:"
+    echo "$NTFS_ROWS"
+
+    if ! ntfs3_available; then
+        abort "ntfs3 is not loadable on the running kernel:" \
+            "the fstab change would leave the volumes unmounted after the reboot"
+    fi
+
+    rewritten=$(mktemp)
+    replace_fstab_type ntfs ntfs3 /etc/fstab "$rewritten"
+    diff -u /etc/fstab "$rewritten" || true
+
+    rows_left=$(ntfs_rows "$rewritten" | grep -c '' || true)
+
+    if [ "$rows_left" -ne 0 ]; then
+        rm -f "$rewritten"
+        exit_with_error "rewrite left $rows_left ntfs row(s), fstab not written;" \
+            "$(describe_what_the_run_changed)"
+    fi
+
+    if confirm "Write this fstab (type column, backup in $backup)?"; then
+        write_rewritten_fstab "$rewritten" "$backup"
+    fi
+
+    rm -f "$rewritten"
+}
+
+step_6b_remove_residue() {
+    local backup=$1
+    local path karg
+
+    if [ -n "$RESIDUE_FILES" ]; then
+        echo "step 6b: residue files: ${RESIDUE_FILES//$'\n'/ }"
+
+        if confirm "Remove them (copies kept under $backup)?"; then
+            while IFS= read -r path; do
+                if ! mkdir -p "$backup$(dirname "$path")" 2> /dev/null; then
+                    exit_with_error "cannot create $backup$(dirname "$path");" \
+                        "$(describe_what_the_run_changed)"
+                fi
+
+                if ! mv "$path" "$backup$path" 2> /dev/null; then
+                    exit_with_error "cannot move $path under $backup;" \
+                        "$(describe_what_the_run_changed)"
+                fi
+            done <<< "$RESIDUE_FILES"
+        fi
+    fi
+
+    if [ -n "$RESIDUE_KARGS" ]; then
+        echo "step 6b: ntfsplus kernel arguments: ${RESIDUE_KARGS//$'\n'/ }"
+
+        if confirm "Delete them from the pending deployment's kernel arguments?"; then
+            while IFS= read -r karg; do
+                if ! rpm-ostree kargs --delete="$karg"; then
+                    exit_with_error "rpm-ostree kargs --delete=$karg failed;" \
+                        "$(describe_what_the_run_changed)"
+                fi
+
+                DEPLOYMENT_QUEUED=1
+            done <<< "$RESIDUE_KARGS"
+        fi
+    fi
+}
+
+print_step_7_what_stays_with_the_user() {
+    echo
+    echo "step 7: what stays with the user"
+    echo "  - Firefox: the RPM in the image reads ~/.mozilla when it exists, ~/.config/mozilla" \
+        "otherwise; a Flatpak profile, in either tree, is copied once, per user," \
+        "BEFORE the first RPM start:"
+    echo "      [ -e ~/.mozilla ] || [ ! -d ~/.var/app/org.mozilla.firefox/.mozilla ]" \
+        "|| cp -a ~/.var/app/org.mozilla.firefox/.mozilla ~/"
+    echo "      [ -e ~/.config/mozilla ]" \
+        "|| [ ! -d ~/.var/app/org.mozilla.firefox/config/mozilla ]" \
+        "|| cp -a ~/.var/app/org.mozilla.firefox/config/mozilla ~/.config/"
+    echo "    then, if wanted: flatpak uninstall org.mozilla.firefox"
+    echo "  - reboot:   systemctl reboot"
+    echo "  - rollback: rpm-ostree rollback && systemctl reboot" \
+        "  (the previous deployment is pinned)"
+    echo "  - after 24 h of use: ujust verify-host, then unpin every deployment" \
+        "ostree admin status marks 'Pinned: yes': sudo ostree admin pin -u <index>," \
+        "the index being its position in that list, counting from 0" \
+        "(a second apply after a reboot can leave two pinned)"
+}
+
+# True on a host every step of apply would skip: no local policy.json or
+# matrixdj96.yaml, nothing layered, the image's initramfs, the signed origin,
+# fstab on ntfs3, no residue.
+# plan and apply stop there instead of pinning and backing up for nothing.
+nothing_to_do() {
+    if [ -n "$CONFIG_HITS$LAYERED$RESIDUE_FILES$RESIDUE_KARGS" ]; then
+        return 1
+    fi
+
+    if [ "$REGEN" = true ] || [ "$REF" != "$TARGET" ]; then
+        return 1
+    fi
+
+    [ -z "$NTFS_ROWS" ]
+}
+
+# Armed as the EXIT trap by cmd_apply before step 2; a no-op unless step 2
+# stopped the timer.
+restore_timer() {
+    if [ "$TIMER_WAS_ACTIVE" -eq 1 ]; then
+        if systemctl start uupd.timer; then
+            echo "uupd.timer started again"
+        else
+            echo "ERROR: uupd.timer not started again: run systemctl start uupd.timer" >&2
+            exit 1
+        fi
+    fi
+}
+
+# --- commands -----------------------------------------------------------------
+
+cmd_plan() {
+    detect_host_state
+    print_host_summary
+
+    check_preconditions
+
+    if nothing_to_do; then
+        echo "plan: nothing to do, the host is already on $TARGET with no step left"
+        return 0
+    fi
+
+    print_steps
+    echo
+    echo "plan: ready for 'ujust migrate apply $TAG'"
+}
+
+cmd_apply() {
+    require_root apply migrate
+
+    # Step 2 stops uupd.timer, not a run it already started or that run's
+    # queued restart, whose transaction would make rpm-ostree refuse the steps.
+    if [ "$(systemctl is-active uupd.service || true)" = activating ]; then
+        abort "an update is running or its restart is queued after a failure" \
+            "(uupd.service activating): rpm-ostree would refuse the steps." \
+            "Wait until systemctl is-active uupd.service no longer says activating," \
+            "then start again"
+    fi
+
+    detect_host_state
+    print_host_summary
+
+    step_0_restore_containers_config
+    check_preconditions
+
+    if nothing_to_do; then
+        echo "nothing to do, the host is already on $TARGET with no step left"
+        return 0
+    fi
+
+    print_steps
+    echo
+
+    trap restore_timer EXIT
+    step_2_backup_pin_and_stop_timer
+
+    step_3_uninstall_layered
+    step_4_disable_local_initramfs
+    step_5_rebase
+    step_6_fstab_ntfs_to_ntfs3 "$BACKUP"
+    step_6b_remove_residue "$BACKUP"
+
+    print_step_7_what_stays_with_the_user
+    rpm-ostree status
+}
+
+# --- self-test ----------------------------------------------------------------
+
+fail_self_test() {
+    echo "self-test: $*"
+    exit 1
+}
+
+# A fstab with four ntfs rows, one ending at its type (fstab(5): the last
+# fields are optional) and one starting with blanks, an ntfs3 row, an ntfs-3g
+# row, a bind and a comment naming ntfs.
+self_test_fstab() {
+    local fstab=$1
+
+    cat > "$fstab" << 'FSTAB'
+# comment with ntfs in it
+UUID=1111 /  btrfs subvol=root 0 0
+UUID=2222 /run/media/x/Windows ntfs defaults,nofail,uid=1000,gid=1000,umask=022 0 0
+UUID=3333 /mnt/games   ntfs   nofail,x-systemd.device-timeout=10 0 0
+/mnt/games/steam /home/x/steam none bind,nofail,x-systemd.requires-mounts-for=/mnt/games 0 0
+UUID=4444 /mnt/fuse ntfs-3g defaults,nofail 0 0
+UUID=7777 /mnt/done ntfs3 defaults,nofail 0 0
+UUID=5555 /mnt/bare ntfs
+   UUID=6666 /mnt/indented ntfs defaults,nofail 0 0
+FSTAB
+}
+
+# Only the type column of the `ntfs` rows changes.
+self_test_fstab_rewrite() {
+    local dir=$1
+
+    replace_fstab_type ntfs ntfs3 "$dir/fstab" "$dir/out"
+
+    if ! diff <(sed -E '/^#/!s/ ntfs( |$)/ ntfs3\1/' "$dir/fstab") "$dir/out" > /dev/null; then
+        fail_self_test "fstab rewrite changed more than the type column"
+    fi
+}
+
+# Known-bad 6: the verification compares error sets. A stale nofail row is an
+# error before and after the rewrite (docs/gotchas.md § `findmnt --verify`
+# reports an unplugged `nofail` volume as an error), so the rewrite adds
+# nothing; a row on a mount point that does not exist adds one and is refused;
+# a 40-row table keeps every error line on its mount point; a findmnt without
+# a verdict is refused.
+self_test_fstab_verify_compares_errors() {
+    local dir=$1
+    local added row
+
+    printf 'UUID=DEAD /mnt/unplugged ntfs defaults,nofail 0 0\n' > "$dir/stale"
+    replace_fstab_type ntfs ntfs3 "$dir/stale" "$dir/stale-rewritten"
+
+    if [ "$(fstab_verify_errors "$dir/stale" | grep -c '')" -eq 0 ]; then
+        fail_self_test "findmnt --verify reports no error on a stale nofail row: the" \
+            "comparison would have nothing to compare"
+    fi
+
+    added=$(new_verify_errors "$dir/stale" "$dir/stale-rewritten")
+
+    if [ -n "$added" ]; then
+        fail_self_test "the ntfs3 rewrite of a stale row counts as a new error: $added"
+    fi
+
+    printf 'UUID=BEEF /mnt/never/existed ntfs3 defaults,nofail 0 0\n' >> "$dir/stale-rewritten"
+    added=$(new_verify_errors "$dir/stale" "$dir/stale-rewritten")
+
+    if [ -z "$added" ]; then
+        fail_self_test "a row added with its own errors was not reported as new"
+    fi
+
+    # findmnt's findings and its summary come on two streams: past 4096
+    # bytes of findings a block-buffered stdout would be cut mid-line by the
+    # summary, and the fragment would pass for a mount point.
+    for row in $(seq 1 40); do
+        printf 'UUID=%08d /mnt/big-%02d ntfs defaults,nofail 0 0\n' "$row" "$row"
+    done > "$dir/big"
+
+    if [ "$(fstab_verify_errors "$dir/big" | grep -vc '^/mnt/big-')" -ne 0 ]; then
+        fail_self_test "an error line of a 40-row table is not prefixed by its mount point:" \
+            "$(fstab_verify_errors "$dir/big" | grep -v '^/mnt/big-')"
+    fi
+
+    # A findmnt that dies on a malformed row after its diagnostic (a stub
+    # here) is no verdict: the write path refuses it instead of reading an
+    # empty error set as clean.
+    mkdir -p "$dir/bin"
+    printf '#!/usr/bin/env bash\necho "findmnt: parse error at line 2 -- ignored" >&2\nexit 139\n' \
+        > "$dir/bin/findmnt"
+    chmod +x "$dir/bin/findmnt"
+
+    if PATH=$dir/bin:$PATH fstab_verify_answers "$dir/stale"; then
+        fail_self_test "a findmnt that dies after a diagnostic passed as a verdict"
+    fi
+
+    if ! fstab_verify_answers "$dir/stale"; then
+        fail_self_test "findmnt --verify answered on the stale row and was refused"
+    fi
+}
+
+# self_test_unmigrated_fixture <dir> <fstab>: a host that already boots this
+# image unsigned, with layered packages and a local initramfs, and a rollback
+# deployment behind the booted one.
+self_test_unmigrated_fixture() {
+    local fixture=$1
+    local fstab=$2
+
+    mkdir -p "$fixture/cmd" "$fixture/etc/containers" "$fixture/etc/modprobe.d" \
+        "$fixture/etc/modules-load.d" "$fixture/usr/share/ublue-os"
+    cp "$fstab" "$fixture/etc/fstab"
+    printf '{"image-name":"bazzite-mx"}\n' > "$fixture/usr/share/ublue-os/image-info.json"
+    cat > "$fixture/etc/containers/policy.json" << 'POLICY'
+{"default": [{"type": "reject"}],
+ "transports": {"docker": {"ghcr.io/matrixdj96": [
+   {"type": "sigstoreSigned", "keyPath": "/etc/pki/containers/matrixdj96.pub"}]}}}
+POLICY
+    printf 'M    fstab\nM    hosts\n' > "$fixture/cmd/config-diff"
+    printf 'root=UUID=x rw rhgb quiet\n' > "$fixture/cmd/kargs"
+    cat > "$fixture/cmd/rpm-ostree-status.json" << 'STATUS'
+{"deployments": [
+  {"booted": true, "staged": false,
+   "container-image-reference":
+     "ostree-unverified-registry:ghcr.io/matrixdj96/bazzite-mx:44.20260903",
+   "packages": [], "requested-packages": ["1password"],
+   "requested-local-packages": ["teams-for-linux"], "requested-base-removals": [],
+   "regenerate-initramfs": true, "initramfs-args": ["--hostonly"],
+   "pinned": false, "version": "44.20260903"},
+  {"booted": false, "staged": false,
+   "container-image-reference": "ostree-unverified-registry:ghcr.io/matrixdj96/bazzite-mx:stable",
+   "packages": ["1password"], "regenerate-initramfs": true, "pinned": false,
+   "version": "44.20260902"}]}
+STATUS
+}
+
+# self_test_migrated_status <file>: the booted deployment of a migrated host,
+# signed, nothing layered, the image's initramfs, pinned.
+self_test_migrated_status() {
+    local file=$1
+
+    cat > "$file" << 'STATUS'
+{"deployments": [
+  {"booted": true, "staged": false,
+   "container-image-reference": "ostree-image-signed:docker://ghcr.io/matrixdj96/bazzite-mx:stable",
+   "packages": [], "regenerate-initramfs": false, "pinned": true, "version": "44.20260903"}]}
+STATUS
+}
+
+self_test_plan_lists_the_steps() {
+    local fixture=$1
+    local rebase_step="5. rpm-ostree rebase $SIGNED/bazzite-mx:44.20260903"
+    local out
+
+    if ! out=$(FIXTURE=$fixture TAG=44.20260903 cmd_plan); then
+        fail_self_test "plan failed on the good fixture: $out"
+    fi
+
+    if ! grep -q '3. rpm-ostree uninstall --all  (1password teams-for-linux)' <<< "$out" \
+        || ! grep -q '4. rpm-ostree initramfs --disable' <<< "$out" \
+        || ! grep -qF "$rebase_step" <<< "$out" \
+        || ! grep -q '6. /etc/fstab: type ntfs -> ntfs3 on 4 row(s)' <<< "$out" \
+        || ! grep -q "plan: ready for 'ujust migrate apply 44.20260903'" <<< "$out"; then
+        echo "self-test: the plan does not list the expected steps:"
+        echo "$out"
+        exit 1
+    fi
+}
+
+# Known-bad 1: a pending deployment (the first becomes staged, the second booted).
+self_test_plan_refuses_pending() {
+    local good=$1
+    local fixture=$2
+    local swap_deployments='.deployments[0].booted = false | .deployments[0].staged = true
+        | .deployments[1].booted = true'
+    local out
+
+    mkdir -p "$fixture"
+    cp -a "$good/." "$fixture/"
+    jq "$swap_deployments" "$good/cmd/rpm-ostree-status.json" \
+        > "$fixture/cmd/rpm-ostree-status.json"
+
+    if out=$(FIXTURE=$fixture TAG=stable cmd_plan 2>&1); then
+        fail_self_test "a pending deployment did not abort the plan"
+    fi
+
+    if ! grep -q 'ABORT: a pending deployment (44.20260903)' <<< "$out"; then
+        fail_self_test "pending abort message wrong: $(tail -n1 <<< "$out")"
+    fi
+}
+
+# Known-bad 2 and 3: no signing scope in the booted policy, then a local
+# policy.json shadowing the image's.
+self_test_plan_refuses_missing_scope() {
+    local good=$1
+    local fixture=$2
+    local unsigned_rebase="rpm-ostree rebase $UNSIGNED/bazzite-mx:stable"
+    local local_copy_abort='ABORT: /etc/containers carries a local copy'
+    local out
+
+    local_copy_abort="$local_copy_abort (M    containers/policy.json"
+    local_copy_abort="$local_copy_abort M    containers/registries.d/matrixdj96.yaml)"
+    mkdir -p "$fixture"
+    cp -a "$good/." "$fixture/"
+    cat > "$fixture/etc/containers/policy.json" << 'POLICY'
+{"default": [{"type": "reject"}],
+ "transports": {"docker": {"ghcr.io/ublue-os": [{"type": "sigstoreSigned"}]}}}
+POLICY
+
+    if out=$(FIXTURE=$fixture TAG=stable cmd_plan 2>&1); then
+        fail_self_test "a missing policy scope did not abort the plan"
+    fi
+
+    if ! grep -qF "$unsigned_rebase" <<< "$out"; then
+        fail_self_test "the unsigned-rebase instruction is missing: $out"
+    fi
+
+    printf 'M    containers/policy.json\nM    containers/registries.d/matrixdj96.yaml\n' \
+        > "$fixture/cmd/config-diff"
+
+    if out=$(FIXTURE=$fixture TAG=stable cmd_plan 2>&1); then
+        fail_self_test "a local policy.json did not abort the plan"
+    fi
+
+    if ! grep -qF "$local_copy_abort" <<< "$out"; then
+        fail_self_test "local-copy abort message wrong: $(tail -n1 <<< "$out")"
+    fi
+
+    # Known-bad: two hits printed over two lines, the second unindented.
+    if ! grep -q '^  local policy/registries.d *M    containers/policy.json' <<< "$out" \
+        || ! grep -q 'policy.json M    containers/registries.d/matrixdj96.yaml$' <<< "$out"; then
+        fail_self_test "the summary does not join the config hits:" \
+            "$(grep 'local policy' <<< "$out" | head -n1)"
+    fi
+}
+
+# Already migrated: steps 3 and 5 skipped, residue reported (an ntfsplus
+# file, a karg, a modules-load file naming msi-ec).
+self_test_plan_on_migrated_host() {
+    local good=$1
+    local fixture=$2
+    local residue_step='6b. remove residue: /etc/modprobe.d/ntfsplus.conf'
+    local out
+
+    residue_step="$residue_step /etc/modules-load.d/msi-ec.conf module_blacklist=ntfsplus"
+    mkdir -p "$fixture"
+    cp -a "$good/." "$fixture/"
+    printf 'blacklist ntfsplus\n' > "$fixture/etc/modprobe.d/ntfsplus.conf"
+    printf 'msi-ec\n' > "$fixture/etc/modules-load.d/msi-ec.conf"
+    printf 'root=UUID=x rw module_blacklist=ntfsplus\n' > "$fixture/cmd/kargs"
+    sed 's/ ntfs / ntfs3 /' "$good/etc/fstab" > "$fixture/etc/fstab"
+    self_test_migrated_status "$fixture/cmd/rpm-ostree-status.json"
+
+    if ! out=$(FIXTURE=$fixture TAG=stable cmd_plan); then
+        fail_self_test "plan failed on the migrated fixture: $out"
+    fi
+
+    if ! grep -q '3. (nothing layered: skipped)' <<< "$out" \
+        || ! grep -q '5. (origin already' <<< "$out" \
+        || ! grep -qF "$residue_step" <<< "$out"; then
+        echo "self-test: the migrated plan does not skip or does not report the residue:"
+        echo "$out"
+        exit 1
+    fi
+}
+
+# Known-bad 4: the EXIT trap runs after cmd_apply has returned, so the flag
+# it reads lives at script scope, set to 0, and restore_timer survives there.
+# A start that fails is an `ERROR:` line and exit 1 (known-bad: silent, exit 0).
+self_test_timer_restored_at_exit() {
+    local out
+
+    if [ "$(declare -p TIMER_WAS_ACTIVE 2> /dev/null)" != 'declare -- TIMER_WAS_ACTIVE="0"' ]; then
+        fail_self_test "TIMER_WAS_ACTIVE is not a script-level variable set to 0:" \
+            "$(declare -p TIMER_WAS_ACTIVE 2>&1)"
+    fi
+
+    if ! out=$(
+        systemctl() { echo "stub: systemctl $*"; }
+        export -f systemctl restore_timer
+        TIMER_WAS_ACTIVE=1 bash -euo pipefail -c 'trap restore_timer EXIT; :' 2>&1
+    ); then
+        fail_self_test "restore_timer died at EXIT: $out"
+    fi
+
+    if ! grep -q 'stub: systemctl start uupd.timer' <<< "$out" \
+        || ! grep -q 'uupd.timer started again' <<< "$out"; then
+        fail_self_test "restore_timer did not restart the timer at EXIT: $out"
+    fi
+
+    if out=$(
+        systemctl() {
+            echo "stub: systemctl $* refused" >&2
+            return 1
+        }
+        export -f systemctl restore_timer
+        TIMER_WAS_ACTIVE=1 bash -euo pipefail -c 'trap restore_timer EXIT; :' 2>&1
+    ); then
+        fail_self_test "restore_timer exited 0 with the timer not started: $out"
+    fi
+
+    if ! grep -q '^ERROR: uupd.timer not started again' <<< "$out"; then
+        fail_self_test "restore_timer did not report the timer not started: $out"
+    fi
+}
+
+# Known-bad 5: step 2 run through `$(…)` sets the flag in a subshell, where
+# the EXIT trap never sees it. The step is called plainly and sets BACKUP.
+# The guard is shown red on the shape it refuses before it reads the source.
+self_test_step_2_sets_the_flag_in_this_shell() {
+    local dir=$1
+    local script=${BASH_SOURCE[0]}
+    local captured_call='=[[:space:]]*"?\$\([[:space:]]*step_2_'
+    local sample
+
+    # Assembled in pieces so that no line of this file carries the shape.
+    sample='backup='
+    sample+='"$('
+    sample+='step_2_backup_pin_and_stop_timer)"'
+
+    if ! grep -qE "$captured_call" <<< "$sample"; then
+        fail_self_test "the step 2 guard no longer matches the shape it must refuse"
+    fi
+
+    if grep -qE "$captured_call" "$script"; then
+        fail_self_test "cmd_apply captures step 2 in a command substitution: the timer flag" \
+            "would be set in a subshell and the timer never restarted"
+    fi
+
+    if ! (
+        rpm-ostree() { echo '{}'; }
+        ostree() { :; }
+        cp() { :; }
+        systemctl() { [ "$*" = "is-active --quiet uupd.timer" ] || [ "$*" = "stop uupd.timer" ]; }
+        BACKUP_ROOT=$dir/backups
+        PINNED=false
+        step_2_backup_pin_and_stop_timer > /dev/null
+        [ "$TIMER_WAS_ACTIVE" -eq 1 ] && [ -d "$BACKUP" ]
+    ); then
+        fail_self_test "step 2 did not set TIMER_WAS_ACTIVE and BACKUP in the calling shell"
+    fi
+}
+
+# Known-bad: a second account owns the backup root before the first apply.
+# Its parent /var/tmp is 1777 in the image, so the account can plant the root
+# first.
+self_test_backup_root_taken_back() {
+    local dir=$1
+    local backup
+
+    mkdir -p "$dir/planted"
+    chown 1000:1000 "$dir/planted"
+    chmod 0755 "$dir/planted"
+
+    if ! backup=$(BACKUP_ROOT=$dir/planted new_backup_directory); then
+        fail_self_test "new_backup_directory refused a planted root instead of taking it back"
+    fi
+
+    if [ "$(stat -c '%a %u %g' "$dir/planted")" != "700 0 0" ]; then
+        fail_self_test "a planted backup root kept its owner or its mode:" \
+            "$(stat -c '%a %u %g' "$dir/planted")"
+    fi
+
+    if [ ! -d "$backup" ]; then
+        fail_self_test "no timestamped directory under the backup root taken back"
+    fi
+}
+
+# Known-bad: apply started while an update runs stops before it reads the host.
+# Without the gate the stubbed detect_host_state ends the run there.
+self_test_apply_refuses_a_running_update() {
+    local out
+
+    if out=$(
+        require_root() { :; }
+        systemctl() { echo activating; }
+        detect_host_state() {
+            echo "apply went past the update gate"
+            exit 0
+        }
+        cmd_apply 2>&1
+    ); then
+        fail_self_test "apply ran with uupd.service activating: $out"
+    fi
+
+    if ! grep -q '^ABORT: an update is running' <<< "$out"; then
+        fail_self_test "apply did not refuse a running update: $(tail -n1 <<< "$out")"
+    fi
+}
+
+# Known-bad: the summary printed a point with a space as fstab writes it,
+# `\040`, while verify-host prints it as libmount reads it.
+self_test_plan_prints_points_unescaped() {
+    local good=$1
+    local fixture=$2
+    local out
+
+    mkdir -p "$fixture"
+    cp -a "$good/." "$fixture/"
+    printf 'UUID=9999 /mnt/sp\\040ace ntfs defaults,nofail 0 0\n' >> "$fixture/etc/fstab"
+
+    if ! out=$(FIXTURE=$fixture TAG=stable cmd_plan); then
+        fail_self_test "plan failed on the fixture with a spaced point: $(tail -n1 <<< "$out")"
+    fi
+
+    if ! grep -qE '^  fstab rows on type ntfs +.* /mnt/sp ace$' <<< "$out"; then
+        fail_self_test "plan prints a spaced point escaped: $(grep 'fstab rows on type' <<< "$out")"
+    fi
+}
+
+# Known-bad: the write path took a rewritten table that adds a findmnt
+# --verify error, or one findmnt gives no verdict on. Each refusal exits
+# before /etc/fstab is touched; the substitution keeps the exit in a subshell.
+self_test_write_refuses() {
+    local dir=$1 out
+
+    mkdir -p "$dir/verify-stub"
+    printf '%s\n' '#!/usr/bin/env bash' \
+        'if [ "${*: -1}" != /etc/fstab ]; then printf "/mnt/new\n   [E] stub\n"; fi' \
+        'echo "0 parse errors, 1 error, 0 warnings" >&2' > "$dir/verify-stub/findmnt"
+    chmod +x "$dir/verify-stub/findmnt"
+    printf 'UUID=1 /mnt/new ntfs3 defaults 0 0\n' > "$dir/refused"
+
+    if out=$(PATH=$dir/verify-stub:$PATH write_rewritten_fstab "$dir/refused" "$dir" 2>&1) \
+        || ! grep -q '^ERROR: the rewritten fstab adds findmnt --verify error' <<< "$out"; then
+        fail_self_test "the write path passed a table that adds an error: $out"
+    fi
+
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/verify-stub/findmnt"
+    printf 'UUID=1 /mnt/new ntfs3 defaults 0 0\n' > "$dir/refused"
+
+    if out=$(PATH=$dir/verify-stub:$PATH write_rewritten_fstab "$dir/refused" "$dir" 2>&1) \
+        || ! grep -q '^ERROR: findmnt --verify gave no verdict' <<< "$out"; then
+        fail_self_test "the write path passed a table findmnt gave no verdict on: $out"
+    fi
+}
+
+# Known-bad: a step not confirmed ran anyway. Without a terminal nothing is
+# confirmed: step 0 skips and steps 3, 4 and 5 abort, none reaching cp or
+# rpm-ostree.
+self_test_unconfirmed_steps_change_nothing() {
+    local dir=$1
+    local step out
+
+    for step in step_0_restore_containers_config step_3_uninstall_layered \
+        step_4_disable_local_initramfs step_5_rebase; do
+        out=$(
+            cp() { echo "ran cp"; }
+            rpm-ostree() { echo "ran rpm-ostree"; }
+            BACKUP_ROOT=$dir/unconfirmed CONFIG_HITS=x LAYERED=x REGEN=true REF=x TARGET=y
+            "$step" < /dev/null 2>&1
+        ) || true
+
+        if grep -q '^ran ' <<< "$out"; then
+            fail_self_test "$step ran without a confirmation: $out"
+        fi
+    done
+}
+
+self_test() {
+    local dir
+
+    dir=$(mktemp -d)
+    # shellcheck disable=SC2064  # expand now: the local is gone at EXIT
+    trap "rm -rf '$dir'" EXIT
+
+    self_test_fstab "$dir/fstab"
+    self_test_fstab_rewrite "$dir"
+    self_test_fstab_verify_compares_errors "$dir"
+    self_test_write_refuses "$dir"
+
+    self_test_unmigrated_fixture "$dir/fx" "$dir/fstab"
+    self_test_plan_lists_the_steps "$dir/fx"
+    self_test_plan_refuses_pending "$dir/fx" "$dir/fx2"
+    self_test_plan_refuses_missing_scope "$dir/fx" "$dir/fx3"
+    self_test_plan_on_migrated_host "$dir/fx" "$dir/fx4"
+    self_test_plan_prints_points_unescaped "$dir/fx" "$dir/fx7"
+    self_test_timer_restored_at_exit
+    self_test_step_2_sets_the_flag_in_this_shell "$dir"
+    self_test_backup_root_taken_back "$dir"
+    self_test_apply_refuses_a_running_update
+    self_test_unconfirmed_steps_change_nothing "$dir"
+
+    echo "self-test ok: fstab rewrite exact and judged on the errors it adds, findmnt without" \
+        "a verdict refused, plan lists the steps, pending / missing scope / local policy refused," \
+        "residue reported, spaced points unescaped," \
+        "timer flag at script scope, set by step 2 in this shell, restored at EXIT or reported," \
+        "a planted backup root taken back, apply refused while an update runs," \
+        "steps not confirmed change nothing"
+}
+
+# --- main ---------------------------------------------------------------------
+
+main() {
+    local command=${1:-}
+
+    TAG=${2:-stable}
+
+    case "$command" in
+        plan)
+            cmd_plan
+            ;;
+        apply)
+            cmd_apply
+            ;;
+        --self-test)
+            self_test
+            ;;
+        *)
+            exit_with_error "unknown command '$command' (usage: bazzite-mx-migrate plan|apply" \
+                "[TAG] | --self-test)"
+            ;;
+    esac
+}
+
+main "$@"

@@ -18,11 +18,13 @@ What the image changes over Bazzite, and why, is [`docs/divergences.md`](docs/di
 
 - Hardware: `msi-ec` and `acpi_ec` for MSI laptops, plus MControlCenter (`ujust setup-msi`).
 - Containers and VMs: Docker CE, libvirt, QEMU/KVM, swtpm (`ujust setup-virtualization`).
-- Development: VS Code, GitKraken, `gh`, `glab`, ShellCheck, shfmt, mise.
+- Development: VS Code, GitKraken, `gh`, `glab`, ShellCheck, shfmt, mise (`ujust setup-dev`).
+- The JetBrains Toolbox installer (`ujust install-jetbrains-toolbox`).
 - Desktop: Firefox, gparted and 1Password as RPMs; Firefox and virt-manager Flatpaks denied.
 - Sunshine with the KMS capabilities its RPM carries (`ujust setup-sunshine`).
 - KDE defaults: clock seconds, a panel per screen, Ctrl+C to copy in Konsole.
 - Signing trust for `ghcr.io/matrixdj96/*`: a host pulls only what this repository signed.
+- Host recipes `ujust migrate` and `ujust verify-host`.
 
 ## Build it yourself
 
@@ -40,6 +42,7 @@ podman build --build-arg BASE_IMAGE="$base_image" --build-arg IMAGE_NAME="$image
 - [`docs/conventions.md`](docs/conventions.md): the rules for scripts, recipes, tests and CI.
 - [`docs/divergences.md`](docs/divergences.md): what changes over Bazzite, and why.
 - [`docs/gotchas.md`](docs/gotchas.md): surprises found here, each with how it was found.
+- [`docs/migration.md`](docs/migration.md): bringing a host onto the image, re-checking one.
 - [`docs/workflow.md`](docs/workflow.md): branches and the sandbox.
 
 ## License
