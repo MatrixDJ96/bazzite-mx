@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(git ls-files:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh api:*)",
+      "Bash(gh release list:*)",
+      "Bash(podman images:*)",
+      "Bash(podman build:*)",
+      "Bash(podman image inspect:*)",
+      "Bash(skopeo inspect:*)",
+      "Bash(skopeo list-tags:*)",
+      "Bash(shellcheck:*)",
+      "Bash(shfmt:*)",
+      "Bash(./.github/scripts/resolve-base.sh:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git commit --amend:*)",
+      "Bash(git commit --no-verify:*)",
+      "Bash(git commit -n:*)",
+      "Bash(git push --no-verify:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/lint-edit.sh" }
+        ]
+      }
+    ]
+  }
+}
