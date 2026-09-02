@@ -56,40 +56,48 @@ else
     echo "FAIL: iptable_nat missing from modules-load.d or from kernel $kver"
 fi
 
-# The docker group: created by the %post, relocated out of /etc/group.
+# Created by the %post, relocated out of /etc/group by clean-stage.
 if grep -q '^docker:' /usr/lib/group && ! grep -q '^docker:' /etc/group; then
     echo "OK: docker group in /usr/lib/group, not in /etc/group"
 else
     echo "FAIL: docker group: /usr/lib/group=$(grep '^docker:' /usr/lib/group || echo none) /etc/group=$(grep '^docker:' /etc/group || echo none)"
 fi
 
-# The hook on a fixture: a wheel user gets docker; a group missing from both
-# files is reported and the hook exits 1.
+# The fixture's /usr/lib/group is the image's, so the test follows the hook's
+# own GROUPS_TARGET instead of repeating the list.
 HOOK=/usr/share/ublue-os/system-setup.hooks.d/10-bazzite-mx-groups.sh
 fx=$(mktemp -d)
 mkdir -p "$fx/etc" "$fx/usr/lib"
 printf 'root:x:0:0:root:/root:/bin/bash\nalice:x:1000:1000::/home/alice:/bin/bash\nbob:x:1001:1001::/home/bob:/bin/bash\n' > "$fx/etc/passwd"
 printf 'root:x:0:\nwheel:x:10:alice\nalice:x:1000:\nbob:x:1001:\n' > "$fx/etc/group"
-grep '^docker:' /usr/lib/group > "$fx/usr/lib/group"
-if out=$(BAZZITE_MX_GROUPS_PREFIX=$fx bash "$HOOK" 2>&1) \
-    && grep -q '^docker:[^:]*:[^:]*:alice$' "$fx/etc/group" \
-    && ! grep -q '^docker:.*bob' "$fx/etc/group"; then
-    echo "OK: hook adds the wheel user to docker on the fixture (bob, not wheel, left out)"
+cp /usr/lib/group "$fx/usr/lib/group"
+check_members() {
+    # every group the hook summarised has alice and not bob
+    local groups g
+    groups=$(sed -n 's/^bazzite-mx-groups: [0-9]* wheel user(s) in //p' <<< "$1")
+    [ -n "$groups" ] || return 1
+    for g in $groups; do
+        grep -q "^${g}:[^:]*:[^:]*:alice$" "$fx/etc/group" || return 1
+    done
+    ! grep -q '^docker:.*bob' "$fx/etc/group"
+}
+if out=$(BAZZITE_MX_GROUPS_PREFIX=$fx bash "$HOOK" 2>&1) && check_members "$out"; then
+    echo "OK: hook adds the wheel user to $(sed -n 's/^bazzite-mx-groups: [0-9]* wheel user(s) in //p' <<< "$out")"
 else
-    echo "FAIL: hook on fixture: $out; group file: $(grep '^docker:' "$fx/etc/group" || echo none)"
+    echo "FAIL: hook on fixture: $out; group file: $(grep -E '^(docker|libvirt):' "$fx/etc/group" || echo none)"
 fi
-if out=$(BAZZITE_MX_GROUPS_PREFIX=$fx bash "$HOOK" 2>&1) && grep -q '^docker:[^:]*:[^:]*:alice$' "$fx/etc/group"; then
+if out=$(BAZZITE_MX_GROUPS_PREFIX=$fx bash "$HOOK" 2>&1) && check_members "$out" && ! grep -q 'adding' <<< "$out"; then
     echo "OK: hook is idempotent on a second run"
 else
-    echo "FAIL: second hook run: $out; group file: $(grep '^docker:' "$fx/etc/group" || echo none)"
+    echo "FAIL: second hook run: $out"
 fi
 : > "$fx/usr/lib/group"
-sed -i '/^docker:/d' "$fx/etc/group"
+sed -i '/^\(docker\|libvirt\):/d' "$fx/etc/group"
 if out=$(BAZZITE_MX_GROUPS_PREFIX=$fx bash "$HOOK" 2>&1); then
-    echo "FAIL: hook exited 0 with the docker group missing from both files"
+    echo "FAIL: hook exited 0 with the target groups missing from both files"
 elif grep -q 'ERROR: group(s) docker' <<< "$out"; then
-    echo "OK: hook reports and fails on a missing group"
+    echo "OK: hook reports and fails on missing groups"
 else
-    echo "FAIL: hook failed without naming the missing group: $out"
+    echo "FAIL: hook failed without naming the missing groups: $out"
 fi
 rm -rf "$fx"
