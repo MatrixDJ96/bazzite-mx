@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test of 80-fix-opt.sh: every tmpfiles line pointing at a directory
-# that is there, applied on a fixture root, and
+# that is there with its user.component xattr, applied on a fixture root, and
 # 1Password's binaries with the modes and groups its %post set. That /var/opt
 # is gone is tests/95-clean-stage.sh's subject, which fails on the directory
 # existing at all.
@@ -33,6 +33,13 @@ check_tmpfiles_lines() {
             echo "OK: $target is there for $link"
         else
             echo "FAIL: $CONF: $link -> $target, target missing"
+        fi
+
+        if [ "$(getfattr --only-values -n user.component "$target" 2> /dev/null)" \
+            = "$(basename "$target")" ]; then
+            echo "OK: $target has its own layer (user.component)"
+        else
+            echo "FAIL: $target lacks user.component=$(basename "$target")"
         fi
     done <<< "$rules"
 }
