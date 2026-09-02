@@ -1,0 +1,54 @@
+# The weekly release: a cron on main that dispatches release.yml with the reason
+# `weekly` while the repository variable PROMOTE_STABLE is true, unless
+# watch-upstream.sh weekly holds it: a release run is open, or a release already
+# carries today's UTC date.
+name: Trigger Release
+
+on:
+  schedule:
+    # Sunday 03:20 UTC
+    - cron: "20 3 * * 0"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: bazzite-mx-trigger-release
+  cancel-in-progress: false
+
+# Sets init.defaultBranch, so actions/checkout's `git init` prints no hint.
+env:
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: init.defaultBranch
+  GIT_CONFIG_VALUE_0: main
+
+jobs:
+  trigger:
+    name: Trigger
+    if: vars.PROMOTE_STABLE == 'true'
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Decide on Dispatch
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./.github/scripts/watch-upstream.sh weekly
+
+      - name: Dispatch Release
+        if: steps.decide.outputs.dispatch == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f reason=weekly -f promote_stable=true
+          echo "dispatched release.yml: reason=weekly promote_stable=true"
