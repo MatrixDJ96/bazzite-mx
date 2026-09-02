@@ -25,10 +25,12 @@ staged modules are bound at `/kmods`, a root-level mount point buildah removes a
 why that path and why `/run` is a tmpfs is on the `RUN` itself in the `Containerfile`.
 
 `BASE_IMAGE` and `IMAGE_NAME` are the two variables between the three flavours, both mapped
-from the flavour by `resolve-base.sh`. CI and `/preflight` resolve the base to a digest with
-`.github/scripts/resolve-base.sh`, which also reads the base's kernel from its `ostree.linux`
-label. `VERSION` is the version the image calls itself, empty unless the build passes one:
-`10-image-info.sh` then applies the `<base version>.dev` rule.
+from the flavour by `resolve-base.sh`, and `VERSION` is the version the image calls itself: the
+release tag, or `<base version>.dev` for a sandbox or pre-flight build. CI and `/preflight`
+resolve the base to a digest with `.github/scripts/resolve-base.sh`, which also reads the
+base's kernel from its `ostree.linux` label. They take `VERSION` and every `--label` from
+`.github/scripts/image-labels.sh`; `10-image-info.sh` repeats the `.dev` rule for a
+`podman build` by hand with no `VERSION`.
 
 ## .github/scripts/
 
@@ -38,6 +40,8 @@ Each script owns one artefact and ships a `--self-test`.
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `lib.sh`                                          | coordinates, `exit_with_error`/`print_error`, `emit`, `image_of`, `fail_self_test`; sourced by all but `check-form.sh` and `check-commits.sh`                                                                                                        |
 | `resolve-base.sh <flavour> \| --digests`          | the base's digest, version and kernel, and the image name; the three digests keyed by flavour                                                                                                                                                        |
+| `image-labels.sh <coords> <tag> <rev>`            | the labels file; the coordinates as `resolve-base.sh` wrote them                                                                                                                                                                                     |
+| `check-image.sh <image> <labels>`                 | the probe of a built image: labels, `/run` and `/tmp`, lint, packages, modules, the ntfsplus opt-in, `image-info.json`                                                                                                                               |
 | `check-commits.sh [<rev>]`                        | the commit-message rules (§ Commits of `conventions.md`) over every commit reachable from `<rev>`                                                                                                                                                    |
 | `check-form.sh <file>...`                         | the form rules (§ Bash → Form of `conventions.md`): line width, the banned control-flow shapes and the four failure shapes (`\| grep -q`, `\|\| echo` fallback, a pipeline assigned without `\|\| true`, a `$( )` inside `$(( ))`), on logical lines |
 
@@ -74,7 +78,7 @@ Each script owns one artefact and ships a `--self-test`.
 | `70-justfile.sh`          | the ujust recipes: drift guard, overrides, import, format check                                                                                  |
 | `80-fix-opt.sh`           | `/var/opt/<name>` moves to `/usr/lib/opt/<name>` with a tmpfiles line                                                                            |
 | `90-validate-repos.sh`    | the repository gate, run after the last install                                                                                                  |
-| `95-clean-stage.sh`       | the tree bootc lint expects                                                                                                                      |
+| `95-clean-stage.sh`       | the tree bootc lint and the rechunk expect                                                                                                       |
 | `tests/run.sh`            | the test runner and the pairing guard                                                                                                            |
 | `tests/lib.sh`            | the checks the tests share, one `OK:`/`FAIL:` line each                                                                                          |
 | `tests/NN-<feature>.sh`   | one smoke test per build script, same stem                                                                                                       |

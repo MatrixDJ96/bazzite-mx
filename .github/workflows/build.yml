@@ -1,6 +1,8 @@
 # The sandbox: on a push to main or develop, a pull request or a dispatch,
 # the lint job, then the three flavours through reusable-build.yml. Nothing
-# here reaches GHCR (docs/workflow.md § Branches and profiles).
+# here reaches GHCR; main and a dispatch with rechunk add the chunked image,
+# its probe and the signing-key proof
+# (docs/workflow.md § Branches and profiles).
 name: Build
 
 on:
@@ -14,6 +16,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      rechunk:
+        description: "Run the main profile (chunked image, probe, signing-key proof) on this ref"
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -130,3 +137,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/reusable-build.yml
+    with:
+      rechunk: ${{ github.ref == 'refs/heads/main' || inputs.rechunk == true }}
+    secrets:
+      SIGNING_SECRET: ${{ secrets.SIGNING_SECRET }}

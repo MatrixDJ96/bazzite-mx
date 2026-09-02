@@ -6,20 +6,20 @@ rules themselves live in [`conventions.md`](conventions.md).
 
 Contents, in the order of the entries: torn writeback on 6.17-azure · just duplicate recipe ·
 ujust.sh readonly names · kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set ·
-command | grep -q · modinfo /lib/modules path · modprobe -n -v on a loaded module ·
-stub-resolv.conf left in the image · remove-unwanted-software v9 · force-push without a push
-run · inactive package request · 1Password BrowserSupport gid · local RPM blocks the rebase ·
-EXIT trap and local · private install marker · mise dotnet SDK · kbuild fragment compiles
-nothing · mount -t ntfs helper · module panics at first use · NTFS drivers' modes and case ·
-udisks defaults outside allow · pre-flight without the changed script · NTFSPLUS EINVAL · skel
-and existing accounts · KXmlGui write-back · flags in a command substitution · findmnt --verify
-on nofail · fstab row ending at its type · fstab row with leading whitespace · mount point with
-a space · status empty list · verify-host and unplugged nofail · findmnt -t exit status ·
-automount over autofs · root's flatpak list · image-info.json vs OCI label day · FAIL branch
-before its verdict · sunshine --version home · Docker FORWARD policy and libvirt · # inside an
-fstab field · 2> /dev/null on a failed redirection · recipe description line · vendor build-log
-warnings · no BTF from kernel-devel · arithmetic error escapes set -e · scriptlet rewrote a
-.pyc.
+command | grep -q · modinfo /lib/modules path · modprobe -n -v on a loaded module · podman
+build labels · stub-resolv.conf left in the image · remove-unwanted-software v9 · skopeo and
+containers-storage · force-push without a push run · inactive package request · 1Password
+BrowserSupport gid · local RPM blocks the rebase · EXIT trap and local · private install marker
+· mise dotnet SDK · kbuild fragment compiles nothing · mount -t ntfs helper · module panics at
+first use · NTFS drivers' modes and case · udisks defaults outside allow · pre-flight without
+the changed script · NTFSPLUS EINVAL · skel and existing accounts · KXmlGui write-back · flags
+in a command substitution · findmnt --verify on nofail · fstab row ending at its type · fstab
+row with leading whitespace · mount point with a space · status empty list · verify-host and
+unplugged nofail · findmnt -t exit status · automount over autofs · root's flatpak list ·
+image-info.json vs OCI label day · FAIL branch before its verdict · sunshine --version home ·
+Docker FORWARD policy and libvirt · # inside an fstab field · 2> /dev/null on a failed
+redirection · recipe description line · vendor build-log warnings · no BTF from kernel-devel ·
+arithmetic error escapes set -e · scriptlet rewrote a .pyc.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -130,6 +130,13 @@ not reproduce in any cell of the table. The same probe once read the blacklist t
 `! modprobe -c | grep -q`, the SIGPIPE shape of § `command | grep -q` under `pipefail` fails on
 a match above on a 2 MB config, so its negation was never false: the config is captured first.
 
+## `podman build` keeps the base's labels
+
+Without `--label`, the new image carries every label of its `FROM`: a pre-flight image called
+itself `Bazzite`, vendor `Universal Blue`, revision the base's commit (measured 2026-09-02).
+`image-labels.sh` restates every label on every build, and the same file is passed again to
+`build-chunked-oci`, which inherits no config either.
+
 ## A networked RUN leaves `/run/systemd/resolve/stub-resolv.conf` in the image
 
 buildah gives a RUN the host's resolver by binding a file at
@@ -138,16 +145,25 @@ The directories and the placeholder file then stay in the layer: 3 entries under
 one networked RUN on the base, none when the RUN mounts a tmpfs on `/run` (measured
 2026-09-02). Every `RUN` of the image stage therefore mounts a tmpfs on `/run`; the build and
 the tests mount one on `/tmp` too. `bootc container lint` cannot see them from inside a
-container, where podman fills `/run` itself.
+container, where podman fills `/run` itself, so `check-image.sh` reads both directories on the
+mounted image instead.
 
 ## `ublue-os/remove-unwanted-software` v9 fails on `ubuntu-26.04`
 
 Its apt step runs `apt-get remove -y powershell --fix-missing` and the 26.04 runner image has
 no such package: `E: Unable to locate package powershell`, exit 100, the job dead before the
 build (measured 2026-09-02). The `df` the action prints first showed 92 GB free of 145 GB on
-that runner, so the image build fits without freeing anything. The action is not used.
-image-template pins commit `695eb75b` of the action, the `v10` merge without the apt step,
-which has no release tag.
+that runner, so the image build, the compose archive and the chunked pull fit without freeing
+anything. The action is not used. image-template pins commit `695eb75b` of the action, the
+`v10` merge without the apt step, which has no release tag.
+
+## `skopeo` cannot read `containers-storage:` in a runner job
+
+`skopeo inspect containers-storage:<image>` in a rootless job on `ubuntu-26.04` dies with
+`Error during unshare(...): Operation not permitted` (measured 2026-09-02): skopeo needs a user
+namespace of its own to open podman's rootless storage and the runner denies it to that binary,
+while podman itself works. What a step needs from a local image is read with
+`podman image inspect`; skopeo is used on `docker://` references only.
 
 ## A force-push of a rewritten history may create no `push` run
 
@@ -461,10 +477,12 @@ never announced. `src_flatpaks` lists `--system` as root and `--user` through
 
 `ghcr.io/ublue-os/bazzite@sha256:437920ba…` carries
 `org.opencontainers.image.version=44.20260908` and ships an `image-info.json` whose `version`
-is `44.20260907`. `resolve-base.sh` reads the label, while `10-image-info.sh` reads the file,
-so `base-version` and the `(Bazzite …)` of `version-pretty` follow the file: a `.dev` build
-without `VERSION` would be `44.20260907.dev`. Measured 2026-09-12 on the pre-flight image. Both
-numbers are the base's own; the image reports each from its source and neither is rewritten.
+is `44.20260907`. `resolve-base.sh` reads the label, so the `.dev` version of a sandbox build
+follows it, while `10-image-info.sh` reads the file, so `base-version` and the `(Bazzite …)` of
+`version-pretty` follow the file: an image built from that base is
+`44.20260908.dev (Bazzite 44.20260907)`, and a `.dev` build without `VERSION` would be
+`44.20260907.dev`. Measured 2026-09-12 on the pre-flight image. Both numbers are the base's
+own; the image reports each from its source and neither is rewritten.
 
 ## A FAIL branch died before its verdict
 

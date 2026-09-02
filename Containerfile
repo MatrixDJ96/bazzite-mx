@@ -10,8 +10,9 @@ ARG BASE_IMAGE=ghcr.io/ublue-os/bazzite:stable
 ARG IMAGE_NAME=bazzite-mx
 ARG IMAGE_VENDOR=matrixdj96
 
-# The version the image calls itself, empty unless the build passes one:
-# 10-image-info.sh then applies the "<base version>.dev" rule.
+# The version the image calls itself: the release tag, or "<base version>.dev"
+# for a sandbox or pre-flight build, both from image-labels.sh. Empty only in a
+# `podman build` by hand, where 10-image-info.sh applies the same .dev rule.
 ARG VERSION=
 
 # --- ctx: the tree the other stages mount -------------------------------------

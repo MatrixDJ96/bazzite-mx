@@ -14,10 +14,13 @@ for s in ./.github/scripts/*.sh; do "$s" --self-test; done  # each CI script's g
 shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's ShellCheck
 ./.github/scripts/check-form.sh <file>.sh                   # banned shapes, 100 columns
 ./.github/scripts/check-commits.sh HEAD                     # every commit message on the ref
+# the main profile (chunked image, its probe, the signing-key proof) on a branch
+gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref <branch> -f rechunk=true
 ```
 
 - The commands need bash, git, jq, shellcheck and node on the host, podman and
-  skopeo for the pre-flight, podman for the lint job's container (shfmt, yamllint, just);
+  skopeo for the pre-flight, podman for the lint job's container (shfmt, yamllint, just), and a
+  gh login (`gh auth login` or `GH_TOKEN`) for the dispatch;
   `.claude/hooks/lint-edit.sh` skips any linter it cannot find.
 - The `lint` job of `build.yml` runs the first five, `node --check` on the Plasma update
   scripts, and shfmt, yamllint and `just --fmt --check` in `quay.io/fedora/fedora:44`; the
@@ -34,6 +37,7 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 - `system_files/` — copied over `/`: vendored `.repo` files and keys, setup hooks, ujust
   recipes and their `usr/libexec/bazzite-mx-*` helpers.
 - `.github/scripts/` — one owner per CI artefact, each with a `--self-test`.
+- `site/` — `logo.svg`, the logo the image's labels point at.
 
 ## Conventions
 
@@ -75,7 +79,8 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 - A push goes to `develop` first, whose sandbox builds the three flavours and publishes
   nothing; a push to `main` and a repository setting take the owner's OK
   (`docs/workflow.md` § What takes the owner's OK).
-- `cosign.key` stays out of git (`.gitignore`); its public half is `cosign.pub`.
+- `cosign.key` stays out of git (`.gitignore`); CI signs with the `SIGNING_SECRET` secret,
+  whose public half must equal `cosign.pub`.
 
 ## Docs
 

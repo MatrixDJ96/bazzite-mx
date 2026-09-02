@@ -4,10 +4,11 @@
 #
 # Usage: run by build.sh; no arguments. Reads the build args IMAGE_NAME,
 #   IMAGE_VENDOR and VERSION from the environment (the Containerfile passes
-#   them); VERSION is empty unless the build passes one. base-version
+#   them); VERSION is empty only in a `podman build` by hand. base-version
 #   is what the base's image-info.json says, which can trail the base's OCI
-#   label by a day: docs/gotchas.md § The base's image-info.json and its OCI
-#   label can name different days.
+#   label (the source of a sandbox or pre-flight build's `<base version>.dev`)
+#   by a day: docs/gotchas.md § The base's image-info.json and its OCI label
+#   can name different days.
 # Writes: /usr/share/ublue-os/image-info.json, /usr/lib/os-release and
 #   /etc/xdg/kcm-about-distrorc.
 # Exit status: 0 done; the build stops on a `FAIL: …` line.
@@ -112,8 +113,8 @@ write_kde_about_page() {
 require_build_args
 base_version=$(base_version)
 
-# Without a release tag the .dev suffix keeps the image from being mistaken for
-# a release.
+# The rule image-labels.sh applies for CI and the pre-flight, repeated for a
+# build by hand: the .dev suffix keeps it from being mistaken for a release.
 version=${VERSION:-${base_version}.dev}
 
 write_image_info "$base_version" "$version"
