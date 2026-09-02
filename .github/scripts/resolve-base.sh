@@ -1,48 +1,72 @@
 #!/usr/bin/env bash
-# Resolve a base image to the coordinates every build consumes: the digest the
-# build pins to, the version the release title quotes, the kernel the akmods
-# carrier is picked by, and the image name the flavour maps to. One owner for the schema, used by CI and the pre-flight.
+# The one owner of the base coordinates a build consumes: the base's digest,
+# version and kernel, and the image name the flavour maps to. Every value is
+# required, so an empty label fails the build instead of defaulting.
 #
-#   resolve-base.sh <flavour>            flavour: bazzite | bazzite-nvidia-open
-#   resolve-base.sh --from-json <file> <flavour>   parse a saved `skopeo inspect`
-#   resolve-base.sh --self-test          prove the fail-closed paths
-#
-# Prints KEY=value lines (shell-sourceable) and appends them to $GITHUB_OUTPUT
-# when set. Every value is required: an empty label is a failure, never a
-# default (verification.md: blank-where-value-expected is failure).
+# Usage: resolve-base.sh <flavour>
+#          <flavour>  bazzite, bazzite-nvidia-open or bazzite-nvidia; its
+#                     :stable manifest is read with skopeo
+#        resolve-base.sh --digests
+#          base_digest_<flavour> for the three flavours, read once for the
+#          release run so the gate can hold the build jobs to that reading
+#        resolve-base.sh --from-json <file> <flavour>
+#          the same coordinates from a saved `skopeo inspect`
+#        resolve-base.sh --self-test
+# Output: KEY=value lines on stdout, and in GITHUB_OUTPUT when a workflow set
+#   it: image_name, base_name, base_image (name@digest), base_digest,
+#   base_version, kernel_version, fedora_version; for --digests one
+#   base_digest_<flavour> line per flavour.
+# Exit status: 0 coordinates written; 1 when the flavour is unknown or the
+#   manifest lacks the digest, the ostree.linux label or the version label,
+#   the reason on stderr as `resolve-base: …`.
 set -euo pipefail
 
 # shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
-TAG=stable
+BASE_TAG=stable
 
+# --- the coordinates ----------------------------------------------------------
+
+# inspect_remote <flavour>: the `skopeo inspect` of the flavour's base.
 inspect_remote() {
-    skopeo inspect --retry-times 3 --no-tags "docker://${BASE_REGISTRY}/$1:${TAG}"
+    local flavour=$1
+
+    skopeo inspect --retry-times 3 --no-tags "docker://${BASE_REGISTRY}/${flavour}:${BASE_TAG}"
 }
 
+# resolve <flavour> <inspect json>: the seven KEY=value lines on stdout;
+# status 1 with the reason when the flavour is unknown or a value is missing
+# or malformed. The Fedora release is the fcNN of the kernel.
 resolve() {
-    local flavour=$1 json=$2
-    local digest kernel version fedora
-    local image_name
-    image_name=$(image_of "$flavour") || return 1
-    digest=$(jq -r '.Digest // empty' <<< "$json")
-    kernel=$(jq -r '.Labels["ostree.linux"] // empty' <<< "$json")
-    version=$(jq -r '.Labels["org.opencontainers.image.version"] // empty' <<< "$json")
-    [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
-        err "no digest for $flavour: '$digest'"
+    local flavour=$1
+    local manifest=$2
+    local image_name digest kernel version fedora
+
+    if ! image_name=$(image_of "$flavour"); then
         return 1
-    }
-    [[ "$kernel" =~ ^[0-9]+\.[0-9]+.*\.fc[0-9]+\.x86_64$ ]] || {
-        err "no ostree.linux label for $flavour: '$kernel'"
+    fi
+
+    digest=$(jq -r '.Digest // empty' <<< "$manifest")
+    kernel=$(jq -r '.Labels["ostree.linux"] // empty' <<< "$manifest")
+    version=$(jq -r '.Labels["org.opencontainers.image.version"] // empty' <<< "$manifest")
+
+    if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+        print_error "no digest for $flavour: '$digest'"
         return 1
-    }
-    [ -n "$version" ] || {
-        err "no org.opencontainers.image.version label for $flavour"
+    fi
+    if [[ ! "$kernel" =~ ^[0-9]+\.[0-9]+.*\.fc[0-9]+\.x86_64$ ]]; then
+        print_error "no ostree.linux label for $flavour: '$kernel'"
         return 1
-    }
+    fi
+    if [ -z "$version" ]; then
+        print_error "no org.opencontainers.image.version label for $flavour"
+        return 1
+    fi
+
     fedora=${kernel##*.fc}
     fedora=${fedora%%.*}
+
     printf '%s\n' \
         "image_name=${image_name}" \
         "base_name=${BASE_REGISTRY}/${flavour}" \
