@@ -33,11 +33,6 @@ check_vendored_files() {
     local file name failed=0
 
     for file in "$VENDORED_DIR"/*.repo; do
-        # No vendored .repo leaves the glob literal.
-        if [ ! -e "$file" ]; then
-            continue
-        fi
-
         name=$(basename "$file")
 
         if [ ! -f "$REPOS_DIR/$name" ]; then

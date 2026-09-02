@@ -31,7 +31,7 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 - `build_files/` — `build.sh` runs `NN-<feature>.sh` in version order; `lib/` the sourced
   libraries; `tests/` one smoke test per script plus `run.sh`. Each file's role:
   `docs/architecture.md`.
-- `system_files/` — copied over `/`.
+- `system_files/` — copied over `/`: vendored `.repo` files and keys, setup hooks.
 - `.github/scripts/` — one owner per CI artefact, each with a `--self-test`.
 
 ## Conventions
@@ -46,7 +46,11 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 - A script that guards something ships a `--self-test` that feeds it known-bad input and
   requires the failure; what an assertion counts comes from an independent record, never from
   the thing under test (`docs/conventions.md` § Positive control).
-- A pin enters only against an observed problem, cited. The base digest is pinned on purpose.
+- Vendor RPMs stay unpinned; a pin enters only against an observed problem, cited. The base
+  digest and the vendor keys (`KEY_FPR` in `lib/gpg.sh`) are pinned on purpose.
+- A third-party package comes from a `.repo` vendored under `system_files/etc/yum.repos.d/`,
+  every section `enabled=0`, installed with `install_from_repo`: `90-validate-repos.sh` fails
+  the build on a repository left enabled or modified.
 - A commit message is `<type>(<scope>): <what>` within 72 columns with no trailing period and
   no trailer, or `check-commits.sh` fails the lint job; a body is optional, after a blank line,
   in natural lines, one per point, never hard-wrapped.
@@ -71,7 +75,7 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 ## Docs
 
 - `docs/architecture.md` — before adding a script: build flow, roles, build state, gates.
-- `docs/conventions.md` — before writing a script, test or workflow.
+- `docs/conventions.md` — before writing a script, boot hook, test or workflow.
 - `docs/divergences.md` — what the image changes over Bazzite and why, one entry per feature.
 - `docs/gotchas.md` — a failure that looks familiar, by heading.
 - `docs/workflow.md` — branches and the local lint run.
