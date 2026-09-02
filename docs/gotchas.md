@@ -6,12 +6,12 @@ rules themselves live in [`conventions.md`](conventions.md).
 
 Contents, in the order of the entries: torn writeback on 6.17-azure · just duplicate recipe ·
 ujust.sh readonly names · kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set ·
-command | grep -q · stub-resolv.conf left in the image · remove-unwanted-software v9 ·
-1Password BrowserSupport gid · pre-flight without the changed script · skel and existing
-accounts · KXmlGui write-back · image-info.json vs OCI label day · FAIL branch before its
-verdict · sunshine --version home · Docker FORWARD policy and libvirt · recipe description line
-· vendor build-log warnings · arithmetic error escapes set -e · scriptlet rewrote a .pyc ·
-sysusers m line on a base group.
+command | grep -q · modinfo /lib/modules path · stub-resolv.conf left in the image ·
+remove-unwanted-software v9 · 1Password BrowserSupport gid · pre-flight without the changed
+script · skel and existing accounts · KXmlGui write-back · image-info.json vs OCI label day ·
+FAIL branch before its verdict · sunshine --version home · Docker FORWARD policy and libvirt ·
+recipe description line · vendor build-log warnings · no BTF from kernel-devel · arithmetic
+error escapes set -e · scriptlet rewrote a .pyc · sysusers m line on a base group.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -80,6 +80,13 @@ SIGPIPE, the pipeline's status is 141 and `pipefail` reports a failure. Capture 
 variable, then grep the variable. Every `| grep -q` of the repo captures first and
 `check-form.sh` refuses the shape.
 
+## `modinfo -F filename` and `modprobe --show-depends` print `/lib/modules/...`
+
+The module tools print the legacy path even when the file lives under `/usr/lib/modules`
+(`/lib` being a symlink to `usr/lib`), so a literal string comparison against the staged path
+fails (measured 2026-09-02). `50-kmods.sh` compares `realpath` of the resolved module against
+`realpath` of the file it installed.
+
 ## A networked RUN leaves `/run/systemd/resolve/stub-resolv.conf` in the image
 
 buildah gives a RUN the host's resolver by binding a file at
@@ -121,10 +128,10 @@ after a first `-1` broke the browser integration, nekochigura refusing a gid und
 buildah keys a `RUN` layer on its command string and its parent layer; the content behind a
 `--mount=type=bind,from=ctx` is not hashed into it. After a change under `build_files/` or
 `system_files/`, a pre-flight whose base layers are cached reports `Using cache` on the
-build step and exits 0 in about three minutes with an image built from the old scripts.
-Measured 2026-09-04: the closed flavour's pre-flight after a new feature printed ten
-`Using cache` lines, while `--no-cache` produced the real build. CI is not affected, a fresh
-runner having no layer cache.
+kmod-builder and build steps and exits 0 in about three minutes with an image built from the
+old scripts. Measured 2026-09-04: the closed flavour's pre-flight after a new feature printed
+ten `Using cache` lines, while `--no-cache` produced the real build. CI is not affected, a
+fresh runner having no layer cache.
 
 ## A skel file reaches no account that already exists
 
@@ -210,10 +217,11 @@ bazzite, bazzite-dx, aurora and amyos).
 `just --list`, which `ujust` runs, shows one description per recipe and takes it from the last
 comment line above the recipe, not from the whole comment block. Measured 2026-09-12 with just
 1.57.0: a two-line comment lists as `foo # second line of the description`, the first line
-lost. So the description comment of `82-bazzite-sunshine.just` (113 columns) stays on one line:
-wrapping it to the 100 columns of `docs/conventions.md` § Form would silently cut what a user
-reads in `ujust`. `.just` files are outside the shell catalogue `check-form.sh` measures, so
-nothing enforces the limit there anyway.
+lost. So the description comments of `82-bazzite-sunshine.just` (113 columns) and
+`95-bazzite-mx.just` (102 columns) stay on one line: wrapping them to the 100 columns of
+`docs/conventions.md` § Form would silently cut what a user reads in `ujust`. `.just` files are
+outside the shell catalogue `check-form.sh` measures, so nothing enforces the limit there
+anyway.
 
 ## Two build-log warnings come from the vendors
 
@@ -245,6 +253,17 @@ alone prints both, `plugdev.conf` belonging to no package and colliding with `op
 of `openrazer`. The `Conflict` lines for group `'libvirt'` that name
 `/usr/lib/sysusers.d/bazzite-mx-groups.conf:4` are the `g libvirt -` of libvirt's scriptlets
 meeting the gid the image fixes first ([`divergences.md`](divergences.md) § Docker CE).
+
+## A module built against kernel-devel gets no BTF
+
+kbuild writes a module's BTF with pahole against `vmlinux` in the kernel build tree. The base's
+`kernel-devel` ships no `vmlinux` and no pahole, so every module printed
+`Skipping BTF generation … due to unavailability of vmlinux`, and on the OGC kernel
+`warning: pahole version differs from the one used to build the kernel`
+(`CONFIG_PAHOLE_VERSION=131`; Fedora 44 ships dwarves 1.30 and, in testing, 1.32; measured
+2026-09-23). `scripts/extract-vmlinux` recovers a `vmlinux` with its `.BTF` section from the
+kernel image, and pahole 1.31 built from its tag gives the modules `.BTF` and `.BTF.base`,
+which `strip --strip-debug` keeps.
 
 ## An arithmetic syntax error escapes `set -e`
 
