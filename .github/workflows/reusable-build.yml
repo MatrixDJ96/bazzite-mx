@@ -1,0 +1,51 @@
+# Reusable build of the three flavours, one job per flavour, called by
+# build.yml. No concurrency group here: a callee inherits the caller's context
+# and would collide with the caller's own group.
+name: Reusable Build
+
+on:
+  workflow_call:
+
+permissions: {}
+
+# Sets init.defaultBranch, so actions/checkout's `git init` prints no hint.
+env:
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: init.defaultBranch
+  GIT_CONFIG_VALUE_0: main
+
+jobs:
+  build:
+    name: ${{ matrix.flavour }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        flavour: [bazzite, bazzite-nvidia-open, bazzite-nvidia]
+    env:
+      FLAVOUR: ${{ matrix.flavour }}
+      IMAGE: localhost/bazzite-mx:${{ matrix.flavour }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve Base
+        id: base
+        run: |
+          set -euo pipefail
+          ./.github/scripts/resolve-base.sh "$FLAVOUR" | tee "$RUNNER_TEMP/base.env"
+
+      - name: Build Image
+        env:
+          BASE_IMAGE: ${{ steps.base.outputs.base_image }}
+        run: |
+          set -euo pipefail
+          podman build \
+            --build-arg BASE_IMAGE="$BASE_IMAGE" \
+            --tag "$IMAGE" \
+            .
