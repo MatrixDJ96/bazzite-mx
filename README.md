@@ -19,6 +19,7 @@ What the image changes over Bazzite, and why, is [`docs/divergences.md`](docs/di
 - Containers and VMs: Docker CE, libvirt, QEMU/KVM, swtpm (`ujust setup-virtualization`).
 - Development: VS Code, GitKraken, `gh`, `glab`, ShellCheck, shfmt, mise.
 - Desktop: Firefox, gparted and 1Password as RPMs; Firefox and virt-manager Flatpaks denied.
+- Sunshine with the KMS capabilities its RPM carries (`ujust setup-sunshine`).
 - Signing trust for `ghcr.io/matrixdj96/*`: a host pulls only what this repository signed.
 
 ## Build it yourself
