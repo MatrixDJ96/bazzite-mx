@@ -1,6 +1,7 @@
 # Workflow
 
-How a change reaches a host: the branches and the profiles they run.
+How a change reaches a host: the branches and the profiles they run. The build itself is in
+[`architecture.md`](architecture.md).
 
 Contents: branches and profiles · run the lint job locally.
 
@@ -12,8 +13,8 @@ Contents: branches and profiles · run the lint job locally.
 
 The `lint` job runs shellcheck, `check-form.sh` and `check-commits.sh` (every commit of the
 pushed ref, `conventions.md` § Commits) on the runner, then shfmt and yamllint inside
-`quay.io/fedora/fedora:44`. The `--self-test` of every script under `.github/scripts/` runs
-right after ShellCheck, before the checks it proves.
+`quay.io/fedora/fedora:44`. The `--self-test` of every script under `.github/scripts/` and of
+`tests/run.sh` runs right after ShellCheck, before the checks it proves.
 
 `build.yml` ignores pushes that touch only `**.md`, `docs/`, `.claude/` or `LICENSE`.
 

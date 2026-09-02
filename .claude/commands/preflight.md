@@ -6,7 +6,11 @@ argument-hint: "[bazzite|bazzite-nvidia-open|bazzite-nvidia] [--no-cache]"
 ---
 
 Build one flavour locally with the same recipe CI runs, and judge it on the exit status.
-Default flavour: `bazzite`; name `bazzite-nvidia-open` or `bazzite-nvidia` instead.
+Default flavour: `bazzite`; name `bazzite-nvidia-open` or `bazzite-nvidia` instead. After a
+change under `build_files/` add `--no-cache`: buildah keys a `RUN` on its command string and
+parent layer, never on the content of a bind mount, so a cached run exits 0 in minutes without
+running the changed script (`docs/gotchas.md` § A local pre-flight can exit 0 without running a
+changed build script).
 
 1. Free the space the build needs first: the previous image of this flavour and the new one are
    both on disk otherwise. The verdict of the previous run is already in its log, so nothing is
@@ -33,9 +37,11 @@ Default flavour: `bazzite`; name `bazzite-nvidia-open` or `bazzite-nvidia` inste
    ```
    The log is `/var/tmp/IMAGE-preflight.log` (`/tmp` is a tmpfs on a bootc host), its last line
    the build's own exit status.
-3. Judge the log: `BUILD_EXIT=0` passes; on a failure, read the log before the verdict.
+3. Judge the log: it passes with `BUILD_EXIT=0`, the build scripts' own lines
+   (`build.sh: N scripts ran`, `tests: N passed`) and no `FAIL:` line; on a failure, read the
+   log before the verdict.
    ```bash
-   grep -E 'BUILD_EXIT|^FAIL:|Using cache' /var/tmp/IMAGE-preflight.log
+   grep -E 'BUILD_EXIT|^FAIL:|Using cache|scripts ran|^tests: ' /var/tmp/IMAGE-preflight.log
    tail -20 /var/tmp/IMAGE-preflight.log
    ```
 4. Give the verdict in one line: ready for `develop`, or the fix needed with `file:line` when
