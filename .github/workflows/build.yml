@@ -110,6 +110,20 @@ jobs:
               echo "just --fmt --check ok: ${#files[@]} files"
             '
 
+      # On the host a syntax error is only a journal warning and the script is
+      # still marked performed (plasma-workspace, shellcorona.cpp).
+      - name: Check Plasma Scripts
+        run: |
+          set -euo pipefail
+          node --version
+
+          mapfile -t scripts < <(git ls-files '*.js')
+          for f in "${scripts[@]}"; do
+            node --check "$f"
+          done
+
+          echo "node --check ok: ${#scripts[@]} scripts"
+
   build:
     name: Build
     needs: lint

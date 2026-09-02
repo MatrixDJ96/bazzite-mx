@@ -49,7 +49,7 @@ Each script owns one artefact and ships a `--self-test`.
 | `lib/just.sh`             | `recipe_set`, `has_recipe`, `remove_portal_group <id>`; output captured before any grep                                                          |
 | `lib/kmod.sh`             | `kernel_version`                                                                                                                                 |
 | `lib/gpg.sh`              | the `KEY_FPR` table, `key_fingerprint` and `assert_key_fingerprint`                                                                              |
-| `00-prep.sh`              | dnf keeps its cache and waits 60 s against COPR and mirror flakes; the base's repositories are recorded                                          |
+| `00-prep.sh`              | dnf keeps its cache and waits 60 s against COPR and mirror flakes; the base's repositories and recipe sets are recorded                          |
 | `01-system-files.sh`      | `rsync` of `system_files/` over the tree, every file on a fresh inode; the fixed-gid groups                                                      |
 | `10-image-info.sh`        | identity: `image-info.json`, os-release, the KDE About page                                                                                      |
 | `11-image-signing.sh`     | the public key and the `policy.json` scope for `ghcr.io/matrixdj96`                                                                              |
@@ -62,6 +62,8 @@ Each script owns one artefact and ships a `--self-test`.
 | `33-mise.sh`              | mise from its COPR; activation and defaults come from `system_files/`                                                                            |
 | `40-desktop-apps.sh`      | Firefox, gparted, 1Password, and the Firefox Flatpak denied                                                                                      |
 | `41-sunshine.sh`          | Sunshine from its COPR, its user unit left disabled, its menu entry routed to the recipe                                                         |
+| `45-kde-defaults.sh`      | the Plasma update scripts, the skel files and their login hook                                                                                   |
+| `70-justfile.sh`          | the ujust recipes: drift guard, import, format check                                                                                             |
 | `80-fix-opt.sh`           | `/var/opt/<name>` moves to `/usr/lib/opt/<name>` with a tmpfiles line                                                                            |
 | `90-validate-repos.sh`    | the repository gate, run after the last install                                                                                                  |
 | `95-clean-stage.sh`       | the tree bootc lint expects                                                                                                                      |
@@ -70,8 +72,8 @@ Each script owns one artefact and ships a `--self-test`.
 | `tests/NN-<feature>.sh`   | one smoke test per build script, same stem                                                                                                       |
 
 Numbering, as the tree uses it: `00-09` preparation, `10-19` identity and trust, `20-49`
-services, packages and desktop defaults, `80-89` fix-ups, `90-99` gates and cleanup. The file
-name is the only statement of the order.
+services, packages and desktop defaults, `70-79` justfile, `80-89` fix-ups, `90-99` gates and
+cleanup. The file name is the only statement of the order.
 
 ## system_files/
 
@@ -83,23 +85,24 @@ One tree, copied over `/` by `01-system-files.sh`.
 | `etc/pki/rpm-gpg/RPM-GPG-KEY-*`                | the five keys those files read with `gpgkey=file://`                                                                                                                                                                                                                                                                       |
 | `etc/containers/registries.d/matrixdj96.yaml`  | sigstore attachments for our own scope                                                                                                                                                                                                                                                                                     |
 | `etc/profile.d/mise.sh`                        | activation, in bash only                                                                                                                                                                                                                                                                                                   |
-| `etc/skel/`                                    | per-user defaults: VS Code, mise                                                                                                                                                                                                                                                                                           |
+| `etc/skel/`                                    | per-user defaults: VS Code, mise, PowerShell, the Konsole shortcuts                                                                                                                                                                                                                                                        |
 | `usr/lib/modprobe.d/bazzite-mx-kvm.conf`       | the KVM options                                                                                                                                                                                                                                                                                                            |
 | `usr/lib/modules-load.d/ip_tables.conf`        | `iptable_nat`, which docker-in-docker needs                                                                                                                                                                                                                                                                                |
 | `usr/lib/sysusers.d/bazzite-mx-groups.conf`    | the fixed gids of `docker` and `libvirt`                                                                                                                                                                                                                                                                                   |
 | `usr/lib/systemd/system/docker.service.d/`     | the drop-in that runs the libvirt forwarding helper once dockerd is ready                                                                                                                                                                                                                                                  |
 | `usr/lib/tmpfiles.d/bazzite-mx-virt.conf`      | the `/var` directories libvirt and swtpm need                                                                                                                                                                                                                                                                              |
 | `usr/libexec/`                                 | the helpers the recipes and `docker.service` call; ours take a fixture knob for their test                                                                                                                                                                                                                                 |
-| `usr/share/ublue-os/just/`                     | two files, each replacing a base file                                                                                                                                                                                                                                                                                      |
+| `usr/share/ublue-os/just/`                     | two files replacing a base file, and `95-bazzite-mx.just`                                                                                                                                                                                                                                                                  |
+| `usr/share/plasma/.../updates/bazzite-mx-*.js` | Plasma update scripts, one run per user                                                                                                                                                                                                                                                                                    |
 | `usr/share/ublue-os/system-setup.hooks.d/`     | the root hook that grants the service groups and moves their gids to the image's                                                                                                                                                                                                                                           |
-| `usr/share/ublue-os/user-setup.hooks.d/`       | the per-user hook: VS Code                                                                                                                                                                                                                                                                                                 |
+| `usr/share/ublue-os/user-setup.hooks.d/`       | the per-user hooks: VS Code and the two skel files                                                                                                                                                                                                                                                                         |
 
 ## State of a build
 
 | Where                                              | Lifetime                       | Content                                                       |
 | -------------------------------------------------- | ------------------------------ | ------------------------------------------------------------- |
 | `/tmp/bazzite-mx-build/` (`BUILD_TMP`)             | the build `RUN` (tmpfs)        | backups a later script restores, the GitKraken RPM download   |
-| `/usr/lib/bazzite-mx/build-state/` (`BUILD_STATE`) | shipped in the image           | the base's repository snapshots                               |
+| `/usr/lib/bazzite-mx/build-state/` (`BUILD_STATE`) | shipped in the image           | the base's repository and recipe snapshots                    |
 | `/var/cache`, `/var/log`                           | cache mounts, not in the image | the dnf cache and logs                                        |
 
 ## Gates, in order

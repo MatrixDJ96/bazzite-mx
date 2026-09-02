@@ -1,6 +1,6 @@
 # vim: set ft=make :
-# Replaces Bazzite's file of the same name, holding the one recipe the base's
-# held, so the base's own import brings ours.
+# Replaces Bazzite's file of the same name: 70-justfile.sh proves the base's
+# copy holds exactly this recipe, so the base's own import brings ours.
 
 # Report the virtualization state of this host. Options: status | kvmfr
 [group("virtualization")]
