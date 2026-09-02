@@ -13,8 +13,8 @@
 #   (the smoke test; host.sh routes the shared ones); no root needed.
 # Output: one `OK:`, `FAIL:`, `SKIP:` or `INFO:` line per check, then
 #   `verify-host: every check passed` or `verify-host: FAIL lines above`.
-#   docs/migration.md maps the FAIL lines to their fix: a line it cites stays
-#   as it is.
+#   docs/migration.md and site/install.html map the FAIL lines to their fix:
+#   a line either cites stays as it is.
 # Exit status: 0 every check passed; 1 at least one FAIL, or a findfs that
 #   could not answer (its `ERROR: …` on stderr, `set -e` ending the run); 2 the
 #   host could not be read (not root, not a bazzite-mx image, no booted
