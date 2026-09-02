@@ -7,9 +7,11 @@ rules themselves live in [`conventions.md`](conventions.md).
 Contents, in the order of the entries: torn writeback on 6.17-azure · just duplicate recipe ·
 ujust.sh readonly names · kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set ·
 command | grep -q · modinfo /lib/modules path · stub-resolv.conf left in the image ·
-remove-unwanted-software v9 · 1Password BrowserSupport gid · pre-flight without the changed
-script · skel and existing accounts · KXmlGui write-back · image-info.json vs OCI label day ·
-FAIL branch before its verdict · sunshine --version home · Docker FORWARD policy and libvirt ·
+remove-unwanted-software v9 · inactive package request · 1Password BrowserSupport gid · local
+RPM blocks the rebase · EXIT trap and local · private install marker · mise dotnet SDK ·
+pre-flight without the changed script · skel and existing accounts · KXmlGui write-back · flags
+in a command substitution · root's flatpak list · image-info.json vs OCI label day · FAIL
+branch before its verdict · sunshine --version home · Docker FORWARD policy and libvirt ·
 recipe description line · vendor build-log warnings · no BTF from kernel-devel · arithmetic
 error escapes set -e · scriptlet rewrote a .pyc · sysusers m line on a base group.
 
@@ -34,8 +36,8 @@ a fresh-inode helper. A runner whose kernel is a 6.17-azure brings the defect ba
 With `set allow-duplicate-recipes` and the same recipe name in two imported files, just keeps
 the recipe of the file imported first (just manual, "Imports"; measured 2026-09-02 with two
 files on just 1.57.0). An import appended after the base's files can never override a base
-recipe, so `70-justfile.sh` replaces the base file, and fails the build on any name defined
-twice.
+recipe, so `70-justfile.sh` replaces the base file or cuts the recipe out of it, and fails the
+build on any name defined twice.
 
 ## `ujust.sh` declares its colour and formatting names readonly
 
@@ -104,6 +106,17 @@ no such package: `E: Unable to locate package powershell`, exit 100, the job dea
 build (measured 2026-09-02). The `df` the action prints first showed 92 GB free of 145 GB on
 that runner, so the image build fits without freeing anything. The action is not used.
 
+## An inactive package request stays in the origin and keeps bootc incompatible
+
+A layered package the new image already ships is reported by the rebase as an inactive request
+("1password (already provided by 1password-8.12.34-1.x86_64)"): `rpm-ostree status` lists it
+under neither `LayeredPackages` nor `packages`, and only `requested-packages` in the JSON and
+the origin's `[packages] requested=` still carry it. bootc reads the origin group and keeps
+`incompatible: true` (measured 2026-09-03 on the first boot after such a rebase, where a reader
+that looked at `packages` alone reported nothing to remove). `layered_requests` in `host.sh`
+reads every `requested-*` list, `verify-host` and `migrate` both go through it, and their
+known-bad fixtures carry the inactive request.
+
 ## The 1Password app rejects a BrowserSupport whose group id is below 1000
 
 With `onepassword` created as a system group (gid 951) the Firefox extension never connects:
@@ -122,6 +135,45 @@ with 1Password 8.12.34 and Firefox 154 from Fedora. The rule is documented by Ni
 31001/31002) and by the Gentoo overlays that carry `acct-group/onepassword` (gentoo-zh at 26753
 after a first `-1` broke the browser integration, nekochigura refusing a gid under 1000; read
 2026-09-06); `40-desktop-apps.sh` creates the two groups with the fixed gids 31001 and 31002.
+
+## A local RPM the new image ships blocks the rebase; a repository package does not
+
+A host carrying 1Password 8.12.28 as a local package (`rpm-ostree install ./1password.rpm`)
+cannot upgrade onto an image that ships 8.12.34: the depsolve fails with "cannot install both
+1password-8.12.28-1.x86_64 from @commandline and 1password-8.12.34-1.x86_64 from @System:
+conflicting requests" (measured 2026-09-04 on two hosts). The same package layered from the
+vendor repository rebases through and leaves an inactive request. A repository request is
+re-resolved against the new base, where a local one is the file itself.
+`rpm-ostree upgrade --uninstall=<nevra>` drops the request in the same transaction
+([`migration.md`](migration.md)).
+
+## An EXIT trap cannot read a `local` of the function that armed it
+
+`bazzite-mx-migrate apply` kept `timer_was_active` as a `local` of `cmd_apply` and armed
+`trap restore_timer EXIT` from there. The trap runs after the function has returned, the local
+is gone, and under `set -u` bash dies with "timer_was_active: unbound variable" once every step
+has run. Measured 2026-09-03 on an already migrated host: `apply` printed step 7 and
+`rpm-ostree status`, then exited 1 and left `uupd.timer` stopped. Running the same steps by
+hand never shows it. State a trap reads lives at script level (`TIMER_WAS_ACTIVE`), and the
+self-test arms the trap in a child shell and requires the restart line.
+
+## A private marker does not identify an installation the recipe did not make
+
+The tarball carries the build in `bin/build.txt` (3.7.2.87231, equal to the feed's `build`
+field, measured 2026-09-05), so the helper reads that, whoever unpacked the tree, and refuses a
+tarball without it.
+
+## mise installs the dotnet SDK in one shared root, not under its own installs directory
+
+`mise install dotnet@10` runs Microsoft's `dotnet-install` script into one root for every SDK
+version and leaves `~/.local/share/mise/installs/dotnet/<version>` as a symlink to it: the
+`dotnet.dotnet_root` setting, else `$DOTNET_ROOT`, else `~/.local/share/mise/dotnet-root`
+(`dotnet_root()` in mise's `src/plugins/core/dotnet.rs`, the same from v2026.6.0 to
+v2026.10.0). Measured 2026-10-03 on a fresh account with the image's mise: without the variable
+the SDK landed in `dotnet-root`, with `DOTNET_ROOT` set in that directory. A hand-installed SDK
+in `~/.dotnet` with the variable exported gets the new SDK and runtime next to it and its
+`dotnet` muxer rewritten (measured 2026-09-05 with SDK 10.0.300). `ujust setup-dev help` says
+so; the other runtimes stay under `installs/`.
 
 ## A local pre-flight can exit 0 without running a changed build script
 
@@ -150,6 +202,24 @@ The Konsole shortcut file ships with `version="1"` so that KXmlGui merges its
 rewritten as the full merged layout at Konsole's version, the `ActionProperties` kept (measured
 2026-09-07: 668 bytes seeded, 3812 bytes and `version="36"` after one start). The shortcut
 holds; a reader comparing the home copy with the skel copy finds them different.
+
+## A step run in a command substitution sets its flags in a subshell
+
+`bazzite-mx-migrate apply` called step 2 as `backup=$(step_2_backup_pin_and_stop_timer)` to
+read the backup directory it printed. The step also set `TIMER_WAS_ACTIVE=1` after stopping
+`uupd.timer`, and that assignment stayed in the subshell: the EXIT trap read 0 and never
+started the timer again. Measured 2026-09-07 in a VM on the first `apply` whose step 2 ran in a
+command substitution, `uupd.timer` inactive after every exit path; the earlier self-test preset
+the flag and could not see it. The step sets `BACKUP` and the flag as globals and is called
+plainly, and the self-test refuses a `=$(step_2_` in the source.
+
+## Root's `flatpak list` misses the invoking user's installation
+
+`ujust verify-host` runs its helper through sudo, and `flatpak list` as root lists the system
+installation and root's own user one: the user who typed the recipe has a user installation of
+their own that root never sees (measured 2026-09-12 on the hub: 43 apps for the user, 41 for
+root, the two user-scope ones missing). `src_flatpaks` lists `--system` as root and `--user`
+through `runuser -u "$SUDO_USER"`, each status kept.
 
 ## The base's image-info.json and its OCI label can name different days
 

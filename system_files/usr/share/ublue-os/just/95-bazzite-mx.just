@@ -95,3 +95,174 @@ setup-msi ACTION="":
         exit 1
         ;;
     esac
+
+# Check this host against what the image expects, one line per check.
+[group("system")]
+verify-host ACTION="":
+    #!/usr/bin/bash
+    source /usr/lib/ujust/ujust.sh
+    OPTION="{{ ACTION }}"
+    HELPER=/usr/libexec/bazzite-mx-verify-host
+
+    if [ "$OPTION" == "help" ]; then
+      echo "Usage: ujust verify-host"
+      echo "Prints one OK/FAIL/SKIP/INFO line per check, exit 1 on any FAIL: bootc status,"
+      echo "signed origin on :stable, nothing layered, signing policy, MSI modules and residue,"
+      echo "GPU and flavour, NTFS driver, ntfsplus residue, Firefox Flatpak, image .repo files."
+      echo "Runs the checks as root (bootc status needs it). Each FAIL line names its fix,"
+      echo "or why the check could not run."
+      exit 0
+    fi
+
+    if [[ $(id -u) -eq 0 ]]; then
+      echo "Please do not run this command as root"
+      exit 1
+    fi
+
+    if [ "$OPTION" != "" ]; then
+      echo "Unknown option: $OPTION (ujust verify-host help)"
+      exit 1
+    fi
+
+    sudo "$HELPER"
+
+# Migrate this host to the signed origin of this image. Options: plan | apply, then a tag.
+[group("system")]
+migrate ACTION="plan" TAG="stable":
+    #!/usr/bin/bash
+    source /usr/lib/ujust/ujust.sh
+    OPTION="{{ ACTION }}"
+    TAG="{{ TAG }}"
+    HELPER=/usr/libexec/bazzite-mx-migrate
+
+    if [ "$OPTION" == "help" ]; then
+      echo "Usage: ujust migrate [plan|apply] [TAG]"
+      echo "  plan   Read-only: what apply would do on this host (default)"
+      echo "  apply  Do it, each step asking first except step 2 (backups, deployment pin,"
+      echo "         update timer stopped); the reboot stays yours"
+      echo "  TAG    Tag of the signed origin, default stable; a dated tag pins the host"
+      echo "         to that release."
+      echo "plan prints the steps and refuses a host it cannot migrate, saying what to do first."
+      exit 0
+    fi
+
+    if [[ $(id -u) -eq 0 ]]; then
+      echo "Please do not run this command as root"
+      exit 1
+    fi
+
+    case "$OPTION" in
+      plan|apply)
+        sudo "$HELPER" "$OPTION" "$TAG"
+        ;;
+      *)
+        echo "Unknown option: $OPTION (ujust migrate help)"
+        exit 1
+        ;;
+    esac
+
+# Install this user's development runtimes with mise. Options: status | install
+[group("development")]
+setup-dev ACTION="":
+    #!/usr/bin/bash
+    source /usr/lib/ujust/ujust.sh
+    OPTION="{{ ACTION }}"
+    SKEL=/etc/skel/.config/mise/config.toml
+    CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/mise/config.toml"
+
+    if [ "$OPTION" == "help" ]; then
+      echo "Usage: ujust setup-dev <option>"
+      echo "  status   What mise has configured and installed for you"
+      echo "  install  Seed $CONFIG from $SKEL when you have none, then 'mise install'"
+      echo "Without an option a menu asks, status first."
+      echo "The runtimes go under ~/.local/share/mise/installs, per user, except dotnet: mise puts"
+      echo "every SDK in ~/.local/share/mise/dotnet-root, or in \$DOTNET_ROOT when you export one"
+      echo "(next to a hand-installed SDK there). A project's own mise.toml overrides the global"
+      echo "config. Not for root."
+      exit 0
+    fi
+
+    if [[ $(id -u) -eq 0 ]]; then
+      echo "Please do not run this command as root"
+      exit 1
+    fi
+
+    if [ "$OPTION" == "" ]; then
+      OPTION=$(Choose "Show status" "Install the default runtimes")
+    fi
+
+    case "${OPTION,,}" in
+      *status*)
+        if [ -f "$CONFIG" ]; then
+          echo "config: $CONFIG"
+        else
+          echo "config: none yet (ujust setup-dev install seeds it from $SKEL)"
+        fi
+
+        mise ls
+        ;;
+      *install*)
+        # Written beside and renamed: a copy cut short by a full home would
+        # otherwise leave an empty config the next run takes as seeded.
+        if [ ! -f "$CONFIG" ]; then
+          if ! mkdir -p "$(dirname "$CONFIG")" 2> /dev/null \
+            || ! cp "$SKEL" "$CONFIG.new" 2> /dev/null \
+            || ! mv -f "$CONFIG.new" "$CONFIG" 2> /dev/null; then
+            rm -f "$CONFIG.new"
+            echo "ERROR: cannot seed $CONFIG from $SKEL" >&2
+            exit 1
+          fi
+
+          echo "seeded $CONFIG from $SKEL"
+        fi
+
+        if ! mise install; then
+          exit 1
+        fi
+
+        mise ls
+        echo "${green}Done.${normal} Open a new bash: mise activates the runtimes on PATH."
+        echo "In fish, add 'if type -q mise; mise activate fish | source; end' to" \
+          "~/.config/fish/config.fish."
+        ;;
+      "")
+        exit 0
+        ;;
+      *)
+        echo "Unknown option: $OPTION (ujust setup-dev help)"
+        exit 1
+        ;;
+    esac
+
+# Install JetBrains Toolbox for this user. Options: install | status | latest
+[group("apps")]
+install-jetbrains-toolbox ACTION="":
+    #!/usr/bin/bash
+    source /usr/lib/ujust/ujust.sh
+    OPTION="{{ ACTION }}"
+    HELPER=/usr/libexec/bazzite-mx-jetbrains-toolbox
+
+    if [ "$OPTION" == "help" ]; then
+      echo "Usage: ujust install-jetbrains-toolbox <option>"
+      echo "  install  Download the latest build, verify its sha256, unpack it under"
+      echo "           ~/.local/share/JetBrains/ToolboxApp and start it (default)"
+      echo "  status   What is installed here"
+      echo "  latest   Build and URLs the feed publishes"
+      echo "The tarball is the one JetBrains documents, not a Homebrew cask. Not for root."
+      exit 0
+    fi
+
+    if [[ $(id -u) -eq 0 ]]; then
+      echo "Please do not run this command as root"
+      exit 1
+    fi
+
+    case "${OPTION:-install}" in
+      install|status|latest)
+        "$HELPER" "${OPTION:-install}"
+        ;;
+      *)
+        echo "Unknown option: $OPTION (ujust install-jetbrains-toolbox help)"
+        exit 1
+        ;;
+    esac
