@@ -4,8 +4,9 @@ What this image changes over its base, one entry per feature. A change enters on
 upstream does not cover it, it needs the image layer, a host that runs the image uses it and it
 ships a smoke test. Each entry says what the image does, why, where the claim comes from and
 which files carry it; the guards themselves live in the build script and its test.
+[`gotchas.md`](gotchas.md) holds the surprises this project probed, each with its date.
 
-Contents: three flavours · CI.
+Contents: three flavours · the cleaned stage · CI.
 
 ## Three flavours, one recipe
 
@@ -24,6 +25,33 @@ Every enumeration of the three images is literal: `FLAVOURS` and `image_of` in
 loops over `FLAVOURS`.
 
 Files: `Containerfile`, `.github/scripts/resolve-base.sh`, `.github/scripts/lib.sh`.
+
+## The cleaned stage
+
+The last build script puts back what the build's own transactions changed under `/etc` and
+`/usr`, so a host boots an image that carries the features and nothing of the machine that
+produced them. Three effects reach a host and belong here.
+
+The accounts created in the build are moved out of `/etc/passwd` and `/etc/group` into
+`/usr/lib/passwd` and `/usr/lib/group`, and the `-` backups removed. Their `/etc/shadow` lines
+are left where they are: the base ships that file with dozens of entries whose accounts live in
+`/usr/lib` already, so the few this stage adds change nothing a host reads. NSS resolves them
+through `altfiles`, and `/etc` goes back to `root` and `wheel` alone. Without the move
+`bootc container lint --fatal-warnings` refuses the image, its sysusers check reading an
+account line in `/etc` as machine state.
+
+The dnf5 system state under `/usr/lib/sysimage/libdnf5/` is emptied. It is the record of the
+build's own transactions (install reasons, repository attribution, the transaction history),
+and it would ship to hosts as the history of a machine that no longer exists; rpm-ostree reads
+the rpmdb under `/usr/share/rpm`, which stays and is the base's own by hardlink. A host
+therefore has no `dnf history` and no install reason for any package, the base's included.
+Source: rpm-ostree's rpmdb location (coreos/rpm-ostree#4554, cited in the script).
+
+The vendored repository files are left as they ship, `enabled=0`, and `dnf.conf` is restored
+byte for byte: the build enables a repository per transaction and never leaves one enabled
+behind it.
+
+Files: `build_files/95-clean-stage.sh` and its test.
 
 ## CI: what differs from the family
 
@@ -45,6 +73,8 @@ workflow of its own (`aurora/.github/workflows/validate-just.yml`).
 `ublue-os/remove-unwanted-software` at `695eb75b`
 (`aurora/.github/workflows/reusable-build.yml`,
 `image-template/.github/workflows/build.yml:39`), the commit past the apt step whose released
-version fails on this runner. No space-freeing action runs here.
+version fails on this runner ([`gotchas.md`](gotchas.md) § `ublue-os/remove-unwanted-software`
+v9 fails on `ubuntu-26.04`). No space-freeing action runs here.
 
-Files: `.github/workflows/` and `.github/scripts/`.
+Files: `.github/workflows/` and `.github/scripts/`, one owner per script
+([`architecture.md`](architecture.md)).

@@ -10,6 +10,7 @@ CI builds the flavours, a local build is a podman pre-flight.
 
 ```bash
 for s in ./.github/scripts/*.sh; do "$s" --self-test; done  # each CI script's guard, offline
+./build_files/tests/run.sh --self-test                      # the test runner's pairing guard
 shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's ShellCheck
 ./.github/scripts/check-form.sh <file>.sh                   # banned shapes, 100 columns
 ./.github/scripts/check-commits.sh HEAD                     # every commit message on the ref
@@ -18,20 +19,29 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 - The commands need bash, git, jq and shellcheck on the host, podman and
   skopeo for the pre-flight, podman for the lint job's container (shfmt, yamllint);
   `.claude/hooks/lint-edit.sh` skips any linter it cannot find.
-- The `lint` job of `build.yml` runs the first four, and shfmt and yamllint in
+- The `lint` job of `build.yml` runs the first five, and shfmt and yamllint in
   `quay.io/fedora/fedora:44`; the local equivalent is `docs/workflow.md` § Run the lint job
   locally.
+- A change under `build_files/` gets the pre-flight (`/preflight`,
+  `.claude/commands/preflight.md`) with `--no-cache` before the push: buildah keys a `RUN` on
+  its command, not on a bind mount's content, so a cached run exits 0 without the change.
 
 ## Layout
 
+- `build_files/` — `build.sh` runs `NN-<feature>.sh` in version order; `lib/` the sourced
+  libraries; `tests/` one smoke test per script plus `run.sh`. Each file's role:
+  `docs/architecture.md`.
 - `.github/scripts/` — one owner per CI artefact, each with a `--self-test`.
 
 ## Conventions
 
-- A shell script opens with `#!/usr/bin/env bash` and `set -euo pipefail`, passes ShellCheck
-  and Fedora 44's `shfmt --indent 4 --case-indent --binary-next-line --space-redirects`, and
-  has the form of `docs/conventions.md` § Form. The lint job fails it on ShellCheck, shfmt
-  and the shapes and width `check-form.sh` reads; review reads the rest.
+- A shell script opens with `#!/usr/bin/env bash` and `set -euo pipefail` (a build script takes
+  the `set` from `lib/env.sh`), passes ShellCheck and Fedora 44's
+  `shfmt --indent 4 --case-indent --binary-next-line --space-redirects`, and has the form of
+  `docs/conventions.md` § Form. The lint job fails it on ShellCheck, shfmt and the shapes and
+  width `check-form.sh` reads; review reads the rest.
+- A build script `build_files/NN-<feature>.sh` lands with `build_files/tests/NN-<feature>.sh`:
+  `tests/run.sh` refuses the build on an unpaired script or test.
 - A script that guards something ships a `--self-test` that feeds it known-bad input and
   requires the failure; what an assertion counts comes from an independent record, never from
   the thing under test (`docs/conventions.md` § Positive control).
@@ -39,7 +49,8 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 - A commit message is `<type>(<scope>): <what>` within 72 columns with no trailing period and
   no trailer, or `check-commits.sh` fails the lint job; a body is optional, after a blank line,
   in natural lines, one per point, never hard-wrapped.
-- An entry of `docs/divergences.md` cites its source (upstream file, manual page, URL).
+- An entry of `docs/divergences.md` cites its source (upstream file, manual page, URL); a fact
+  measured on this project goes to `docs/gotchas.md` with its date.
 - A workflow's concurrency group is the literal `bazzite-mx-<phase>[-<key>]`: a `workflow_call`
   callee inherits the caller's `${{ github.workflow }}` and waits on its own caller. Names,
   runners and action pins: `docs/conventions.md` § CI.
@@ -57,6 +68,8 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 
 ## Docs
 
-- `docs/conventions.md` — before writing a script or workflow.
+- `docs/architecture.md` — before adding a script: build flow, roles, build state, gates.
+- `docs/conventions.md` — before writing a script, test or workflow.
 - `docs/divergences.md` — what the image changes over Bazzite and why, one entry per feature.
+- `docs/gotchas.md` — a failure that looks familiar, by heading.
 - `docs/workflow.md` — branches and the local lint run.
