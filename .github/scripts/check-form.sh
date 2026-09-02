@@ -4,8 +4,8 @@
 # into grep -q, a || echo fallback inside $( ), a pipeline assigned bare, a $( )
 # inside $(( ))).
 #
-# The lint job runs the self-test, then the check over the whole shell
-# catalogue.
+# The edit hook runs it on every shell file an edit touches; the lint job runs
+# the self-test, then the check over the whole shell catalogue.
 #
 # Usage: check-form.sh <file>...
 #          <file>  a shell file to check

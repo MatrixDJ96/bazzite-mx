@@ -24,6 +24,7 @@ podman build --build-arg BASE_IMAGE="$base_image" --tag localhost/bazzite-mx .
 
 ## Documentation
 
+- [`AGENTS.md`](AGENTS.md): the project guide for anyone working on the repo.
 - [`docs/conventions.md`](docs/conventions.md): the rules for scripts and CI.
 - [`docs/divergences.md`](docs/divergences.md): what changes over Bazzite, and why.
 - [`docs/workflow.md`](docs/workflow.md): branches and the sandbox.

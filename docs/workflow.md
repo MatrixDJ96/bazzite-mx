@@ -15,13 +15,14 @@ pushed ref, `conventions.md` § Commits) on the runner, then shfmt and yamllint 
 `quay.io/fedora/fedora:44`. The `--self-test` of every script under `.github/scripts/` runs
 right after ShellCheck, before the checks it proves.
 
-`build.yml` ignores pushes that touch only `**.md`, `docs/` or `LICENSE`.
+`build.yml` ignores pushes that touch only `**.md`, `docs/`, `.claude/` or `LICENSE`.
 
 ## Run the lint job locally
 
 The shell catalogue is every `.sh` git does not ignore, tracked or not, plus any extensionless
 script, found by its shebang; shfmt and yamllint run in the container the job uses, so the
-releases match the image's.
+releases match the image's. The job's self-tests and `check-commits.sh` are the lines of
+`AGENTS.md` § Build & run.
 
 ```bash
 scripts=$({ git ls-files -co --exclude-standard '*.sh'
