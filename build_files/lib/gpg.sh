@@ -10,6 +10,14 @@ declare -A KEY_FPR=(
     # "Docker Release (CE rpm) <docker@docker.com>"
     # download.docker.com/linux/fedora/gpg
     ["/etc/pki/rpm-gpg/RPM-GPG-KEY-docker-ce"]=060A61C51B558A7F742B77AAC52FEB6B621E9F35
+
+    # "Microsoft (Release signing) <gpgsecurity@microsoft.com>"
+    # packages.microsoft.com/keys/microsoft.asc
+    ["/etc/pki/rpm-gpg/RPM-GPG-KEY-microsoft"]=BC528686B50D79E339D3721CEB3E94ADBE1229CF
+
+    # "jdxcode_mise (None) <jdxcode#mise@copr.fedorahosted.org>"
+    # download.copr.fedorainfracloud.org/results/jdxcode/mise/pubkey.gpg
+    ["/etc/pki/rpm-gpg/RPM-GPG-KEY-copr-jdxcode-mise"]=9504792D1F9CCA1514FD1DEC8497A816C83E991C
 )
 
 # The primary key's fingerprint of an armored key file, 40 upper-case hex

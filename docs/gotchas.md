@@ -153,7 +153,8 @@ in the three pre-flight images and nothing in their three bases; in the base,
 same line, and with `PYTHONDONTWRITEBYTECODE=1` in front it exited 0. `lib/env.sh` exports the
 variable to every build script and `tests/run.sh` to every test. The last gate of the
 `Containerfile` requires `rpm -V --nomtime python3-setuptools` clean on the final image, which
-holds what the build RUN and the test RUN wrote.
+holds what the build RUN and the test RUN wrote: without the variable, the `python3` of
+`tests/33-mise.sh` makes a rewrite of its own.
 
 ## A sysusers `m` line on a group of the base reaches only `/etc/gshadow`
 
