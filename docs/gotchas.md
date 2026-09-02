@@ -7,9 +7,9 @@ rules themselves live in [`conventions.md`](conventions.md).
 Contents, in the order of the entries: torn writeback on 6.17-azure · ujust.sh readonly names ·
 kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set · command | grep -q ·
 stub-resolv.conf left in the image · remove-unwanted-software v9 · 1Password BrowserSupport gid
-· pre-flight without the changed script · image-info.json vs OCI label day · Docker FORWARD
-policy and libvirt · arithmetic error escapes set -e · scriptlet rewrote a .pyc · sysusers m
-line on a base group.
+· pre-flight without the changed script · image-info.json vs OCI label day · sunshine --version
+home · Docker FORWARD policy and libvirt · recipe description line · vendor build-log warnings
+· arithmetic error escapes set -e · scriptlet rewrote a .pyc · sysusers m line on a base group.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -125,6 +125,16 @@ so `base-version` and the `(Bazzite …)` of `version-pretty` follow the file: a
 without `VERSION` would be `44.20260907.dev`. Measured 2026-09-12 on the pre-flight image. Both
 numbers are the base's own; the image reports each from its source and neither is rewritten.
 
+## `sunshine --version` needs a home directory
+
+Sunshine 2026.906.222525 (released 2026-09-06) creates `$HOME/.config/sunshine` in
+`config::parse` before it prints anything, `--version` included, and aborts with SIGABRT on an
+uncaught `std::filesystem` exception when it cannot; 2026.516.143833 printed first. In the
+build container `HOME` is `/root`, a link to `/var/roothome` that the image does not carry, so
+the `41-sunshine` smoke test went red on the day the release landed (measured 2026-09-07, gdb
+backtrace in the failed layer; `HOME=/tmp` printed the version). The test lends the binary a
+temporary home; a booted host has one.
+
 ## Docker's `FORWARD` policy cuts libvirt's NAT guests off
 
 A guest on libvirt's `default` network pinged `192.168.122.1` and nothing beyond, and
@@ -147,6 +157,47 @@ container only through a port published on the host whatever the filter table sa
 the same day: the guest got http 200 on the published port, nothing on the container's address,
 with either form). No upstream image carries a counterpart (`git grep DOCKER-USER` empty in
 bazzite, bazzite-dx, aurora and amyos).
+
+## A recipe's description is the LAST comment line above it
+
+`just --list`, which `ujust` runs, shows one description per recipe and takes it from the last
+comment line above the recipe, not from the whole comment block. Measured 2026-09-12 with just
+1.57.0: a two-line comment lists as `foo # second line of the description`, the first line
+lost. So the description comment of `82-bazzite-sunshine.just` (113 columns) stays on one line:
+wrapping it to the 100 columns of `docs/conventions.md` § Form would silently cut what a user
+reads in `ujust`. `.just` files are outside the shell catalogue `check-form.sh` measures, so
+nothing enforces the limit there anyway.
+
+## Two build-log warnings come from the vendors
+
+A pre-flight on the 44.20260921 base (measured 2026-09-23) prints two warnings the repository
+cannot remove. `Warning: skipped OpenPGP checks for 1 package from repository: @commandline` is
+dnf5 installing the GitKraken RPM, which its vendor does not sign; `31-git-tools.sh` checks the
+payload digests and passes `--no-gpgchecks` on purpose.
+`libsemanage.semanage_rename: WARNING: rename(...) failed: Invalid cross-device link` is the
+`%post` of Fedora's `swtpm-selinux` writing the SELinux store on the container's overlay: it
+falls back to a copy, and the image carries the package's three modules (`semodule -l`).
+
+The same log carries
+`modprobe: FATAL: Module uhid not found in directory /lib/modules/<kernel>`, from the `%post`
+of Sunshine loading `uhid` for the kernel the build runs on: the building host's,
+`7.0.0-1012-azure` on the runner, never the image's. The image carries `uhid.ko` for its own
+kernel and the package's `60-sunshine.conf` loads it at boot, the file `41-sunshine.sh`
+requires and `tests/41-sunshine.sh` reads for `uhid`. The `%post` then prints
+`rpm-ostree environment detected, skipping post install steps`: it finds `rpm-ostree` in the
+base and leaves out its udev reload.
+
+The other `Failed` and `Conflict` lines, the same in the three flavours, are not warnings
+either. `Failed to preset unit: Unit ublue-user-setup.service does not exist`, once, is the
+`%post` of `ublue-setup-services` running `systemd-update-helper install-system-units` on a
+unit the package ships only under `/usr/lib/systemd/user/`; `30-ide.sh` enables it with
+`systemctl --global`. `Failed to connect to audit log, ignoring: Invalid argument` and
+`plugdev.conf:1: Conflict with earlier configuration for group 'plugdev'` come from the
+sysusers scriptlets of the packages installed: `systemd-sysusers --dry-run` in the base image
+alone prints both, `plugdev.conf` belonging to no package and colliding with `openrazer.conf:3`
+of `openrazer`. The `Conflict` lines for group `'libvirt'` that name
+`/usr/lib/sysusers.d/bazzite-mx-groups.conf:4` are the `g libvirt -` of libvirt's scriptlets
+meeting the gid the image fixes first ([`divergences.md`](divergences.md) § Docker CE).
 
 ## An arithmetic syntax error escapes `set -e`
 
