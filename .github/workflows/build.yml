@@ -1,0 +1,108 @@
+# The sandbox: on a push to main or develop, a pull request or a dispatch, the
+# lint job, then the three flavours through reusable-build.yml. Nothing here
+# reaches GHCR.
+name: Build
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - "**.md"
+      - docs/**
+      - LICENSE
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: bazzite-mx-build-${{ github.ref_name }}
+  cancel-in-progress: true
+
+# Sets init.defaultBranch, so actions/checkout's `git init` prints no hint.
+env:
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: init.defaultBranch
+  GIT_CONFIG_VALUE_0: main
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Run ShellCheck
+        run: |
+          set -euo pipefail
+          shellcheck --version | grep version:
+
+          mapfile -t scripts < <(
+            { git ls-files '*.sh'; git grep -l '^#!/usr/bin/env bash'; } | LC_ALL=C sort -u
+          )
+          shellcheck -x -P SCRIPTDIR --severity=warning "${scripts[@]}"
+
+          echo "shellcheck ok: ${#scripts[@]} scripts"
+
+      - name: Run Self-Tests
+        run: |
+          set -euo pipefail
+
+          for s in ./.github/scripts/*.sh; do
+            "$s" --self-test
+          done
+
+      - name: Check Form
+        run: |
+          set -euo pipefail
+
+          mapfile -t scripts < <(
+            { git ls-files '*.sh'; git grep -l '^#!/usr/bin/env bash'; } | LC_ALL=C sort -u
+          )
+          ./.github/scripts/check-form.sh "${scripts[@]}"
+
+      - name: Check Commits
+        run: ./.github/scripts/check-commits.sh HEAD
+
+      - name: Run shfmt and yamllint
+        run: |
+          set -euo pipefail
+          podman run --rm \
+            --volume "$PWD:/repo:ro" \
+            --workdir /repo \
+            quay.io/fedora/fedora:44 \
+            bash -euo pipefail -c '
+              dnf -q install -y shfmt yamllint git > /dev/null
+              git config --global --add safe.directory /repo
+
+              rpm -q shfmt
+              mapfile -t scripts < <(
+                { git ls-files "*.sh"; git grep -l "^#!/usr/bin/env bash"; } | LC_ALL=C sort -u
+              )
+              shfmt --diff \
+                --indent 4 \
+                --case-indent \
+                --binary-next-line \
+                --space-redirects \
+                "${scripts[@]}"
+              echo "shfmt ok: ${#scripts[@]} scripts"
+
+              yamllint --version
+              yamllint --strict .
+              echo "yamllint ok"
+            '
+
+  build:
+    name: Build
+    needs: lint
+    permissions:
+      contents: read
+    uses: ./.github/workflows/reusable-build.yml
