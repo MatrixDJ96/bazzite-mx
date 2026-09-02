@@ -1,0 +1,13 @@
+# What Claude Code writes under .claude/ during a session and never belongs
+# in the tree: locks, the per-machine settings, logs, caches, the audit
+# ledgers and logs of the review rounds, session state and worktrees. The
+# block between the markers is the tool's own list.
+###> claude code ###
+scheduled_tasks.lock
+settings.local.json
+logs/
+.cache/
+audits/
+sessions/
+worktrees/
+###< claude code ###

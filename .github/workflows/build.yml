@@ -1,0 +1,90 @@
+# Sandbox build: every push to main or develop, every PR, builds both flavours
+# and lints them. Nothing is pushed to GHCR and no release is made from here
+# (owner's decision 1.5d: releases come only from release.yml, dispatched by
+# hand, by the weekly trigger or by the upstream watcher).
+name: Build Bazzite-MX
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - "**.md"
+      - site/**
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: bazzite-mx-build-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint the tree
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # shellcheck 0.11.0 is preinstalled on ubuntu-26.04 (ubuntu-slim carries
+      # 0.9.0: not used). shfmt and yamllint come from Fedora 44 so the CI, the
+      # image and the local hook format with the same shfmt release.
+      - name: Run shellcheck
+        run: |
+          set -euo pipefail
+          shellcheck --version | grep version:
+          mapfile -t scripts < <({ git ls-files '*.sh'; git grep -l '^#!/usr/bin/env bash'; } | LC_ALL=C sort -u)
+          shellcheck -x -P SCRIPTDIR --severity=warning "${scripts[@]}"
+          echo "shellcheck ok: ${#scripts[@]} scripts"
+
+      # Fedora 44, so CI, the image and the local hook share one shfmt release.
+      - name: Run shfmt and yamllint
+        run: |
+          set -euo pipefail
+          podman run --rm --volume "$PWD:/repo:ro" --workdir /repo quay.io/fedora/fedora:44 bash -euo pipefail -c '
+            dnf -q install -y shfmt yamllint git > /dev/null
+            git config --global --add safe.directory /repo
+            shfmt --version
+            mapfile -t scripts < <({ git ls-files "*.sh"; git grep -l "^#!/usr/bin/env bash"; } | LC_ALL=C sort -u)
+            shfmt --diff --indent 4 --case-indent --binary-next-line --space-redirects "${scripts[@]}"
+            echo "shfmt ok: ${#scripts[@]} scripts"
+            yamllint --version
+            yamllint --strict .
+            echo "yamllint ok"
+          '
+
+      - name: Prove the resolver fails closed
+        run: ./.github/scripts/resolve-base.sh --self-test
+
+  build:
+    name: Build ${{ matrix.flavour }}
+    needs: lint
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        flavour: [bazzite, bazzite-nvidia-open]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve base image
+        id: base
+        run: ./.github/scripts/resolve-base.sh "${{ matrix.flavour }}"
+
+      - name: Build image
+        run: |
+          set -euo pipefail
+          podman build \
+            --build-arg BASE_IMAGE="${{ steps.base.outputs.base_image }}" \
+            --tag "localhost/bazzite-mx:${{ matrix.flavour }}" \
+            .
+          podman image inspect --format 'built {{.Id}} size {{.Size}}' "localhost/bazzite-mx:${{ matrix.flavour }}"

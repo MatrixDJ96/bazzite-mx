@@ -1,0 +1,19 @@
+# yamllint, run by the lint job of build.yml as `yamllint --strict .` inside
+# quay.io/fedora/fedora:44, over every YAML file of the tree: the workflows,
+# this file and the registries.d file under system_files.
+extends: default
+
+rules:
+  # The width every file of the repo keeps (docs/conventions.md § Bash → Form).
+  line-length:
+    max: 100
+
+  # GitHub Actions' top-level `on:` key reads as a boolean to yamllint.
+  truthy:
+    check-keys: false
+
+  document-start: disable
+
+  # `# comment` after a value with one space, the way the workflows write it.
+  comments:
+    min-spaces-from-content: 1
