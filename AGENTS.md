@@ -3,8 +3,8 @@
 Three flavours of one `Containerfile`, `bazzite-mx`, `bazzite-mx-nvidia-open` and
 `bazzite-mx-nvidia`, on Bazzite's KDE `stable` bases, differing only in the build args
 `BASE_IMAGE` and `IMAGE_NAME`. The image is the system layer: apps are Flatpak, CLI tools
-Fedora RPMs or Homebrew, mutable userspace distrobox. GitHub repo `MatrixDJ96/bazzite-mx`;
-CI builds the flavours, a local build is a podman pre-flight.
+Fedora RPMs or Homebrew, mutable userspace distrobox. GitHub repo `MatrixDJ96/bazzite-mx`,
+images under `ghcr.io/matrixdj96/`; CI builds them, a local build is a podman pre-flight.
 
 ## Build & run
 
@@ -14,13 +14,14 @@ for s in ./.github/scripts/*.sh; do "$s" --self-test; done  # each CI script's g
 shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's ShellCheck
 ./.github/scripts/check-form.sh <file>.sh                   # banned shapes, 100 columns
 ./.github/scripts/check-commits.sh HEAD                     # every commit message on the ref
+./.github/scripts/refresh-pins.sh --check                   # one row per pin; STALE is a row
 # the main profile (chunked image, its probe, the signing-key proof) on a branch
 gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref <branch> -f rechunk=true
 ```
 
 - The commands need bash, git, jq, shellcheck and node on the host, podman and
   skopeo for the pre-flight, podman for the lint job's container (shfmt, yamllint, just), and a
-  gh login (`gh auth login` or `GH_TOKEN`) for the dispatch;
+  gh login (`gh auth login` or `GH_TOKEN`) for `refresh-pins.sh` and the dispatch;
   `.claude/hooks/lint-edit.sh` skips any linter it cannot find.
 - The `lint` job of `build.yml` runs the first five, `node --check` on the Plasma update
   scripts, and shfmt, yamllint and `just --fmt --check` in `quay.io/fedora/fedora:44`; the
@@ -28,6 +29,7 @@ gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref <branch> -f rechunk
 - A change under `build_files/` or `system_files/` gets the pre-flight (`/preflight`,
   `.claude/commands/preflight.md`) with `--no-cache` before the push: buildah keys a `RUN` on
   its command, not on a bind mount's content, so a cached run exits 0 without the change.
+- A change under `.github/` gets `refresh-pins.sh --check` first.
 
 ## Layout
 
@@ -75,7 +77,8 @@ gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref <branch> -f rechunk
 ## Boundaries
 
 - A push goes to `develop` first, whose sandbox builds the three flavours and publishes
-  nothing; a push to `main` and a repository setting take the owner's OK.
+  nothing; a push to `main`, a dispatch of `release.yml`, `promote.yml` or `sign-image.yml`, a
+  GHCR write or delete and a repository setting take the owner's OK.
 - `cosign.key` stays out of git (`.gitignore`); CI signs with the `SIGNING_SECRET` secret,
   whose public half must equal `cosign.pub`.
 
@@ -86,4 +89,4 @@ gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref <branch> -f rechunk
 - `docs/divergences.md` — what the image changes over Bazzite and why, one entry per feature.
 - `docs/gotchas.md` — a failure that looks familiar, by heading.
 - `docs/migration.md` — bringing a host onto the image; a `verify-host` `FAIL:` line.
-- `docs/workflow.md` — branches and the local lint run.
+- `docs/workflow.md` — branches, releases, the pin refresh.
