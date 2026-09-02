@@ -21,7 +21,13 @@
       "Bash(shfmt:*)",
       "Bash(./.github/scripts/resolve-base.sh:*)",
       "Bash(./.github/scripts/image-labels.sh:*)",
-      "Bash(./.github/scripts/check-image.sh:*)"
+      "Bash(./.github/scripts/check-image.sh:*)",
+      "Bash(./.github/scripts/preflight-build.sh:*)",
+      "Bash(./.github/scripts/release-tag.sh:*)",
+      "Bash(./.github/scripts/gate-release.sh --self-test)",
+      "Bash(./.github/scripts/changelog.sh:*)",
+      "Bash(./.github/scripts/refresh-pins.sh --check)",
+      "Bash(./.github/scripts/refresh-pins.sh --self-test)"
     ],
     "deny": [
       "Bash(git push --force:*)",

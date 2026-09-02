@@ -34,25 +34,29 @@ it for a `podman build` by hand with no `VERSION`).
 build.yml            push to main or develop, pull request, dispatch (input rechunk)
   lint               ubuntu-26.04: shellcheck; shfmt and yamllint from Fedora 44; node --check on the
                      Plasma update scripts; just --unstable --fmt --check on the .just files (just from
-                     Linuxbrew); --self-test of resolve-base.sh, image-labels.sh, check-image.sh
+                     Linuxbrew); --self-test of every script under .github/scripts/
   build              reusable-build.yml with rechunk = (ref == main) or the dispatch input
-reusable-build.yml   workflow_call: release_tag ("" in the sandbox), rechunk; secret SIGNING_SECRET
+release.yml          workflow_dispatch only (reason, promote_stable): version → build → gate → release,
+                     step by step in docs/workflow.md § The release run
+promote.yml          workflow_dispatch (release_tag): gate-release.sh promote → :stable
+sign-image.yml       workflow_dispatch (image): sign one of our images by digest, verify
+reusable-build.yml   workflow_call: release_tag ("" in the sandbox), rechunk, publish; secret SIGNING_SECRET
   matrix             bazzite, bazzite-nvidia-open on ubuntu-26.04, fail-fast off
   resolve-base.sh    → base.env: base digest, base version, kernel, image name
   image-labels.sh    → labels.txt: every label of the image (version = release_tag or <base>.dev)
   podman build       --build-arg BASE_IMAGE, IMAGE_NAME, VERSION; --label per line of labels.txt
   sandbox profile    check-image.sh on the built image
-  main profile       rpm-ostree compose build-chunked-oci from the built image's root (df before and after)
-                     (labels.txt restated: a composed image inherits no config) → check-image.sh on the
-                     chunked image → cosign sign-blob over its manifest with SIGNING_SECRET, verify-blob
-                     with cosign.pub, a tampered copy refused
+  main profile       the chunked image (build-chunked-oci), its probe, a test signature with SIGNING_SECRET
+  release profile    (publish) SBOM, push :staging by digest, signature, attestation, release-<flavour>.env;
+                     the three profiles in docs/workflow.md § Branches and profiles and § The release run
 ```
 
 Nothing in `build.yml` pushes to GHCR or creates a release (decision 1.5d): the main profile
 proves, on every push to `main`, the artefact a release run would publish and the key it would
 sign with. The main profile runs on any ref with
 `gh workflow run build.yml --ref <branch> -f rechunk=true`, which is how a change to it is
-proven before it reaches `main`.
+proven before it reaches `main`. The release run, the promotions and the recovery signer are
+described in [`workflow.md`](workflow.md).
 
 | Script | Role |
 |---|---|
@@ -60,6 +64,10 @@ proven before it reaches `main`.
 | `resolve-base.sh <flavour>` | the base's digest, version and kernel and the flavour's image name, from `skopeo inspect` of `ghcr.io/ublue-os/<flavour>:stable`; `--from-json` for a saved inspect; `--self-test` |
 | `image-labels.sh <coords> <release-tag> <revision>` | the labels file: OCI title, description, source, url, vendor, licenses, version, revision, created, `base.name`, `base.digest`; `ostree.bootable`, `ostree.linux`, `containers.bootc`; every value required; `--self-test` |
 | `check-image.sh <image> <labels-file>` | the probe of the artefact: every label present with its value; `/run` and `/tmp` empty on the mounted image; inside the image `bootc container lint --fatal-warnings`, `rpm -q` of docker-ce, code and 1password, the two MSI modules under `updates/` for the labelled kernel and resolved by modprobe, `image-info.json` at the labelled version; `--self-test` on the label gate |
+| `release-tag.sh <coords>` | the release tag `<fedora>.<yyyymmdd>`, `.N` only when taken on either GHCR package or on a GitHub Release; a probe returning nothing aborts; `--from-lists` for saved lists; `--self-test` |
+| `gate-release.sh release\|promote` | the gate: reads the build's env files, checks the manifest's labels by digest, shows both verifiers failing on the base image, `cosign verify` and `gh attestation verify --repo`, copies the digest onto `:<tag>` (never over another digest) and, on promotion, `:stable`; `--self-test` on the label, env and tag-state checks |
+| `changelog.sh release` | the release notes: base version and kernel from the base's labels, the previous release from `gh release list`, package diff of the two SBOM referrers (stated when the previous release carries none), commits since the previous revision, switch commands; prints the title; `--self-test` |
+| `refresh-pins.sh` | the pin refresh: actions, binaries, runner labels, workflow states, cited issues (`--check`), `--apply` for the first two classes; offline `--self-test` on fixtures ([`workflow.md`](workflow.md) § Keeping the pins fresh) |
 
 ## build_files/
 

@@ -563,7 +563,7 @@ SHA, key reused). What differs from the family and why:
   Without labels of our own the image keeps the base's and calls itself Bazzite
   (`docs/gotchas.md`).
 - **The signing key is proven on `main`.** No family repo does this: the secret is first used
-  in the run that publishes. Here the main profile signs the chunked manifest with
+  in the run that publishes. Here the main profile signs the chunked image's digest with
   `SIGNING_SECRET` (`cosign sign-blob`, no transparency log, no signing config: the bundle
   stays local) and verifies it with the `cosign.pub` the image trusts, then must refuse a
   tampered copy (cosign 3.1.3 `sign-blob`/`verify-blob`, flags measured 2026-09-02: `--bundle`
@@ -585,8 +585,9 @@ SHA, key reused). What differs from the family and why:
   has no container engine, no Homebrew and shellcheck 0.9.0 (2.5 #2.4).
 - **Disk.** No space-freeing action. The `ubuntu-26.04` runner starts with 92 GB free of
   145 GB (`df` on run 33644315576, 2026-09-02) and the main profile needs the raw image, its
-  OCI archive and the pulled chunked copy at once: 17 GB, 6.6 GB and 17 GB (measured
-  2026-09-02 on the pre-flight image), the raw image removed before the pull. The family's
+  OCI archive and the pulled chunked copy at once: 17 GB, 6.3 GB and 17 GB, the raw image
+  removed before the pull (run 33645065090, 2026-09-02: 73 GB free before the compose, 85 GB
+  before the pull, 74 GB after; the compose took 11.5 min, the pull 4 min). The family's
   `ublue-os/remove-unwanted-software` v9 (image-template `build-disk.yml:73`) fails on this
   runner (`apt-get remove powershell`, package absent: `docs/gotchas.md`); aurora and the
   template's `build.yml` pin an untagged commit of its `v10` merge instead. The compose step
@@ -596,6 +597,109 @@ SHA, key reused). What differs from the family and why:
   tmpfs on `/run` (and `/tmp`), so the resolver file buildah binds there never reaches the
   image (`docs/gotchas.md`), and `check-image.sh` proves both directories empty on the
   artefact.
+
+## CI: the release run (`release.yml`, `promote.yml`, `sign-image.yml`, `gate-release.sh`, `changelog.sh`, `refresh-pins.sh`)
+
+Decisions 1.5d (a release only from a dispatched workflow), 1.5g (`44.<build date>`, `.N`
+only on a same-day collision), 1.6 (key reused, `sigstoreSigned` policy, signature +
+attestation + SBOM, SHA pins refreshed by a script in the repo, no bot), 1.1 (`:stable` moves
+only onto a release a host has verified). What differs from the family and why:
+
+- **The tag is born in a gate, by digest.** Bazzite and bazzite-dx push the dated tag and
+  every alias from the build job, right after the push and before the signature (bazzite
+  `build.yml:554-575`, bazzite-dx `build.yml:247-266`); aurora pushes `:staging`, signs it,
+  then pushes the real tags from the same job (`reusable-build.yml:343-407`). Here the build
+  job stops at `:staging` and hands the digest to a separate job as an artifact
+  (`release-<flavour>.env`); `gate-release.sh` inspects `docker://<image>@<digest>`, checks
+  title, vendor, `version` = release tag and `revision` = the run's commit, verifies the
+  signature and the attestation, and only then copies the digest onto `:<tag>`. A `:staging`
+  left by a failed run of the same day never reaches a tag (2.5 #2.7), and no tag ever points
+  at an unsigned manifest. A `:<tag>` that already exists with another digest is refused: a
+  release tag never moves (v1 `promote-release-tags.sh` warned and skipped; here it fails).
+- **`:stable` has a switch.** No family repo distinguishes "publish" from "promote": their
+  `:stable` moves on every run. Here the dispatch input `promote_stable` (default `false`)
+  AND the repository variable `PROMOTE_STABLE` must both be true; otherwise the gate prints
+  the reason and exits 0 (2.5 #1.1). The pilot host rebases on the dated tag; `promote.yml`
+  moves `:stable` after the pilot, then the variable is set and the trigger and the watcher
+  (commit 14) may promote.
+- **Negative controls in the gate.** `cosign verify` with `cosign.pub` and
+  `gh attestation verify --repo MatrixDJ96/bazzite-mx` are first run on
+  `ghcr.io/ublue-os/bazzite@<digest>`, signed and attested by ublue-os: cosign must answer
+  `no matching signatures` (any other failure is inconclusive) and the attestation lookup must
+  find nothing. Lifted from v1 `verify-published-signatures.sh` (akmods `verify-publication`
+  pattern), extended to the attestation.
+- **Attestation with `actions/attest`, `push-to-registry: false`.** Decision 1.6 names
+  `attest-build-provenance`; its README (v4, read 2026-09-02) calls itself "simply a wrapper
+  on top of actions/attest" and points new implementations at `actions/attest`, which bazzite
+  (`build.yml:649`) and aurora (`reusable-build.yml:450`) use. The attestation stays in the
+  GitHub store, where `gh attestation verify` reads it (aurora keeps `push-to-registry: false`
+  with "this confuses cosign verify", `:454-455`; `true` is tried on a throwaway tag after the
+  first release, 2.0 §10).
+- **SBOM as a signed referrer, changelog from its diff, in bash.** As bazzite
+  (`build.yml:476-497`, `:617-645`: syft on the exported root, `oras attach`, the referrer's
+  digest signed). The release notes are `changelog.sh` (decision 1.4: bash), not
+  `changelog.py`: the previous release comes from `gh release list` by `publishedAt`, never
+  from the manifest's `RepoTags` (bazzite `changelog.py:254-281`; an orphan tag would hijack
+  the comparison, v1 audit root R1); the package diff is `join` of the two RPM lists; a
+  previous release without an SBOM (every v1 release) is stated in the notes and on stderr,
+  never rendered as "no changes". Base version and kernel come from the labels of the exact
+  base the image was built from (`base.name@base.digest`), not from a second `:stable` read.
+- **One tag per run, taken tags probed on both packages and the releases.** `release-tag.sh`
+  reads `skopeo list-tags` of both packages and `gh release list`; a probe that fails or
+  returns nothing aborts (bazzite `build.yml:79-94` swallows the probe with `|| true` and would
+  reuse a tag on a mute registry, v1 audit A.1). The Fedora major comes from the base's
+  kernel label through `resolve-base.sh` (bazzite-dx `build.yml:89-109`), not from a constant.
+- **No retry action, no release action.** `podman push` runs twice inside a three-attempt
+  loop (podman#27796: the layer annotations land on the second push; bazzite-dx and aurora
+  wrap it in `nick-fields/retry`), `gh release create --latest --target <sha>` replaces
+  `softprops/action-gh-release` (aurora `generate-release.yml:65-77`): two pins fewer.
+- **ORAS from its release, not from `setup-oras`.** The first release run (33697633900,
+  2026-09-03 00:00Z) died on both flavours at `oras-project/setup-oras` v2.0.1 with "official
+  ORAS CLI releases does not contain version 1.3.4": the action installs only the versions of
+  the list embedded in its own release (`src/lib/data/releases.json`, up to 1.3.0 at v2.0.1;
+  1.3.4 is on its `main` only), so a pin the release check calls current is not installable
+  until the action itself is released again. `install-oras.sh` downloads the linux/amd64
+  tarball and the checksums file of the ORAS release and refuses a tarball whose sha256 does
+  not match (`--self-test`: a matching checksum accepted, a mismatch and a missing line
+  refused; proven live on 1.3.4, 2026-09-03), `ORAS_VERSION` is the one input and
+  `refresh-pins.sh` compares it with the ORAS releases, which is now also what installs. One
+  action pin fewer (bazzite `build.yml:610` keeps `setup-oras`).
+- **The recovery signer is restricted and closes on a verification.** bazzite-dx
+  `sign_image.yml` signs whatever reference the dispatch names; here the reference must be one
+  of the two images of this repository, is resolved to a digest first, and the signature is
+  verified with `cosign.pub` before the job is green.
+- **Pins refreshed by a script, five classes, offline self-test.** aurora runs renovate
+  (`validate-renovate.yml`); decision 1.6 wants no bot. `refresh-pins.sh` reads the workflows
+  and reports actions (sha and comment against the latest release, the sha proven to be a
+  commit of that repository: GitHub docs "Security hardening for GitHub Actions"), binaries
+  (`cosign-release`, `syft-version`, `ORAS_VERSION`), runner labels against the
+  `actions/runner-images` README (the preview badge of `ubuntu-26.04` is reported, not
+  hidden), the state of every workflow (`disabled_inactivity`: GitHub docs, events
+  `schedule`) and the upstream issues the comments cite (a closed one means a flag is up for
+  review). `--self-test` runs on fixture answers, offline, and covers every verdict. The
+  live table on 2026-09-02 15:12Z: every pin `OK`, `ubuntu-26.04` "still marked preview",
+  the three issues open.
+- **Immutable releases.** A repository setting (GitHub docs "Immutable releases": the tag is
+  locked to its commit, assets frozen, a release attestation generated; REST
+  `PUT /repos/{owner}/{repo}/immutable-releases`), off on 2026-09-02 and listed in
+  [`workflow.md`](workflow.md) § Repository settings to enable before the first v2 release.
+- **Retention.** Dated tags are prunable like bazzite's and aurora's (the weekly cleanup
+  arrives with commit 14: 90 days, 7 kept); the GitHub Release outlives its tag and says so.
+
+Sources read 2026-09-02: GitHub docs "Reuse workflows" (permissions "can be only downgraded
+(not elevated) by the called workflow"), "Immutable releases", REST "Repositories" (the
+`immutable-releases` endpoints), `gh attestation verify` manual (`oci://` needs a registry
+login; `--repo`, `--owner`), `actions/attest` README (inputs, permissions
+`id-token`/`attestations`/`artifact-metadata`, `push-to-registry`), `actions/runner-images`
+README (label table, preview badge) and `Ubuntu2604-Readme.md` (no cosign, syft or oras
+preinstalled); releases and tags of every pinned action via `gh api` (table in the audit file
+`2.1-ci-design.md` § 5, re-measured 15:12Z: unchanged; `actions/upload-artifact` v7.0.1
+`043fb46d`, `actions/download-artifact` v8.0.1 `3e5f45b2`, `oras-project/oras` v1.3.4 added);
+bazzite `build.yml` (version, push, SBOM, attest), `changelog.py`, `generate_release.yml`,
+`sign_image.yml`; bazzite-dx `build.yml`, `sign_image.yml`; aurora `reusable-build.yml`,
+`generate-release.yml`, `trigger-schedule-stable-image.yml`, `build-image-stable.yml`; v1
+`verify-published-signatures.sh`, `promote-release-tags.sh`, `changelog.sh`, `sign-image.yml`
+(read as reference, rewritten).
 
 Sources read 2026-09-02: GitHub docs "Reuse workflows" (inputs typed, secrets by name,
 "Permissions can only be maintained or reduced—not elevated—throughout the chain"),

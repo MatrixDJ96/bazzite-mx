@@ -91,13 +91,24 @@ jobs:
       - name: Prove the CI scripts fail closed
         run: |
           set -euo pipefail
-          for s in resolve-base image-labels check-image; do "./.github/scripts/$s.sh" --self-test; done
+          for s in resolve-base image-labels check-image release-tag gate-release changelog refresh-pins; do
+            "./.github/scripts/$s.sh" --self-test
+          done
 
+  # The callee's job declares the permissions its publishing steps need and
+  # a caller may only maintain or reduce them (GitHub docs, reusable
+  # workflows), so the same set is granted here; no step of a sandbox or
+  # main run uses the write half (every publishing step is behind
+  # `if: inputs.publish`, and `publish` is never passed from here).
   build:
     name: Build
     needs: lint
     permissions:
       contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     uses: ./.github/workflows/reusable-build.yml
     with:
       rechunk: ${{ github.ref == 'refs/heads/main' || inputs.rechunk == true }}
