@@ -25,12 +25,12 @@ images, `bazzite-nvidia` and its GNOME twin, take the `ogc-lts` kernel.
 
 Every enumeration of the three images is literal: `PACKAGES`, `FLAVOURS` and `image_of` in
 `.github/scripts/lib.sh`, the build matrix, the `version` job's base-digest outputs and the gate
-step's `--base` arguments in `release.yml` and the recovery signer (`sign-image.yml`) name them
-one by one; `resolve-base.sh --digests` loops over `FLAVOURS`. `release-tag.sh` probes every
-package for taken tags.
+step's `--base` arguments in `release.yml`, the retention list and the recovery signer
+(`sign-image.yml`) name them one by one; the watcher and `resolve-base.sh --digests` loop over
+`FLAVOURS`. `release-tag.sh` probes every package for taken tags.
 
 Files: `Containerfile`, `.github/scripts/resolve-base.sh`, `.github/scripts/lib.sh`,
-`.github/scripts/release-tag.sh`.
+`.github/scripts/release-tag.sh`, `.github/scripts/watch-upstream.sh`.
 
 ## Image identity and the update ref
 
@@ -735,16 +735,18 @@ moves on every run.
 **Fewer actions, more bash.** `nick-fields/retry`, `softprops/action-gh-release`, `setup-oras`
 ([`gotchas.md`](gotchas.md) § `setup-oras` installs only the ORAS versions embedded in its own
 release) and renovate are replaced by scripts of ours with `--self-test`s. Bazzite's version
-step swallows its tag probe with `|| true`; ours stops on a probe that fails. The family is
-split on freeing disk: Bazzite and bazzite-dx run `jlumbroso/free-disk-space`
-(`bazzite/.github/workflows/build.yml`, `bazzite-dx/.github/workflows/build.yml`), Bazzite
-having dropped `AdityaGarg8/remove-unwanted-software` in a45a310e and taken
-`jlumbroso/free-disk-space` in 595c121e; aurora's `stable-f44`, which builds its Fedora 44
-images, and image-template pin `ublue-os/remove-unwanted-software` at `695eb75b`
-(`aurora/.github/workflows/reusable-build.yml`, `image-template/.github/workflows/build.yml`),
-the commit past the apt step whose released version fails on this runner
-([`gotchas.md`](gotchas.md) § `ublue-os/remove-unwanted-software` v9 fails on `ubuntu-26.04`).
-No space-freeing action runs here.
+step swallows its tag probe with `|| true`; ours stops on a probe that fails. bazzite-dx reads
+the base's version label; `watch-upstream.sh` compares base digests, which also move on a
+retag. The family is split on freeing disk: Bazzite and bazzite-dx run
+`jlumbroso/free-disk-space` (`bazzite/.github/workflows/build.yml`,
+`bazzite-dx/.github/workflows/build.yml`), Bazzite having dropped
+`AdityaGarg8/remove-unwanted-software` in a45a310e and taken `jlumbroso/free-disk-space` in
+595c121e; aurora's `stable-f44`, which builds its Fedora 44 images, and image-template pin
+`ublue-os/remove-unwanted-software` at `695eb75b`
+(`aurora/.github/workflows/reusable-build.yml`,
+`image-template/.github/workflows/build.yml`), the commit past the apt step whose released
+version fails on this runner ([`gotchas.md`](gotchas.md) § `ublue-os/remove-unwanted-software`
+v9 fails on `ubuntu-26.04`). No space-freeing action runs here.
 
 Files: `.github/workflows/` and `.github/scripts/`, one owner per script
 ([`architecture.md`](architecture.md)).

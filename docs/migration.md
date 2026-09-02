@@ -96,6 +96,9 @@ ujust migrate apply <tag>     # a dated release tag instead of the moving alias
 ujust migrate help
 ```
 
+GHCR keeps every dated tag younger than 90 days and the 7 newest older ones, while every
+release page stays ([`workflow.md`](workflow.md) § GHCR retention).
+
 Run it from a terminal: confirmations go through `ugum confirm`, and without a terminal nothing
 is confirmed: steps 1, 6 and 7 are skipped and the run stops at the first of steps 3, 4 and 5
 that asks. Step 2 asks nothing and only stops `uupd.timer`, which every exit path restarts.

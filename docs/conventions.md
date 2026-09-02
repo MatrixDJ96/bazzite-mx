@@ -434,10 +434,10 @@ Where each one runs:
 - Names follow `ublue-os/bazzite`'s workflows (`bazzite/.github/workflows/build.yml`: jobs
   `Version`, `Make`, `Generate Release`; steps `Build Image`, `Apply Labels`, `Push to GHCR`,
   `Install Cosign`). Workflow `name:` Title Case. A job name is the phase in one Title Case
-  word: `Lint`, `Build`, `Version`, `Gate`, `Release`, `Promote`, `Sign`; the matrix job of the
-  reusable build is named by its flavour, so a run reads `Build / bazzite-nvidia`. A step name
-  is Title Case, verb + object, no article, a tool in its own casing: `Checkout`,
-  `Resolve Base`, `Build Image`, `Install Cosign`, `Push to GHCR`,
+  word: `Lint`, `Build`, `Version`, `Gate`, `Release`, `Prune`, `Promote`, `Sign`, `Trigger`,
+  `Compare`; the matrix job of the reusable build is named by its flavour, so a run reads
+  `Build / bazzite-nvidia`. A step name is Title Case, verb + object, no article, a tool in its
+  own casing: `Checkout`, `Resolve Base`, `Build Image`, `Install Cosign`, `Push to GHCR`,
   `Run shfmt, yamllint and just`. Env vars `SCREAMING_SNAKE_CASE`; outputs `snake_case`, one
   key name across workflows.
 - Concurrency groups are literal `bazzite-mx-<phase>[-<key>]` and never built from
@@ -446,12 +446,19 @@ Where each one runs:
   that started it.
 - Every third-party `uses:` is pinned to a commit SHA with the version in a trailing comment
   ([`workflow.md`](workflow.md) § Keeping the pins fresh).
-- `ubuntu-26.04` for jobs that need podman or skopeo, which every job here does. It is also the
-  runner whose kernel keeps in-place writeback intact, so a runner change is a change to that
-  measurement ([`gotchas.md`](gotchas.md) § Torn writeback on a 6.17-azure runner kernel).
+- `ubuntu-26.04` for jobs that need podman or skopeo; `ubuntu-slim` only for `gh`, `jq`, `curl`
+  and `python3` work (the weekly trigger) or a single action (`clean.yml`),
+  since it runs in an unprivileged container where Docker-in-Docker is unsupported (GitHub docs,
+  "GitHub-hosted runners reference", "Single-CPU runners") and ships neither podman nor skopeo,
+  and an older shellcheck (each image's README in `actions/runner-images`). `ubuntu-26.04` is
+  also the runner whose kernel keeps in-place writeback intact, so a runner change is a change
+  to that measurement ([`gotchas.md`](gotchas.md) § Torn writeback on a 6.17-azure runner
+  kernel).
 - `runner.temp` is not available in a job-level `env:`; steps read `$RUNNER_TEMP`.
 - A dispatch on a branch runs that branch's copy of the file,
-  `gh workflow run build.yml --ref <branch>`, and `-f rechunk=true` runs the main profile.
+  `gh workflow run build.yml --ref <branch>`, and `-f rechunk=true` runs the main profile; the
+  file has to be on the default branch too ([`gotchas.md`](gotchas.md) § A workflow that is not
+  on the default branch has no runs endpoint).
 - Two profiles, one reusable workflow: what `main` and a release run add to the sandbox is an
   input (`rechunk`, then `publish`), never a second copy of the steps.
 - Every check CI runs on an image is a script under `.github/scripts/` with a `--self-test` the
@@ -487,6 +494,17 @@ Where each one runs:
   reads exactly those three names.
 - Retries are loops in the step or the tool's own flag (`skopeo inspect --retry-times 3`),
   never an action: one pin fewer for a `for` loop.
+- A cron's minute sits off `:00`, because the `schedule` event is delayed at the start of every
+  hour (GitHub docs). A scheduled workflow never publishes on its own: it dispatches
+  `release.yml`, which keeps its single trigger and puts the reason in its run name. A scheduled
+  dispatch of `release.yml` is gated on the repository variable `PROMOTE_STABLE`, so a run that
+  does not dispatch shows why: as a job `if:` when the job has nothing else to do with the
+  variable off (`trigger-release.yml`, whose job shows as skipped), in the script when the job
+  still has work (`watch-upstream.sh decide`, which logs its no-dispatch line after the
+  verdict).
+- A GHCR package is named in full in `clean.yml`, never by pattern ([`gotchas.md`](gotchas.md)
+  § `ghcr-cleanup-action` matches `packages` by pattern only with `expand-packages`), and a
+  pattern would also reach any other package of the owner.
 
 ## Prose
 

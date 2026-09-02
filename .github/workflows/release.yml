@@ -1,5 +1,5 @@
-# The only workflow that publishes, dispatched by hand, never by a push. Four
-# jobs in a row: version resolves the tag
+# The only workflow that publishes, dispatched by hand, by the weekly trigger or
+# by the watcher, never by a push. Four jobs in a row: version resolves the tag
 # and the three bases, build runs the release profile of reusable-build.yml,
 # gate verifies the three images by digest and writes the tags, release
 # publishes the GitHub Release. :stable moves only when the dispatch asks for it
@@ -12,7 +12,7 @@ on:
     inputs:
       reason:
         description: >-
-          Why this release runs (manual); shown as the run name
+          Why this release runs (manual, weekly, upstream:<12 hex per base>); shown as the run name
         type: string
         required: true
       promote_stable:
@@ -31,7 +31,8 @@ on:
 permissions: {}
 
 # One release runs and one waits on this group, which promote.yml shares; a
-# later dispatch replaces the waiting one.
+# later hand dispatch replaces the waiting one, while the watcher and the weekly
+# trigger hold as long as a release run is open.
 concurrency:
   group: bazzite-mx-release
   cancel-in-progress: false
