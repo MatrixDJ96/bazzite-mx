@@ -1,18 +1,27 @@
-# Sandbox build: every push to main or develop, every PR, builds both flavours
-# and lints them. Nothing is pushed to GHCR and no release is made from here
-# (owner's decision 1.5d: releases come only from release.yml, dispatched by
-# hand, by the weekly trigger or by the upstream watcher).
-name: Build Bazzite-MX
+# The sandbox: on a push to main or develop, a pull request or a dispatch,
+# the lint job, then the three flavours through reusable-build.yml. Nothing
+# here reaches GHCR and no release comes from a push; main and a dispatch
+# with rechunk add the chunked image, its probe and a test signature
+# (docs/workflow.md § Branches and profiles).
+name: Build
 
 on:
   push:
     branches: [main, develop]
     paths-ignore:
       - "**.md"
+      - docs/**
       - site/**
+      - .claude/**
+      - LICENSE
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      rechunk:
+        description: "Run the main profile (chunked image, probe, test signature) on this ref"
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -22,70 +31,119 @@ concurrency:
 
 jobs:
   lint:
-    name: Lint the tree
+    name: Lint
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
     steps:
-      - name: Checkout repository
+      # The whole history: check-commits.sh reads every commit of the ref.
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
 
-      # shellcheck 0.11.0 is preinstalled on ubuntu-26.04 (ubuntu-slim carries
-      # 0.9.0: not used). shfmt and yamllint come from Fedora 44 so the CI, the
-      # image and the local hook format with the same shfmt release.
-      - name: Run shellcheck
+      # The catalogue is every .sh git tracks plus every file opening with the
+      # repo's shebang, which is how the extensionless libexec helpers are
+      # covered (docs/conventions.md § Bash).
+      - name: Run ShellCheck
         run: |
           set -euo pipefail
           shellcheck --version | grep version:
-          mapfile -t scripts < <({ git ls-files '*.sh'; git grep -l '^#!/usr/bin/env bash'; } | LC_ALL=C sort -u)
+
+          mapfile -t scripts < <(
+            { git ls-files '*.sh'; git grep -l '^#!/usr/bin/env bash'; } | LC_ALL=C sort -u
+          )
           shellcheck -x -P SCRIPTDIR --severity=warning "${scripts[@]}"
+
           echo "shellcheck ok: ${#scripts[@]} scripts"
+
+      # The same catalogue, against the form rules the edit hook applies to one
+      # file at a time (docs/conventions.md § Bash → Form).
+      - name: Check Form
+        run: |
+          set -euo pipefail
+
+          mapfile -t scripts < <(
+            { git ls-files '*.sh'; git grep -l '^#!/usr/bin/env bash'; } | LC_ALL=C sort -u
+          )
+          ./.github/scripts/check-form.sh "${scripts[@]}"
+
+      # Every commit of the pushed ref, against docs/conventions.md § Commits.
+      - name: Check Commits
+        run: ./.github/scripts/check-commits.sh HEAD
 
       # Fedora 44, so CI, the image and the local hook share one shfmt release.
       - name: Run shfmt and yamllint
         run: |
           set -euo pipefail
-          podman run --rm --volume "$PWD:/repo:ro" --workdir /repo quay.io/fedora/fedora:44 bash -euo pipefail -c '
-            dnf -q install -y shfmt yamllint git > /dev/null
-            git config --global --add safe.directory /repo
-            shfmt --version
-            mapfile -t scripts < <({ git ls-files "*.sh"; git grep -l "^#!/usr/bin/env bash"; } | LC_ALL=C sort -u)
-            shfmt --diff --indent 4 --case-indent --binary-next-line --space-redirects "${scripts[@]}"
-            echo "shfmt ok: ${#scripts[@]} scripts"
-            yamllint --version
-            yamllint --strict .
-            echo "yamllint ok"
-          '
+          podman run --rm \
+            --volume "$PWD:/repo:ro" \
+            --workdir /repo \
+            quay.io/fedora/fedora:44 \
+            bash -euo pipefail -c '
+              dnf -q install -y shfmt yamllint git > /dev/null
+              git config --global --add safe.directory /repo
 
-      - name: Prove the resolver fails closed
-        run: ./.github/scripts/resolve-base.sh --self-test
+              shfmt --version
+              mapfile -t scripts < <(
+                { git ls-files "*.sh"; git grep -l "^#!/usr/bin/env bash"; } | LC_ALL=C sort -u
+              )
+              shfmt --diff \
+                --indent 4 \
+                --case-indent \
+                --binary-next-line \
+                --space-redirects \
+                "${scripts[@]}"
+              echo "shfmt ok: ${#scripts[@]} scripts"
 
-  build:
-    name: Build ${{ matrix.flavour }}
-    needs: lint
-    runs-on: ubuntu-26.04
-    timeout-minutes: 60
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        flavour: [bazzite, bazzite-nvidia-open]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              yamllint --version
+              yamllint --strict .
+              echo "yamllint ok"
+            '
 
-      - name: Resolve base image
-        id: base
-        run: ./.github/scripts/resolve-base.sh "${{ matrix.flavour }}"
-
-      - name: Build image
+      # On the host a syntax error is only a journal warning and the script is
+      # still marked performed (plasma-workspace, shellcorona.cpp).
+      - name: Check Plasma Scripts
         run: |
           set -euo pipefail
-          podman build \
-            --build-arg BASE_IMAGE="${{ steps.base.outputs.base_image }}" \
-            --build-arg IMAGE_NAME="${{ steps.base.outputs.image_name }}" \
-            --tag "localhost/bazzite-mx:${{ matrix.flavour }}" \
-            .
-          podman image inspect --format 'built {{.Id}} size {{.Size}}' "localhost/bazzite-mx:${{ matrix.flavour }}"
+          node --version
+
+          mapfile -t scripts < <(git ls-files '*.js')
+          for f in "${scripts[@]}"; do
+            node --check "$f"
+          done
+
+          echo "node --check ok: ${#scripts[@]} scripts"
+
+      # From the runner's Linuxbrew, not a third-party action.
+      - name: Install just
+        run: |
+          set -euo pipefail
+          /home/linuxbrew/.linuxbrew/bin/brew install just
+          echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+
+      - name: Check Recipe Format
+        run: |
+          set -euo pipefail
+          just --version
+          mapfile -t files < <(git ls-files '*.just')
+          for f in "${files[@]}"; do just --unstable --fmt --check --justfile "$f"; done
+          echo "just --fmt --check ok: ${#files[@]} files"
+
+      - name: Prove the CI scripts fail closed
+        run: |
+          set -euo pipefail
+          for s in resolve-base image-labels check-image; do "./.github/scripts/$s.sh" --self-test; done
+
+  build:
+    name: Build
+    needs: lint
+    permissions:
+      contents: read
+    uses: ./.github/workflows/reusable-build.yml
+    with:
+      rechunk: ${{ github.ref == 'refs/heads/main' || inputs.rechunk == true }}
+    secrets:
+      SIGNING_SECRET: ${{ secrets.SIGNING_SECRET }}

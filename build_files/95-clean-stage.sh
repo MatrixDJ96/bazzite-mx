@@ -136,28 +136,7 @@ relocate_accounts /etc/group /usr/lib/group /etc/gshadow \
 wheel:x:10:'
 rm -f /etc/.pwd.lock /etc/passwd- /etc/group- /etc/shadow- /etc/gshadow- /etc/subuid- /etc/subgid-
 
-# The rpmdb rpm-ostree reads must be the one dnf5 wrote (hardlink, not
-# symlink: aurora clean-stage.sh, rpm-ostree#4554).
-for f in rpmdb.sqlite rpmdb.sqlite-shm rpmdb.sqlite-wal; do
-    if [ -f "/usr/share/rpm/$f" ] && [ -f "/usr/lib/sysimage/rpm-ostree-base-db/$f" ]; then
-        ln -f "/usr/share/rpm/$f" "/usr/lib/sysimage/rpm-ostree-base-db/$f"
-    fi
-done
-
-# Nothing build-time survives under /var, /run, /tmp, /boot. /var/cache and
-# /var/log are cache mounts during the build (Containerfile) and cannot be
-# removed here (aurora clean-stage.sh: "things we can't delete here are mounts").
-find /var/* -maxdepth 0 -type d ! -name cache ! -name log -exec rm -rf {} +
-find /run -mindepth 1 \
-    ! -path '/run/systemd' \
-    ! -path '/run/systemd/resolve' \
-    ! -path '/run/systemd/resolve/stub-resolv.conf' \
-    ! -path '/run/secrets' \
-    ! -path '/run/secrets/*' \
-    ! -path '/run/.containerenv' \
-    -delete
-find /tmp /boot -mindepth 1 -delete
-mkdir -p /var/tmp
-chmod 1777 /var/tmp
+link_rpmdb
+empty_build_directories
 
 log "clean-stage: tree ready for lint"

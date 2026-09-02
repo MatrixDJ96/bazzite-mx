@@ -19,7 +19,9 @@
       "Bash(skopeo list-tags:*)",
       "Bash(shellcheck:*)",
       "Bash(shfmt:*)",
-      "Bash(./.github/scripts/resolve-base.sh:*)"
+      "Bash(./.github/scripts/resolve-base.sh:*)",
+      "Bash(./.github/scripts/image-labels.sh:*)",
+      "Bash(./.github/scripts/check-image.sh:*)"
     ],
     "deny": [
       "Bash(git push --force:*)",
