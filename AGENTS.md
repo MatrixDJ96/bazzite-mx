@@ -1,8 +1,8 @@
 # bazzite-mx — a personal bootc image built on Bazzite
 
 Three flavours of one `Containerfile`, `bazzite-mx`, `bazzite-mx-nvidia-open` and
-`bazzite-mx-nvidia`, on Bazzite's KDE `stable` bases, differing only in the build arg
-`BASE_IMAGE`. The image is the system layer: apps are Flatpak, CLI tools
+`bazzite-mx-nvidia`, on Bazzite's KDE `stable` bases, differing only in the build args
+`BASE_IMAGE` and `IMAGE_NAME`. The image is the system layer: apps are Flatpak, CLI tools
 Fedora RPMs or Homebrew, mutable userspace distrobox. GitHub repo `MatrixDJ96/bazzite-mx`;
 CI builds the flavours, a local build is a podman pre-flight.
 
@@ -22,7 +22,7 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 - The `lint` job of `build.yml` runs the first five, and shfmt and yamllint in
   `quay.io/fedora/fedora:44`; the local equivalent is `docs/workflow.md` § Run the lint job
   locally.
-- A change under `build_files/` gets the pre-flight (`/preflight`,
+- A change under `build_files/` or `system_files/` gets the pre-flight (`/preflight`,
   `.claude/commands/preflight.md`) with `--no-cache` before the push: buildah keys a `RUN` on
   its command, not on a bind mount's content, so a cached run exits 0 without the change.
 
@@ -31,6 +31,7 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 - `build_files/` — `build.sh` runs `NN-<feature>.sh` in version order; `lib/` the sourced
   libraries; `tests/` one smoke test per script plus `run.sh`. Each file's role:
   `docs/architecture.md`.
+- `system_files/` — copied over `/`.
 - `.github/scripts/` — one owner per CI artefact, each with a `--self-test`.
 
 ## Conventions
@@ -68,6 +69,7 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 - A push goes to `develop` first, whose sandbox builds the three flavours and publishes
   nothing; a push to `main` and a repository setting take the owner's OK
   (`docs/workflow.md` § What takes the owner's OK).
+- `cosign.key` stays out of git (`.gitignore`); its public half is `cosign.pub`.
 
 ## Docs
 

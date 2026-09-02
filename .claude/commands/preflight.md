@@ -7,10 +7,10 @@ argument-hint: "[bazzite|bazzite-nvidia-open|bazzite-nvidia] [--no-cache]"
 
 Build one flavour locally with the same recipe CI runs, and judge it on the exit status.
 Default flavour: `bazzite`; name `bazzite-nvidia-open` or `bazzite-nvidia` instead. After a
-change under `build_files/` add `--no-cache`: buildah keys a `RUN` on its command string and
-parent layer, never on the content of a bind mount, so a cached run exits 0 in minutes without
-running the changed script (`docs/gotchas.md` § A local pre-flight can exit 0 without running a
-changed build script).
+change under `build_files/` or `system_files/` add `--no-cache`: buildah keys a `RUN` on its
+command string and parent layer, never on the content of a bind mount, so a cached run exits 0
+in minutes without running the changed script (`docs/gotchas.md` § A local pre-flight can exit
+0 without running a changed build script).
 
 1. Free the space the build needs first: the previous image of this flavour and the new one are
    both on disk otherwise. The verdict of the previous run is already in its log, so nothing is
@@ -32,6 +32,7 @@ changed build script).
    ```bash
    eval "$(./.github/scripts/resolve-base.sh FLAVOUR)"
    podman build --pull=newer --build-arg BASE_IMAGE="$base_image" \
+     --build-arg IMAGE_NAME="$image_name" \
      --tag localhost/IMAGE:preflight . > /var/tmp/IMAGE-preflight.log 2>&1
    echo "BUILD_EXIT=$?" >> /var/tmp/IMAGE-preflight.log
    ```

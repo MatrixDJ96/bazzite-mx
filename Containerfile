@@ -1,20 +1,31 @@
-# bazzite-mx: one recipe for the three flavours, which differ in the build
-# arg BASE_IMAGE, mapped from the flavour name by
+# bazzite-mx: one recipe for the three flavours, which differ in the two
+# build args BASE_IMAGE and IMAGE_NAME, both mapped from the flavour name by
 # .github/scripts/resolve-base.sh, the base resolved to a digest. Two stages,
 # in the order below: ctx holds the tree and is bound at /ctx, never copied
 # into the image; image runs the build scripts, their smoke tests and bootc's
 # lint (docs/architecture.md § Build flow).
 
 ARG BASE_IMAGE=ghcr.io/ublue-os/bazzite:stable
+ARG IMAGE_NAME=bazzite-mx
+ARG IMAGE_VENDOR=matrixdj96
+
+# The version the image calls itself, empty unless the build passes one:
+# 10-image-info.sh then applies the "<base version>.dev" rule.
+ARG VERSION=
 
 # --- ctx: the tree the other stages mount -------------------------------------
 
 FROM scratch AS ctx
 COPY build_files /build_files
+COPY system_files /system_files
+COPY cosign.pub /cosign.pub
 
 # --- image: build, test, lint -------------------------------------------------
 
 FROM ${BASE_IMAGE} AS image
+ARG IMAGE_NAME
+ARG IMAGE_VENDOR
+ARG VERSION
 
 # /run is a tmpfs because buildah binds the host's resolv.conf under it and
 # the path would otherwise stay in the image (docs/gotchas.md § A networked

@@ -6,7 +6,8 @@ rules themselves live in [`conventions.md`](conventions.md).
 
 Contents, in the order of the entries: torn writeback on 6.17-azure · command | grep -q ·
 stub-resolv.conf left in the image · remove-unwanted-software v9 · force-push without a push
-run · pre-flight without the changed script · arithmetic error escapes set -e.
+run · pre-flight without the changed script · image-info.json vs OCI label day · arithmetic
+error escapes set -e.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -71,11 +72,21 @@ hand, `gh workflow run build.yml --ref <branch>`.
 ## A local pre-flight can exit 0 without running a changed build script
 
 buildah keys a `RUN` layer on its command string and its parent layer; the content behind a
-`--mount=type=bind,from=ctx` is not hashed into it. After a change under `build_files/`, a
-pre-flight whose base layers are cached reports `Using cache` on the build step and exits 0 in
-about three minutes with an image built from the old scripts. Measured 2026-09-04: the closed
-flavour's pre-flight after a new feature printed ten `Using cache` lines, while `--no-cache`
-produced the real build. CI is not affected, a fresh runner having no layer cache.
+`--mount=type=bind,from=ctx` is not hashed into it. After a change under `build_files/` or
+`system_files/`, a pre-flight whose base layers are cached reports `Using cache` on the
+build step and exits 0 in about three minutes with an image built from the old scripts.
+Measured 2026-09-04: the closed flavour's pre-flight after a new feature printed ten
+`Using cache` lines, while `--no-cache` produced the real build. CI is not affected, a fresh
+runner having no layer cache.
+
+## The base's image-info.json and its OCI label can name different days
+
+`ghcr.io/ublue-os/bazzite@sha256:437920ba…` carries
+`org.opencontainers.image.version=44.20260908` and ships an `image-info.json` whose `version`
+is `44.20260907`. `resolve-base.sh` reads the label, while `10-image-info.sh` reads the file,
+so `base-version` and the `(Bazzite …)` of `version-pretty` follow the file: a `.dev` build
+without `VERSION` would be `44.20260907.dev`. Measured 2026-09-12 on the pre-flight image. Both
+numbers are the base's own; the image reports each from its source and neither is rewritten.
 
 ## An arithmetic syntax error escapes `set -e`
 
