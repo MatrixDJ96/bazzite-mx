@@ -7,8 +7,8 @@ which files carry it; the guards themselves live in the build script and its tes
 [`gotchas.md`](gotchas.md) holds the surprises this project probed, each with its date.
 
 Contents: three flavours · image identity · signing trust · hook framework · Docker CE ·
-virtualization · VS Code · git tools · command-line tools · mise · desktop applications · the
-cleaned stage · CI.
+virtualization · VS Code · git tools · command-line tools · mise · desktop applications ·
+Sunshine · the cleaned stage · CI.
 
 ## Three flavours, one recipe
 
@@ -376,6 +376,58 @@ Files: `build_files/40-desktop-apps.sh` and `build_files/80-fix-opt.sh` with the
 `build_files/lib/flatpak.sh`, `system_files/etc/yum.repos.d/1password.repo`,
 `system_files/etc/pki/rpm-gpg/RPM-GPG-KEY-1password`.
 
+## Sunshine
+
+Bazzite dropped its Sunshine RPM, and its `setup-sunshine` installs the Flatpak per host
+(`bazzite/system_files/desktop/shared/usr/share/ublue-os/just/82-bazzite-sunshine.just`). The
+RPM is in the image because the Flatpak cannot do what the fleet uses it for: Flatpak does not
+support KMS capture, which needs elevated privileges (LizardByte/Sunshine,
+`docs/getting_started.md`). The package comes from the COPR the Sunshine docs name, vendored
+with `enabled=0` and the file's `priority=1` dropped, which would otherwise let the repository
+override Fedora's packages on a host that enabled it. Its `/usr/bin/sunshine` carries
+`cap_sys_admin,cap_sys_nice=p`, which KMS capture needs and which also means a compromised
+process holds `CAP_SYS_ADMIN` for the user running it, accepted because the unit is opt-in and
+the hosts are single-user. That premise holds only once the user has set the portal's
+credentials. Once enabled, Sunshine listens on every address and its portal admits the LAN
+(`bind_address` empty and `origin_web_ui_allowed = lan` by default; LizardByte/Sunshine,
+`docs/configuration.md`), the base's `FedoraWorkstation` zone admits TCP and UDP 1025-65535
+(`/usr/lib/firewalld/zones/FedoraWorkstation.xml`). So `enable` writes
+`origin_web_ui_allowed = pc` to `~/.config/sunshine/sunshine.conf` when the file has no such
+key, leaving a value the user set: the portal answers this PC alone, and the stream stays
+reachable from the LAN. `/api/password` skips that origin check while no username exists
+(LizardByte/Sunshine, `src/confighttp.cpp`: `savePassword` calls `authenticate` only once one
+is set), so when `~/.config/sunshine/sunshine_state.json` has no username `enable` asks for the
+portal's credentials and writes them with `sunshine --creds` before the service starts, the
+password passing through the command line of that one call. It restarts a running Sunshine only
+when it wrote one of the two files, which Sunshine reads at start (LizardByte/Sunshine,
+`src/httpcommon.cpp`, `src/config.cpp`), so a stream in progress survives an `enable` with
+nothing to write. The package's menu entry `Sunshine` (`dev.lizardbyte.app.Sunshine.desktop`)
+started the unit with `systemctl start --u`, past both, and its action ran `sunshine` directly:
+the build rewrites the entry to run `ujust setup-sunshine enable` in a terminal and drops the
+action.
+
+Streaming stays opt-in: the RPM's user unit is disabled for every user with
+`systemctl --global disable`, asserted after the install rather than assumed from the presets,
+and enabled per user by the recipe. One account at a time per host: https://localhost:47990 is
+the portal of the account whose Sunshine started first, and another's cannot bind the ports,
+its unit failing after five restarts. Bazzite's announcement telling users of that unit to
+reinstall from the Portal is removed, and so is the Portal's Sunshine group, whose `update`,
+`uninstall` and `enable-brew` are Bazzite's options. The recipe `setup-sunshine` replaces
+Bazzite's with `status`, `enable`, `disable`, `portal` and `virtual-monitor`, the last being
+Bazzite's "Virtual Monitor" app rewritten for the RPM. `enable` refuses when the unit systemd
+loads is a copy under the user's home, such as the one Bazzite's Flatpak leaves in
+`~/.config/systemd/user/app-dev.lizardbyte.app.Sunshine.service`, first in the user unit path
+and running the Flatpak, and names the remedy:
+`flatpak run --command=remove-additional-install.sh dev.lizardbyte.app.Sunshine`, or removing
+the file and `systemctl --user daemon-reload`. Not carried over: the install, update and
+uninstall paths, the RPM following the image, and the Deck and Homebrew branches, the fleet
+having no Deck image. The "Fix Error 503" switch is a KWin permission bypass, and returns as
+its own step if a host needs it.
+
+Files: `build_files/41-sunshine.sh` and its test, `system_files/etc/yum.repos.d/sunshine.repo`,
+`system_files/etc/pki/rpm-gpg/RPM-GPG-KEY-copr-lizardbyte-stable`,
+`system_files/usr/share/ublue-os/just/82-bazzite-sunshine.just`.
+
 ## The cleaned stage
 
 The last build script puts back what the build's own transactions changed under `/etc` and
@@ -385,9 +437,10 @@ produced them. Three effects reach a host and belong here.
 The accounts created in the build are moved out of `/etc/passwd` and `/etc/group` into
 `/usr/lib/passwd` and `/usr/lib/group`, and the `-` backups removed. Their `/etc/shadow` lines
 are left where they are: the base ships that file with dozens of entries whose accounts live in
-`/usr/lib` already, so the few this stage adds change nothing a host reads. NSS resolves them
-through `altfiles`, and `/etc` goes back to `root` and `wheel` alone. Without the move
-`bootc container lint --fatal-warnings` refuses the image, its sysusers check reading an
+`/usr/lib` already, so the few this stage adds change nothing a host reads. On the current base
+the move is eleven groups and five users, `docker`, `libvirt` and `qemu` among them; NSS
+resolves them through `altfiles`, and `/etc` goes back to `root` and `wheel` alone. Without the
+move `bootc container lint --fatal-warnings` refuses the image, its sysusers check reading an
 account line in `/etc` as machine state (§ Docker CE for what the boot hook then copies back).
 
 The dnf5 system state under `/usr/lib/sysimage/libdnf5/` is emptied. It is the record of the

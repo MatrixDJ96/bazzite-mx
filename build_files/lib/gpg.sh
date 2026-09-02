@@ -22,6 +22,10 @@ declare -A KEY_FPR=(
     # "Code signing for 1Password <codesign@1password.com>"
     # downloads.1password.com/linux/keys/1password.asc
     ["/etc/pki/rpm-gpg/RPM-GPG-KEY-1password"]=3FEF9748469ADBE15DA7CA80AC2D62742012EA22
+
+    # "lizardbyte_stable (None) <lizardbyte#stable@copr.fedorahosted.org>"
+    # download.copr.fedorainfracloud.org/results/lizardbyte/stable/pubkey.gpg
+    ["/etc/pki/rpm-gpg/RPM-GPG-KEY-copr-lizardbyte-stable"]=1827C306E9944D99DF4CACF143B84301E4F68234
 )
 
 # The primary key's fingerprint of an armored key file, 40 upper-case hex

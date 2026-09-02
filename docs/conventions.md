@@ -82,6 +82,15 @@ is checked by hand at review, like § Prose.
   `systemctl is-enabled`, `is-active`) leaves x under what it printed, two lines for one. The
   output is captured with `|| true` and the fallback sits in the expansion.
 
+  ```bash
+  # before, 82-bazzite-sunshine.just
+  enabled=$(systemctl --user is-enabled "$UNIT" 2> /dev/null || echo disabled)
+  # after
+  enabled=$(systemctl --user is-enabled "$UNIT" 2>/dev/null || true)
+  active=$(systemctl --user is-active "$UNIT" 2>/dev/null || true)
+  echo "$UNIT: ${enabled:-unknown} / ${active:-unknown}"
+  ```
+
 - **A pipeline assigned carries `|| true` or opens a condition.** `var=$(grep …)` and
   `var=$(cmd | …)` are refused by `check-form.sh` without one of the two: under `pipefail` an
   element that fails (a grep matching nothing, `just` on a broken file, `head` closing early)
@@ -121,7 +130,10 @@ is checked by hand at review, like § Prose.
   commands after, `main` last.
 
 - **A line stops at 100 columns.** A long command breaks after `\` with one argument per line;
-  a long pattern or message goes into a variable named for what it holds.
+  a long pattern or message goes into a variable named for what it holds. The one exception is
+  the description comment above a `.just` recipe, which `just --list` prints whole from that
+  single line ([`gotchas.md`](gotchas.md) § A recipe's description is the LAST comment line
+  above it).
 
 - **A name says what the function does or what the variable holds.** No private vocabulary.
   `die` is named by its effect: `fail_build` in `lib/log.sh` (prints `FAIL:`, the build stops),
