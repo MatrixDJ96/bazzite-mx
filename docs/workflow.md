@@ -12,8 +12,9 @@ Contents: branches and profiles · run the lint job locally · what takes the ow
 | `develop`, `main`, pull requests | the `lint` job, then the three flavours                              | the tree builds                                                    | nothing                           |
 
 The `lint` job runs shellcheck, `check-form.sh` and `check-commits.sh` (every commit of the
-pushed ref, `conventions.md` § Commits) on the runner, then shfmt and yamllint inside
-`quay.io/fedora/fedora:44`. The `--self-test` of every script under `.github/scripts/` and of
+pushed ref, `conventions.md` § Commits) on the runner, then shfmt, yamllint and
+`just --fmt --check` on the recipe files inside `quay.io/fedora/fedora:44`, the `just` release
+the image ships. The `--self-test` of every script under `.github/scripts/` and of
 `tests/run.sh` runs right after ShellCheck, before the checks it proves.
 
 `build.yml` ignores pushes that touch only `**.md`, `docs/`, `.claude/` or `LICENSE`.
@@ -37,18 +38,20 @@ gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref main
 
 ## Run the lint job locally
 
-The shell catalogue is every `.sh` git does not ignore, tracked or not, plus any extensionless
-script, found by its shebang; shfmt and yamllint run in the container the job uses, so the
-releases match the image's.
+The shell catalogue is every `.sh` git does not ignore, tracked or not, plus the extensionless
+libexec helpers, found by their shebang; shfmt, yamllint and `just` run in the container the
+job uses, so the releases match the image's.
 
 ```bash
 scripts=$({ git ls-files -co --exclude-standard '*.sh'
   git grep --untracked -l '^#!/usr/bin/env bash'; } | sort -u | tr '\n' ' ')
+recipes=$(git ls-files '*.just' | tr '\n' ' ')
 shellcheck -x -P SCRIPTDIR --severity=warning $scripts
 ./.github/scripts/check-form.sh $scripts
 podman run --rm -v "$PWD:/repo:ro,z" -w /repo quay.io/fedora/fedora:44 \
-  bash -euo pipefail -c "dnf -q install -y shfmt yamllint >/dev/null
-    shfmt -d -i 4 -ci -bn -sr $scripts; yamllint --strict ."
+  bash -euo pipefail -c "dnf -q install -y shfmt yamllint just >/dev/null
+    shfmt -d -i 4 -ci -bn -sr $scripts; yamllint --strict .
+    for f in $recipes; do just --unstable --fmt --check --justfile \$f; done"
 ```
 
 ## What takes the owner's OK

@@ -2,8 +2,8 @@
 # build args BASE_IMAGE and IMAGE_NAME, both mapped from the flavour name by
 # .github/scripts/resolve-base.sh, the base resolved to a digest. Two stages,
 # in the order below: ctx holds the tree and is bound at /ctx, never copied
-# into the image; image runs the build scripts, their smoke tests and bootc's
-# lint (docs/architecture.md § Build flow).
+# into the image; image runs the build scripts, their smoke tests, rpm -V of
+# python3-setuptools and bootc's lint (docs/architecture.md § Build flow).
 
 ARG BASE_IMAGE=ghcr.io/ublue-os/bazzite:stable
 ARG IMAGE_NAME=bazzite-mx
@@ -48,7 +48,9 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --network=none \
     /ctx/build_files/tests/run.sh
 
-# The last gate, offline (docs/architecture.md § Gates, in order).
+# The last gate, offline (docs/architecture.md § Gates, in order): rpm -V sees
+# a packaged .pyc the build or the test RUN rewrote.
 RUN --mount=type=tmpfs,target=/run \
     --network=none \
-    bootc container lint --fatal-warnings --no-truncate
+    rpm -V --nomtime python3-setuptools \
+    && bootc container lint --fatal-warnings --no-truncate

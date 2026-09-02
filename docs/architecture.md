@@ -15,7 +15,7 @@ Containerfile
   image         FROM ${BASE_IMAGE}
     RUN /ctx/build_files/build.sh                  mounts: /var/cache and /var/log (cache), /run and /tmp (tmpfs)
     RUN /ctx/build_files/tests/run.sh              offline; tmpfs on /run, /tmp, /var/log, /var/cache
-    RUN bootc container lint …                                          offline; tmpfs on /run
+    RUN rpm -V --nomtime python3-setuptools && bootc container lint …    offline; tmpfs on /run
 ```
 
 Why `/run` is a tmpfs is on the `RUN` itself in the `Containerfile`.
@@ -42,9 +42,11 @@ Each script owns one artefact and ships a `--self-test`.
 | Path                      | Role                                                                                                                                             |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `build.sh`                | runs `NN-<feature>.sh` in version order, one group each, stops at the first failure                                                              |
-| `lib/env.sh`              | sourced first: `CTX`, `BUILD_FILES`, `BUILD_TMP`, `BUILD_STATE`, then every library                                                              |
+| `lib/env.sh`              | sourced first: `CTX`, `BUILD_FILES`, `BUILD_TMP`, `BUILD_STATE`, `PYTHONDONTWRITEBYTECODE`, then every library                                   |
 | `lib/log.sh`              | `group`, `endgroup`, `log`, `fail_build`                                                                                                         |
 | `lib/repos.sh`            | `install_from_repo`, `enabled_repos`                                                                                                             |
+| `lib/flatpak.sh`          | `deny_flatpak <ref>`: one deny line in the base's Flatpak filter                                                                                 |
+| `lib/just.sh`             | `recipe_set`, `has_recipe`; output captured before any grep                                                                                      |
 | `lib/gpg.sh`              | the `KEY_FPR` table, `key_fingerprint` and `assert_key_fingerprint`                                                                              |
 | `00-prep.sh`              | dnf keeps its cache and waits 60 s against COPR and mirror flakes; the base's repositories are recorded                                          |
 | `01-system-files.sh`      | `rsync` of `system_files/` over the tree, every file on a fresh inode; the fixed-gid groups                                                      |
@@ -52,6 +54,7 @@ Each script owns one artefact and ships a `--self-test`.
 | `11-image-signing.sh`     | the public key and the `policy.json` scope for `ghcr.io/matrixdj96`                                                                              |
 | `20-setup-services.sh`    | the `ublue-setup-services` hook framework and its system unit                                                                                    |
 | `21-container-runtime.sh` | Docker CE, the podman tools, both sockets enabled                                                                                                |
+| `22-virtualization.sh`    | libvirt, QEMU/KVM, virt-manager, swtpm, quickemu                                                                                                 |
 | `90-validate-repos.sh`    | the repository gate, run after the last install                                                                                                  |
 | `95-clean-stage.sh`       | the tree bootc lint expects                                                                                                                      |
 | `tests/run.sh`            | the test runner and the pairing guard                                                                                                            |
@@ -71,8 +74,13 @@ One tree, copied over `/` by `01-system-files.sh`.
 | `etc/yum.repos.d/`                             | the one vendored repository, every section `enabled=0`                                                                                                                                                                                                                                                                     |
 | `etc/pki/rpm-gpg/RPM-GPG-KEY-*`                | the key that file reads with `gpgkey=file://`                                                                                                                                                                                                                                                                              |
 | `etc/containers/registries.d/matrixdj96.yaml`  | sigstore attachments for our own scope                                                                                                                                                                                                                                                                                     |
+| `usr/lib/modprobe.d/bazzite-mx-kvm.conf`       | the KVM options                                                                                                                                                                                                                                                                                                            |
 | `usr/lib/modules-load.d/ip_tables.conf`        | `iptable_nat`, which docker-in-docker needs                                                                                                                                                                                                                                                                                |
-| `usr/lib/sysusers.d/bazzite-mx-groups.conf`    | the fixed gid of `docker`                                                                                                                                                                                                                                                                                                  |
+| `usr/lib/sysusers.d/bazzite-mx-groups.conf`    | the fixed gids of `docker` and `libvirt`                                                                                                                                                                                                                                                                                   |
+| `usr/lib/systemd/system/docker.service.d/`     | the drop-in that runs the libvirt forwarding helper once dockerd is ready                                                                                                                                                                                                                                                  |
+| `usr/lib/tmpfiles.d/bazzite-mx-virt.conf`      | the `/var` directories libvirt and swtpm need                                                                                                                                                                                                                                                                              |
+| `usr/libexec/`                                 | the helpers the recipes and `docker.service` call; ours take a fixture knob for their test                                                                                                                                                                                                                                 |
+| `usr/share/ublue-os/just/`                     | one file replacing a base file                                                                                                                                                                                                                                                                                             |
 | `usr/share/ublue-os/system-setup.hooks.d/`     | the root hook that grants the service groups and moves their gids to the image's                                                                                                                                                                                                                                           |
 
 ## State of a build
@@ -89,7 +97,9 @@ One tree, copied over `/` by `01-system-files.sh`.
    repository, the enabled set read from `dnf5 repolist` itself, and no modified base
    repository.
 2. `tests/run.sh`: every feature's smoke test on the cleaned tree, offline.
-3. `bootc container lint --fatal-warnings`: the last word, offline.
+3. `rpm -V --nomtime python3-setuptools`, then `bootc container lint --fatal-warnings`: the
+   last word, offline; `rpm -V` sees a packaged `.pyc` the build or the test RUN rewrote
+   ([`gotchas.md`](gotchas.md) § A scriptlet rewrote a packaged `.pyc`).
 
 Every gate is proven on a known-bad input before it counts ([`conventions.md`](conventions.md)
 § Positive control).

@@ -4,10 +4,11 @@ Surprises found on this project that a reader would otherwise rediscover the har
 says what happens, how and when it was measured, and what the repository does about it. The
 rules themselves live in [`conventions.md`](conventions.md).
 
-Contents, in the order of the entries: torn writeback on 6.17-azure · command | grep -q ·
+Contents, in the order of the entries: torn writeback on 6.17-azure · ujust.sh readonly names ·
+kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set · command | grep -q ·
 stub-resolv.conf left in the image · remove-unwanted-software v9 · force-push without a push
-run · pre-flight without the changed script · image-info.json vs OCI label day · arithmetic
-error escapes set -e.
+run · pre-flight without the changed script · image-info.json vs OCI label day · Docker FORWARD
+policy and libvirt · arithmetic error escapes set -e · scriptlet rewrote a .pyc.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -24,6 +25,49 @@ in 4 of 4 arms.
 
 CI builds on `ubuntu-26.04` for this reason, and the image carries neither a cold NUL sweep nor
 a fresh-inode helper. A runner whose kernel is a 6.17-azure brings the defect back.
+
+## `ujust.sh` declares its colour and formatting names readonly
+
+`source /usr/lib/ujust/ujust.sh` brings `libcolors.sh` and `libformatting.sh`, which declare
+`red`, `green`, `bold`, `normal` and the short forms `b` and `n` with `declare -r`
+(ublue-os-just 0.57-3.fc44, measured 2026-09-06 on the hub). A script that assigns one of them
+after the source prints `b: readonly variable` at every run and keeps the library's value;
+under `set -e` it stops there. The kvmfr helper carried such a line, added on the belief that
+`ujust.sh` left `b` and `n` unset; it is bazzite-dx's file again, a shellcheck directive
+standing in for the assignment (the runner cannot follow the source), and
+`tests/22-virtualization.sh` refuses any assignment to a name the libraries declare readonly,
+the list read from the image and an empty list a failure.
+
+## The kvmfr helper's `qemu.conf` edit matches nothing on this base
+
+`bazzite-dx-kvmfr-setup` uncomments libvirt's default `cgroup_device_acl` with `/dev/kvmfr0`
+appended by matching the whole commented block, `/dev/kvm` on its own line included. The
+`/etc/libvirt/qemu.conf` of this image (libvirt of Fedora 44, measured 2026-09-06 in the
+`44.20260906` release) lists `"/dev/ptmx", "/dev/userfaultfd"` with no `/dev/kvm`, so the
+substitution changes nothing and prints nothing: the step ran, the file stayed as it was. The
+rewrite of 2026-09-06 kept the edit as upstream wrote it; on 2026-09-14 the step was dropped
+instead, a call that writes nothing on every host this image reaches being one step of a recipe
+that lies about what it did. A libvirt whose commented block matches upstream's again would
+need the edit back, with the block re-read at that point.
+
+## The kvmfr helper runs under sudo, so `$HOME` and `$USER` are root's
+
+`ujust setup-virtualization` calls `sudo /usr/libexec/bazzite-dx-kvmfr-setup`, the line
+upstream's recipe has (`bazzite-dx`, `84-bazzite-virt.just`), while the helper still calls sudo
+on each root step, as upstream's does. The image's `/etc/sudoers` carries
+`Defaults always_set_home` and keeps `HOME` out of `env_keep` (measured 2026-09-08 in the
+`44.20260908.dev` pre-flight image), so inside the helper `HOME=/root` and `USER=root`: the
+SELinux policy lands under `/root/.config/selinux_te/`, a path the helper prints to the user
+who cannot read it, and the final `chown "$USER:qemu" /dev/kvmfr0` gives the device to root.
+Kept as upstream wrote it (the port is by design faithful); a fix is a behaviour change.
+
+## `grep -v` on an empty set kills a `pipefail` script silently
+
+`... | grep -v '^$' | ...` exits 1 when no line survives the filter, and under
+`set -euo pipefail` the script dies without a message (measured 2026-09-02 in `00-prep.sh`,
+first pre-flight of the justfile feature). `sed '/^$/d'` exits 0 on an empty set and is what
+`recipe_set` uses in `lib/just.sh`. A dry run in a container without `set -e` had not caught
+it, dry runs carrying `set -euo pipefail` too.
 
 ## `command | grep -q` under `pipefail` fails on a match
 
@@ -88,6 +132,29 @@ so `base-version` and the `(Bazzite …)` of `version-pretty` follow the file: a
 without `VERSION` would be `44.20260907.dev`. Measured 2026-09-12 on the pre-flight image. Both
 numbers are the base's own; the image reports each from its source and neither is rewritten.
 
+## Docker's `FORWARD` policy cuts libvirt's NAT guests off
+
+A guest on libvirt's `default` network pinged `192.168.122.1` and nothing beyond, and
+`curl https://ghcr.io/v2/` timed out (measured 2026-09-07 on a host running the image, Docker
+CE 29.8.0 with its iptables backend, libvirt 12.0.0 with its nftables backend, firewalld off;
+the probe was a network namespace on a veth attached to `virbr0`, the forwarding path of a
+tap). libvirt's `ip libvirt_network` table accepts the guest's packets in its own `forward`
+chain; the packet then traverses Docker's `ip filter` `FORWARD` chain, whose policy dockerd set
+to `DROP` when it enabled forwarding, and no rule there matches a `virbr0` packet: an accept in
+one nftables base chain is not final for the others. Docker evaluates `DOCKER-USER` first and
+never flushes it, so `iptables -I DOCKER-USER -i virbr+ -j ACCEPT` and its `-o` twin restore
+the route at once, and they survived `systemctl restart docker`. That pair also skips Docker's
+own ingress rules in the filter table for every container; the image ships a narrower chain,
+`BAZZITE-MX-LIBVIRT`, built by `bazzite-mx-libvirt-forward` from a `docker.service` drop-in
+after dockerd is ready ([`divergences.md`](divergences.md) § Virtualization and quickemu).
+Docker 29.8.0 protects a running container on its own as well: its `raw` table drops every
+packet to the container's address that does not enter through `docker0` (one rule per
+container, published ports or not, gone when the container stops), so a guest reaches a
+container only through a port published on the host whatever the filter table says (measured
+the same day: the guest got http 200 on the published port, nothing on the container's address,
+with either form). No upstream image carries a counterpart (`git grep DOCKER-USER` empty in
+bazzite, bazzite-dx, aurora and amyos).
+
 ## An arithmetic syntax error escapes `set -e`
 
 Under `set -euo pipefail`, `x=$((5 - $(printf '')))` prints `syntax error: operand expected`
@@ -98,3 +165,19 @@ ended with the status of the last command it ran, 0 after an `echo`; only a drop
 that is the script's last, as `main "$@"` is, ends it with 1 (measured 2026-09-23 with bash
 5.3.9). `(( n += $(printf '') ))` is an ordinary failure with status 1, which `set -e` stops
 on. Rule 10 of `check-form.sh` refuses a `$( )` inside `$(( ))`.
+
+## A scriptlet rewrote a packaged `.pyc`
+
+The `%post` of `libvirt-daemon-driver-network`, installed by `22-virtualization.sh`, runs
+`firewall-cmd --reload --quiet`, a `#!/usr/bin/python3 -sP` script. At start Python imports
+`_distutils_hack` through `distutils-precedence.pth`, and the base's `__init__.cpython-314.pyc`
+records a source mtime of `0x69af5f00` where the source has 0, so the interpreter compiles it
+again and writes it over the packaged file. Measured 2026-09-23 on the 44.20260921 base:
+`rpm -V --nomtime python3-setuptools` printed
+`S.5...... /usr/lib/python3.14/site-packages/_distutils_hack/__pycache__/__init__.cpython-314.pyc`
+in the three pre-flight images and nothing in their three bases; in the base,
+`firewall-cmd --reload --quiet` alone (status 36) sufficed for `rpm -V --nomtime` to print the
+same line, and with `PYTHONDONTWRITEBYTECODE=1` in front it exited 0. `lib/env.sh` exports the
+variable to every build script and `tests/run.sh` to every test. The last gate of the
+`Containerfile` requires `rpm -V --nomtime python3-setuptools` clean on the final image, which
+holds what the build RUN and the test RUN wrote.
