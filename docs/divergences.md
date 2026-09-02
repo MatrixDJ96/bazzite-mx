@@ -7,7 +7,8 @@ which files carry it; the guards themselves live in the build script and its tes
 [`gotchas.md`](gotchas.md) holds the surprises this project probed, each with its date.
 
 Contents: three flavours · image identity · signing trust · hook framework · Docker CE ·
-virtualization · VS Code · git tools · command-line tools · mise · the cleaned stage · CI.
+virtualization · VS Code · git tools · command-line tools · mise · desktop applications · the
+cleaned stage · CI.
 
 ## Three flavours, one recipe
 
@@ -322,6 +323,58 @@ package ships the bash and fish completions.
 Files: `build_files/33-mise.sh` and its test, `system_files/etc/profile.d/mise.sh`,
 `system_files/etc/skel/.config/mise/config.toml`, `system_files/etc/yum.repos.d/mise.repo`,
 `system_files/etc/pki/rpm-gpg/RPM-GPG-KEY-copr-jdxcode-mise`.
+
+## Desktop applications
+
+**Firefox.** Bazzite removes `firefox` and `firefox-langpacks` in favour of the Flatpak. The
+RPM is back because of 1Password's browser integration: native messaging goes through
+`/opt/1Password/1Password-BrowserSupport`, a host binary a sandboxed Firefox does not reach out
+of the box. The Flatpak is denied through Bazzite's own filter: `bazzite-flatpak-manager`
+points Flathub's filter at its blocklist with `flatpak remote-modify --filter` when its version
+or the image name changes, as the rebase onto this image does, and the remote reads the file by
+path (flatpak-remote-modify(1), flatpak-remote-add(1)); a host that already has it keeps it.
+The RPM reads its defaults from `/usr/lib64/firefox/browser/defaults/preferences/`, and
+Bazzite's `/usr/share/ublue-os/firefox-config/01-bazzite-global.js` reaches only the Flatpak,
+which `bazzite-flatpak-manager` copies it into, so the build installs that file there too: the
+AI features it turns off (`browser.ml.enable` and the rest) stay off and hardware video
+decoding is forced, as in Bazzite; the home page stays Fedora's start page. **gparted** comes
+from Fedora, where Bazzite ships `gnome-disk-utility` and gparted only on the live ISO.
+**teams-for-linux** is deliberately absent: `flatpak preinstall` synchronises, so removing an
+entry later would uninstall the app (flatpak-preinstall(1)).
+
+**1Password** comes from the vendor's repository, the stanza of
+https://support.1password.com/install-linux/ vendored with `enabled=0` and the key from
+https://downloads.1password.com/linux/keys/1password.asc, whose fingerprint the vendor's page
+prints as well. `repo_gpgcheck=1` stays because the repository publishes
+`repodata/repomd.xml.asc`; the package's own `.repo` comments that out for a dnf4-era bug
+(bugzilla 1768206). Installing at build time rather than layering on the host is what keeps
+`bootc status` compatible. Its `%post` needs three answers. It rewrites the `.repo` file with
+`enabled=1`, so the build reinstalls the vendored copy and asserts it byte for byte. It fills
+the polkit owner annotation from the first ten UID ≥ 1000 users of `/etc/passwd`, and a build
+has no such user. The annotation therefore ships empty, and the build fails if one were
+rendered there. Nothing is lost: polkit lets a process check the authorization of another
+process of the same user without it (polkit(8)). It creates two groups without `--system`,
+which in a build would take the gids of a host's first human users, and a system gid is no
+answer either since the app rejects a BrowserSupport whose group id is below 1000
+([`gotchas.md`](gotchas.md) § The 1Password app rejects a BrowserSupport whose group id is
+below 1000); the build creates them first with fixed gids above 1000, 31001 being NixOS's own
+for `onepassword`. The `%post` also makes `chrome-sandbox` setuid root, which Electron's
+sandbox requires (https://github.com/electron/electron/issues/17972, cited in the scriptlet),
+and the image keeps it: `rpm -V --nomtime 1password` on a host reports its mode, and the mode
+and group of the two setgid binaries, as changed.
+
+**The `/opt` payload.** The image's `/opt` is a symlink to `var/opt`, and `/var/opt` is created
+on a host by rpm-ostree's own tmpfiles line but does not exist in a build, so an RPM unpacking
+under `/opt` dies in cpio. `80-fix-opt.sh` moves every `/var/opt/<name>` to
+`/usr/lib/opt/<name>` and writes one tmpfiles `L+` line per directory, so the `/opt/...` paths
+baked into the application resolve on the host. bootc keeps `/opt` read-only and links what
+must be written into `/var` (bootc.dev, "Filesystem" and "Building images"); the move to
+`/usr/lib/opt` is the pattern bazzite-dx uses for an RPM's `/opt` payload
+(`bazzite-dx/build_files/50-fix-opt.sh`), rewritten so the checks run before the first move.
+
+Files: `build_files/40-desktop-apps.sh` and `build_files/80-fix-opt.sh` with their tests,
+`build_files/lib/flatpak.sh`, `system_files/etc/yum.repos.d/1password.repo`,
+`system_files/etc/pki/rpm-gpg/RPM-GPG-KEY-1password`.
 
 ## The cleaned stage
 
