@@ -13,7 +13,10 @@ Contents: Bash (Form) · positive control · CI · prose · commits.
   follows the sourced libraries, so a variable a library sets is not reported as undefined.
 - The `lint` job of `build.yml` runs both over every `.sh` git tracks plus every file carrying
   the repo's shebang, so an extensionless script is covered too.
-- The shfmt release is fixed at Fedora 44's: CI installs it in `quay.io/fedora/fedora:44`.
+- The shfmt release is fixed at Fedora 44's, so the hook and the lint job cannot disagree on a
+  diff. CI installs it in `quay.io/fedora/fedora:44`. The edit hook
+  `.claude/hooks/lint-edit.sh` uses the host binary only when its minor matches, and the same
+  container otherwise.
 - A function a caller may run under `if` or `||` returns a status and never calls `exit`: under
   `if`, `exit` kills the whole script, and a `2>/dev/null` on the call hides why. The CI
   scripts follow it, and their `--self-test` exercises the failing paths as calls. An exit left
@@ -24,12 +27,13 @@ Contents: Bash (Form) · positive control · CI · prose · commits.
 ### Form
 
 A script is read by a person before bash runs it, and the person is not the author. These rules
-hold for every file the lint job covers: libraries and the CI scripts. They hold in the same
-spirit for every other file of the repo: a workflow or the Containerfile gets the same blank
-lines between its steps, the same 100 columns and comments that carry a reason, never a
-restatement. The shapes and the width are checked by `.github/scripts/check-form.sh`, which the
-`lint` job runs on the whole shell catalogue; a line that holds a banned shape as data ends in
-`# form: literal`. The rest is checked by hand at review, like § Prose.
+hold for every file the lint job covers: libraries, the CI scripts and the edit hook. They hold
+in the same spirit for every other file of the repo: a workflow or the Containerfile gets the
+same blank lines between its steps, the same 100 columns and comments that carry a reason,
+never a restatement. The shapes and the width are checked by `.github/scripts/check-form.sh`,
+which the edit hook runs on every shell file an edit touches and the `lint` job on the whole
+shell catalogue; a line that holds a banned shape as data ends in `# form: literal`. The rest
+is checked by hand at review, like § Prose.
 
 - **Control flow is written as `if … then … fi`.** `cmd || return 1`, `a && b || c`,
   `! cmd || die`, `cmd || { … }` and a subshell `( … ) ||` used as a guard are out: they hide
@@ -132,7 +136,7 @@ Where each one runs:
 | Self-test                                                 | Where it runs                                                                                                                                             |
 | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.github/scripts/*.sh`                                    | `lint` job, `build.yml`                                                                                                                                   |
-| `check-form.sh`                                           | `lint` job, `build.yml`, which then runs the check itself over the whole shell catalogue                                                                  |
+| `check-form.sh`                                           | `lint` job, `build.yml`, which then runs the check itself over the whole shell catalogue; `.claude/hooks/lint-edit.sh` runs it on every edited shell file |
 
 ## CI
 

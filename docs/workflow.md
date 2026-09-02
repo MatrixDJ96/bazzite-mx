@@ -15,7 +15,7 @@ pushed ref, `conventions.md` § Commits) on the runner, then shfmt and yamllint 
 `quay.io/fedora/fedora:44`. The `--self-test` of every script under `.github/scripts/` runs
 right after ShellCheck, before the checks it proves.
 
-`build.yml` ignores pushes that touch only `**.md`, `docs/` or `LICENSE`.
+`build.yml` ignores pushes that touch only `**.md`, `docs/`, `.claude/` or `LICENSE`.
 
 ## Run the lint job locally
 

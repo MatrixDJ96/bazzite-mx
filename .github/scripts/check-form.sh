@@ -2,8 +2,9 @@
 # The form rules of docs/conventions.md § Bash → Form as a check: the line
 # width, six control-flow shapes the rules ban and four failures (a pipe into
 # grep -q, a || echo fallback inside $( ), a pipeline assigned bare, a $( )
-# inside $(( ))). The lint job runs its self-test, then the check over the
-# whole shell catalogue.
+# inside $(( ))). The edit hook runs it on every shell file an edit touches;
+# the lint job runs its self-test, then the check over the whole shell
+# catalogue.
 #
 # Usage: check-form.sh <file>...
 #        check-form.sh --self-test
