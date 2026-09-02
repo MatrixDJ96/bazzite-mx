@@ -152,9 +152,9 @@ seen red on a lesion before its first green counts.
 - Values an expression computes reach a step through `env:`, never inline in `run:` (an input
   or a label with a quote would break the script; GitHub docs, "Security hardening for GitHub
   Actions", read 2026-09-02).
-- A secret proves itself before it is needed: the main profile signs the chunked image's digest with
-  `SIGNING_SECRET` and verifies with `cosign.pub`, so a rotated or mispasted key fails on a
-  push to `main`, not in the release run.
+- A secret proves itself before it is needed: the main profile signs the chunked image's digest
+  with `SIGNING_SECRET` and verifies with `cosign.pub`, so a rotated or mispasted key fails on
+  a push to `main`, not in the release run.
 - Publishing is an input, never an event: every step that reaches GHCR sits behind
   `if: inputs.publish`, `publish` is passed by `release.yml` alone, and `release.yml` has one
   trigger, `workflow_dispatch`. A job's permissions cannot follow an input, so the callee
@@ -178,6 +178,15 @@ seen red on a lesion before its first green counts.
   (runner-images `Ubuntu2604-Readme.md`, read 2026-09-02).
 - Retries are loops in the step (`podman push` twice, three attempts; `skopeo --retry-times`),
   not an action: one pin fewer for a `for` loop.
+- A cron's minute sits off `:00` (the `schedule` event is delayed at the start of every hour,
+  GitHub docs) and a scheduled workflow never publishes on its own: it dispatches
+  `release.yml`, which keeps one trigger and puts the reason in its run name. A scheduled
+  action that must wait for a decision (the cutover) is gated on the repository variable, in
+  the script where there is one and as a job `if:` where there is none, so a skipped run shows
+  why.
+- A GHCR package is named in full in `clean.yml`, never by pattern: the action reads `packages`
+  as a plain list unless `expand-packages` is set, and that needs a classic PAT; a pattern
+  would also reach any other package of the owner.
 
 ## Commits
 

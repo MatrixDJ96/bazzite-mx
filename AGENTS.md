@@ -30,10 +30,13 @@ system_files/               copied over / by 01-system-files.sh, one tree for bo
 cosign.pub                  the public key the image trusts for ghcr.io/matrixdj96 (11-image-signing.sh)
 .github/scripts/            resolve-base.sh (base digest + kernel), image-labels.sh (the labels file), check-image.sh (probe of the built image),
                             release-tag.sh (the release tag), gate-release.sh (verify by digest, tag, promote), changelog.sh (release notes),
-                            refresh-pins.sh (pin refresh); each one owner, each --self-test (run by the lint job)
+                            refresh-pins.sh (pin refresh), watch-upstream.sh (the watcher's verdict and dispatch decision); each one owner,
+                            each --self-test (run by the lint job)
 .github/workflows/          build.yml (lint, then reusable-build.yml: sandbox profile on develop/PR, main profile on main or dispatch `rechunk`),
                             reusable-build.yml (both flavours; publish only from release.yml), release.yml (dispatch only: version, build,
-                            gate, release), promote.yml (move :stable, the cutover), sign-image.yml (recovery signer)
+                            gate, release), promote.yml (move :stable, the cutover), sign-image.yml (recovery signer),
+                            trigger-release.yml (weekly cron → release.yml), watch-upstream.yml (6-hourly cron: base digest vs our :stable →
+                            release.yml), clean.yml (GHCR retention, dispatch with dry_run)
 .claude/                    Claude Code: settings.json, hooks/lint-edit.sh, commands/preflight.md
 docs/                       architecture.md (build flow, state, gates, CI), conventions.md (bash, tests, CI, commits), divergences.md (what changes over Bazzite, why),
                             gotchas.md (measured facts), migration.md (moving a host to v2), workflow.md (branches, the release run, cutover, repo settings, pins)
@@ -93,7 +96,7 @@ with them. What the image changes over Bazzite, and why, is `docs/divergences.md
 # Resolve the base and write the labels the way CI does
 ./.github/scripts/resolve-base.sh bazzite | tee /var/tmp/bazzite-mx-base.env   # base_image=... kernel_version=...
 ./.github/scripts/image-labels.sh /var/tmp/bazzite-mx-base.env "" "$(git rev-parse HEAD)" > /var/tmp/bazzite-mx-labels.txt
-for s in resolve-base image-labels check-image release-tag gate-release changelog refresh-pins; do ./.github/scripts/$s.sh --self-test; done
+for s in resolve-base image-labels check-image release-tag gate-release changelog refresh-pins watch-upstream; do ./.github/scripts/$s.sh --self-test; done
 
 # Probe a built image the way CI does (labels, /run and /tmp, lint, packages, modules, version)
 ./.github/scripts/check-image.sh localhost/bazzite-mx:preflight /var/tmp/bazzite-mx-labels.txt

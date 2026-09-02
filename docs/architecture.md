@@ -40,6 +40,13 @@ release.yml          workflow_dispatch only (reason, promote_stable): version �
                      step by step in docs/workflow.md § The release run
 promote.yml          workflow_dispatch (release_tag): gate-release.sh promote → :stable
 sign-image.yml       workflow_dispatch (image): sign one of our images by digest, verify
+trigger-release.yml  schedule (Tuesday 03:20 UTC), dispatch: release.yml with reason=weekly, promote_stable=true;
+                     skipped while vars.PROMOTE_STABLE is not "true"
+watch-upstream.yml   schedule (every 6 h at :37), dispatch (dry_run): watch-upstream.sh check (base digests
+                     against the base.digest labels of our :stable) → decide (stale, the variable, coalescing)
+                     → release.yml with reason=upstream:<digests>, promote_stable=true
+clean.yml            workflow_dispatch (dry_run, default true): ghcr-cleanup-action on the two packages,
+                     90 days, keep 7 + 7, :stable and :staging excluded; the cron comes after the DoD
 reusable-build.yml   workflow_call: release_tag ("" in the sandbox), rechunk, publish; secret SIGNING_SECRET
   matrix             bazzite, bazzite-nvidia-open on ubuntu-26.04, fail-fast off
   resolve-base.sh    → base.env: base digest, base version, kernel, image name
@@ -68,6 +75,7 @@ described in [`workflow.md`](workflow.md).
 | `gate-release.sh release\|promote` | the gate: reads the build's env files, checks the manifest's labels by digest, shows both verifiers failing on the base image, `cosign verify` and `gh attestation verify --repo`, copies the digest onto `:<tag>` (never over another digest) and, on promotion, `:stable`; `--self-test` on the label, env and tag-state checks |
 | `changelog.sh release` | the release notes: base version and kernel from the base's labels, the previous release from `gh release list`, package diff of the two SBOM referrers (stated when the previous release carries none), commits since the previous revision, switch commands; prints the title; `--self-test` |
 | `refresh-pins.sh` | the pin refresh: actions, binaries, runner labels, workflow states, cited issues (`--check`), `--apply` for the first two classes; offline `--self-test` on fixtures ([`workflow.md`](workflow.md) § Keeping the pins fresh) |
+| `watch-upstream.sh check\|decide` | the watcher: per flavour, the base digest (`resolve-base.sh`) against the `base.digest` label of our `:stable` → `verdict` (`current`, `stale`, `absent`; unreadable or unlabelled = exit 1) and `reason`; `decide` → `dispatch` from the verdict, `PROMOTE_STABLE`, the queued and recent release runs, `--dry-run`; `--from-dir` and `--runs-json` for fixtures; `--self-test` |
 
 ## build_files/
 

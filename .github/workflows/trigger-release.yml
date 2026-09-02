@@ -1,0 +1,38 @@
+# The weekly release: a cron on main that dispatches release.yml with the
+# reason `weekly`, only while the repository variable PROMOTE_STABLE is true.
+# GitHub disables this cron after 60 days without a commit; refresh-pins.sh
+# reports it (docs/workflow.md § The weekly trigger and the upstream watcher).
+name: Trigger Release
+
+on:
+  schedule:
+    # Tuesday 03:20 UTC; the minute sits off the hour because schedule
+    # events lag at the start of every hour (GitHub docs).
+    - cron: "20 3 * * 2"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: bazzite-mx-trigger-release
+  cancel-in-progress: false
+
+jobs:
+  # The condition sits on the job, so a skipped run shows why it skipped.
+  trigger:
+    name: Trigger
+    if: vars.PROMOTE_STABLE == 'true'
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f reason=weekly -f promote_stable=true
+          echo "dispatched release.yml: reason=weekly promote_stable=true"

@@ -81,3 +81,21 @@ has no release tag.
 the runner denies it to that binary, while podman itself works. What a step needs from a
 local image is read with `podman image inspect` (digest, id, labels); skopeo is used on
 `docker://` references only.
+
+## A workflow that is not on the default branch has no runs endpoint
+
+`gh run list --workflow release.yml` and `GET /repos/{owner}/{repo}/actions/workflows/release.yml/runs`
+answer `HTTP 404: workflow release.yml not found on the default branch` while the file exists
+only on a branch (measured 2026-09-02 15:27Z with `release.yml` on `v2`), and `gh workflow run
+release.yml --ref v2` resolves the file the same way. Runs of such a workflow are read from the
+repository-wide endpoint `GET /repos/{owner}/{repo}/actions/runs` filtered on `.path`
+(`watch-upstream.sh`), and a workflow is dispatched on a branch only once its file is on the
+default branch too (`build.yml` is, which is why `--ref v2` works for it).
+
+## `ghcr-cleanup-action` matches `packages` by pattern only with `expand-packages`
+
+`use-regex: true` reaches `delete-tags` and `exclude-tags`; `packages` stays a comma-separated
+list of literal names unless `expand-packages: true`, which lists the owner's packages through
+the Packages API and requires a classic PAT (`src/main.ts:50-90` and `src/config.ts:92-100` at
+v1.2.2, read 2026-09-02; `GITHUB_TOKEN` is refused there). With `expand-packages` and
+`use-regex`, the whole `packages` string is ONE regular expression, not a list of them.

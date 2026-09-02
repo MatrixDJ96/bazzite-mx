@@ -27,7 +27,9 @@
       "Bash(./.github/scripts/gate-release.sh --self-test)",
       "Bash(./.github/scripts/changelog.sh:*)",
       "Bash(./.github/scripts/refresh-pins.sh --check)",
-      "Bash(./.github/scripts/refresh-pins.sh --self-test)"
+      "Bash(./.github/scripts/refresh-pins.sh --self-test)",
+      "Bash(./.github/scripts/watch-upstream.sh check:*)",
+      "Bash(./.github/scripts/watch-upstream.sh --self-test)"
     ],
     "deny": [
       "Bash(git push --force:*)",
