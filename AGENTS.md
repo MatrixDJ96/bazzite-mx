@@ -16,12 +16,12 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 ./.github/scripts/check-commits.sh HEAD                     # every commit message on the ref
 ```
 
-- The commands need bash, git, jq and shellcheck on the host, podman and
+- The commands need bash, git, jq, shellcheck and node on the host, podman and
   skopeo for the pre-flight, podman for the lint job's container (shfmt, yamllint, just);
   `.claude/hooks/lint-edit.sh` skips any linter it cannot find.
-- The `lint` job of `build.yml` runs the first five, and shfmt, yamllint and
-  `just --fmt --check` in `quay.io/fedora/fedora:44`; the local equivalent is
-  `docs/workflow.md` § Run the lint job locally.
+- The `lint` job of `build.yml` runs the first five, `node --check` on the Plasma update
+  scripts, and shfmt, yamllint and `just --fmt --check` in `quay.io/fedora/fedora:44`; the
+  local equivalent is `docs/workflow.md` § Run the lint job locally.
 - A change under `build_files/` or `system_files/` gets the pre-flight (`/preflight`,
   `.claude/commands/preflight.md`) with `--no-cache` before the push: buildah keys a `RUN` on
   its command, not on a bind mount's content, so a cached run exits 0 without the change.

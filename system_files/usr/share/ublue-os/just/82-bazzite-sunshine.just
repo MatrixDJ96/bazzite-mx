@@ -1,6 +1,6 @@
 # vim: set ft=make :
-# Replaces Bazzite's file of the same name, holding the one recipe the base's
-# held, so the base's own import brings ours.
+# Replaces Bazzite's file of the same name: 70-justfile.sh proves the base's
+# copy holds exactly this recipe, so the base's own import brings ours.
 
 # Manage the Sunshine streaming host for this user. Options: status | enable | disable | portal | virtual-monitor
 [group("gaming")]

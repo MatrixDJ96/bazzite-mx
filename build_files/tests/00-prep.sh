@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test of 00-prep.sh: 95-clean-stage.sh undid the dnf.conf change. What
 # the snapshots 00-prep.sh records say is their readers' subject, and only
-# there is it falsifiable: 90-validate-repos.sh for the repository ones.
+# there is it falsifiable: 90-validate-repos.sh for the repository ones,
+# tests/70-justfile.sh for the recipe sets.
 #
 # Usage: run by tests/run.sh inside the image (offline, on the cleaned tree).
 # Output: one `OK: <what>` or `FAIL: <what>` line per check, on stdout.

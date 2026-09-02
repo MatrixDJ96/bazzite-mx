@@ -1,0 +1,12 @@
+<?xml version='1.0'?>
+<!DOCTYPE gui SYSTEM 'kpartgui.dtd'>
+<!-- bazzite-mx: Ctrl+C as Konsole's primary Copy shortcut, Windows style. Konsole disables
+     edit_copy while no text is selected, so with nothing selected Ctrl+C still reaches the
+     shell as the interrupt. version="1" is below Konsole's own sessionui.rc version, so
+     KXmlGui merges only these ActionProperties into the application's layout. KF6 still
+     reads GenericDataLocation/kxmlgui5/<component>/ (KXMLGUIClient::localXMLFile). -->
+<gui name="session" version="1">
+ <ActionProperties scheme="Default">
+  <Action name="edit_copy" shortcut="Ctrl+C; Ctrl+Shift+C"/>
+ </ActionProperties>
+</gui>
