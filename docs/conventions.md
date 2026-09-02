@@ -1,9 +1,10 @@
 # Conventions
 
-Rules for writing build scripts, tests, CI and prose in this repo. A rule a file enforces names
-that file; the rest is checked by hand at review.
+Rules for writing build scripts, tests, boot hooks, CI and prose in this repo. A rule a file
+enforces names that file; the rest is checked by hand at review.
 
-Contents: Bash (Form) · build scripts · tests · positive control · CI · prose · commits.
+Contents: Bash (Form) · build scripts · boot hooks · tests · positive control · CI · prose ·
+commits.
 
 ## Bash
 
@@ -28,13 +29,14 @@ Contents: Bash (Form) · build scripts · tests · positive control · CI · pro
 ### Form
 
 A script is read by a person before bash runs it, and the person is not the author. These rules
-hold for every file the lint job covers: build scripts, libraries, tests, the CI scripts and
-the edit hook. They hold in the same spirit for every other file of the repo: a workflow or the
-Containerfile gets the same blank lines between its steps, the same 100 columns and comments
-that carry a reason, never a restatement. The shapes and the width are checked by
-`.github/scripts/check-form.sh`, which the edit hook runs on every shell file an edit touches
-and the `lint` job on the whole shell catalogue; a line that holds a banned shape as data ends
-in `# form: literal`. The rest is checked by hand at review, like § Prose.
+hold for every file the lint job covers: build scripts, libraries, tests, the boot hooks, the
+CI scripts and the edit hook. They hold in the same spirit for every other file of the repo: a
+workflow, the Containerfile, a `.repo` or `.conf` file gets the same blank lines between its
+steps, the same 100 columns and comments that carry a reason, never a restatement. The shapes
+and the width are checked by `.github/scripts/check-form.sh`, which the edit hook runs on every
+shell file an edit touches and the `lint` job on the whole shell catalogue; a line that holds a
+banned shape as data ends in `# form: literal`. The rest is checked by hand at review, like §
+Prose.
 
 - **Control flow is written as `if … then … fi`.** `cmd || return 1`, `a && b || c`,
   `! cmd || die`, `cmd || { … }` and a subshell `( … ) ||` used as a guard are out: they hide
@@ -119,6 +121,12 @@ known-bad still red after it. The rules above add to the earlier bullets of this
 
 - One script per feature, `NN-<feature>.sh` under `build_files/`, sourcing `lib/env.sh` first.
   `build.sh` runs them in version order and stops at the first failure.
+- Third-party packages come from a `.repo` vendored under `system_files/etc/yum.repos.d/` with
+  every section `enabled=0`, installed with `install_from_repo <section> <pkg>...`, which
+  enables the section for one dnf5 transaction. A COPR the base already ships disabled
+  (`ublue-os/packages`) goes through the same `install_from_repo`, with its
+  `copr:copr.fedorainfracloud.org:<owner>:<project>` id, as bazzite-dx does; the base's file is
+  never touched.
 - The gate `90-validate-repos.sh` runs after the installs and refuses a vendored file that is
   absent, differs from the vendored copy or carries `enabled=1`; a base repository file the
   build modified; any other added file left enabled; and an enabled set, as `dnf5 repolist`
@@ -132,14 +140,35 @@ known-bad still red after it. The rules above add to the earlier bullets of this
   latest, and a pin enters only against an observed problem, with the observation cited. One
   exception: the base image is pinned to the digest CI resolved (`resolve-base.sh`), so the
   three flavours build against a known base.
+- A vendor's signing key is pinned on purpose: the armored key ships under
+  `system_files/etc/pki/rpm-gpg/`, the `.repo` reads it with `gpgkey=file://`, and the feature
+  script calls `assert_key_fingerprint` before the install. The fingerprint is pinned once in
+  the `KEY_FPR` table of `lib/gpg.sh`, with the URL each key was read from, so a rotation is a
+  reviewable diff and never a download at build time. The one exception is the base's own
+  `ublue-os/packages` COPR file, used as the base ships it, its key read over https as
+  bazzite-dx reads it.
 - A package `%post` runs in the build, not on the host. Read it with `rpm -qp --scripts` before
   the package enters a script, and handle every effect that belongs to a host explicitly. A
   `groupadd` in a `%post` lands in `/etc/group`; `95-clean-stage.sh` relocates the accounts to
   `/usr/lib/passwd` and `/usr/lib/group`, where NSS reads them, so a host's `/etc` merge cannot
-  drop them.
+  drop them. Membership for humans is a boot hook's job.
 - Writes to files the base image ships end on a fresh inode (`mv`, `install`, `sed -i`,
   `rsync`) where it costs nothing. What a runner change would reopen is in
   [`gotchas.md`](gotchas.md) § Torn writeback on a 6.17-azure runner kernel.
+
+## Boot hooks
+
+Scripts under `system_files/usr/share/ublue-os/system-setup.hooks.d/` run as root at every boot
+through `ublue-system-setup.service`, before user sessions. The dispatcher is a loop of
+`bash $script` and reads no exit status, which sets three rules:
+
+- a hook converges on every boot, checking first and changing only what differs. It does not
+  stamp a version with libsetup's `version-script`, which records the run before the body
+  executes, so it never repeats a failed run nor reaches a user created later;
+- a hook that cannot do its job prints one `ERROR:` line to stderr and exits 1, because the
+  journal line is the only signal it can leave;
+- a hook takes a fixture prefix (`usermod --prefix`, files under a temporary tree) so its smoke
+  test exercises the real script, positive and known-bad, without touching the image.
 
 ## Tests
 
@@ -152,9 +181,10 @@ known-bad still red after it. The rules above add to the earlier bullets of this
 - Tests run offline (`--network=none`) on the tree `95-clean-stage.sh` left, with tmpfs on
   `/run`, `/tmp`, `/var/log` and `/var/cache`: they see what the image ships, not what the
   build had, and a test that touches dnf5 cannot leave a log behind for `bootc container lint`.
-- A check several tests make is a function of `tests/lib.sh`, sourced first:
-  `check_unit_state`, `check_self_test`, and `on_one_line` for a probe's output quoted in a
-  `FAIL:` line. A check made once stays in its test.
+- A check several tests make is a function of `tests/lib.sh`, sourced first: `check_pkg`,
+  `check_unit_state`, `check_rpm_key`, `check_key_fingerprint`, `check_self_test`, and
+  `on_one_line` for a probe's output quoted in a `FAIL:` line. A check made once stays in its
+  test.
 
 ## Positive control
 
@@ -174,10 +204,10 @@ that file" is no owner of a `declare -r` name the base image's libraries set.
 An assertion also has to be able to go red, and the shape that quietly cannot is not the one a
 reader expects. A count is safe or not by where its subject comes from, never by being a count.
 A check that counts or walks a list read out of the very thing it tests shrinks with the defect
-and stays green: a required number of `OK:` lines lets a check stop reporting unnoticed. Name
-what a count stands for. The same reading condemns a tolerant `else` that prints `OK:` on the
-failure it meant to excuse. Neither shape holds a counter, so neither is found by grepping for
-one.
+and stays green: a required number of `OK:` lines lets a check stop reporting unnoticed, and a
+group list read from the hook's own summary shrinks with the hook. Name what a count stands
+for. The same reading condemns a tolerant `else` that prints `OK:` on the failure it meant to
+excuse. Neither shape holds a counter, so neither is found by grepping for one.
 
 Where each one runs:
 

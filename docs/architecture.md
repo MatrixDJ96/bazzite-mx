@@ -45,18 +45,22 @@ Each script owns one artefact and ships a `--self-test`.
 | `lib/env.sh`              | sourced first: `CTX`, `BUILD_FILES`, `BUILD_TMP`, `BUILD_STATE`, then every library                                                              |
 | `lib/log.sh`              | `group`, `endgroup`, `log`, `fail_build`                                                                                                         |
 | `lib/repos.sh`            | `install_from_repo`, `enabled_repos`                                                                                                             |
+| `lib/gpg.sh`              | the `KEY_FPR` table, `key_fingerprint` and `assert_key_fingerprint`                                                                              |
 | `00-prep.sh`              | dnf keeps its cache and waits 60 s against COPR and mirror flakes; the base's repositories are recorded                                          |
-| `01-system-files.sh`      | `rsync` of `system_files/` over the tree, every file on a fresh inode                                                                            |
+| `01-system-files.sh`      | `rsync` of `system_files/` over the tree, every file on a fresh inode; the fixed-gid groups                                                      |
 | `10-image-info.sh`        | identity: `image-info.json`, os-release, the KDE About page                                                                                      |
 | `11-image-signing.sh`     | the public key and the `policy.json` scope for `ghcr.io/matrixdj96`                                                                              |
+| `20-setup-services.sh`    | the `ublue-setup-services` hook framework and its system unit                                                                                    |
+| `21-container-runtime.sh` | Docker CE, the podman tools, both sockets enabled                                                                                                |
 | `90-validate-repos.sh`    | the repository gate, run after the last install                                                                                                  |
 | `95-clean-stage.sh`       | the tree bootc lint expects                                                                                                                      |
 | `tests/run.sh`            | the test runner and the pairing guard                                                                                                            |
 | `tests/lib.sh`            | the checks the tests share, one `OK:`/`FAIL:` line each                                                                                          |
 | `tests/NN-<feature>.sh`   | one smoke test per build script, same stem                                                                                                       |
 
-Numbering, as the tree uses it: `00-09` preparation, `10-19` identity and trust, `90-99` gates
-and cleanup. The file name is the only statement of the order.
+Numbering, as the tree uses it: `00-09` preparation, `10-19` identity and trust, `20-49`
+services, packages and desktop defaults, `90-99` gates and cleanup. The file name is the only
+statement of the order.
 
 ## system_files/
 
@@ -64,7 +68,12 @@ One tree, copied over `/` by `01-system-files.sh`.
 
 | Path                                           | Content                                                                                                                                                                                                                                                                                                                    |
 | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `etc/yum.repos.d/`                             | the one vendored repository, every section `enabled=0`                                                                                                                                                                                                                                                                     |
+| `etc/pki/rpm-gpg/RPM-GPG-KEY-*`                | the key that file reads with `gpgkey=file://`                                                                                                                                                                                                                                                                              |
 | `etc/containers/registries.d/matrixdj96.yaml`  | sigstore attachments for our own scope                                                                                                                                                                                                                                                                                     |
+| `usr/lib/modules-load.d/ip_tables.conf`        | `iptable_nat`, which docker-in-docker needs                                                                                                                                                                                                                                                                                |
+| `usr/lib/sysusers.d/bazzite-mx-groups.conf`    | the fixed gid of `docker`                                                                                                                                                                                                                                                                                                  |
+| `usr/share/ublue-os/system-setup.hooks.d/`     | the root hook that grants the service groups and moves their gids to the image's                                                                                                                                                                                                                                           |
 
 ## State of a build
 
