@@ -444,8 +444,9 @@ Where each one runs:
   `Install Cosign`). Workflow `name:` Title Case. A job name is the phase in one Title Case
   word: `Lint`, `Build`; the matrix job of the reusable build is named by its flavour, so a run
   reads `Build / bazzite-nvidia`. A step name is Title Case, verb + object, no article, a tool
-  in its own casing: `Checkout`, `Resolve Base`, `Build Image`, `Run shfmt, yamllint and just`.
-  Env vars `SCREAMING_SNAKE_CASE`; outputs `snake_case`, one key name across workflows.
+  in its own casing: `Checkout`, `Resolve Base`, `Build Image`, `Install Cosign`,
+  `Run shfmt, yamllint and just`. Env vars `SCREAMING_SNAKE_CASE`; outputs `snake_case`, one
+  key name across workflows.
 - Concurrency groups are literal `bazzite-mx-<phase>[-<key>]` and never built from
   `${{ github.workflow }}`. A called workflow reports the caller's name there, so a group built
   from it would put caller and callee in the same group and the callee would wait for the run
@@ -456,10 +457,20 @@ Where each one runs:
   measurement ([`gotchas.md`](gotchas.md) § Torn writeback on a 6.17-azure runner kernel).
 - `runner.temp` is not available in a job-level `env:`; steps read `$RUNNER_TEMP`.
 - A dispatch on a branch runs that branch's copy of the file,
-  `gh workflow run build.yml --ref <branch>`.
+  `gh workflow run build.yml --ref <branch>`, and `-f rechunk=true` runs the main profile.
+- Two profiles, one reusable workflow: what `main` adds to the sandbox is an input (`rechunk`),
+  never a second copy of the steps.
+- Every check CI runs on an image is a script under `.github/scripts/` with a `--self-test` the
+  `lint` job runs; the workflow calls the script and does not restate the checks.
+- One labels file per build (`image-labels.sh`), passed to `podman build` and again to the
+  chunked compose: a composed image inherits no config, and a `podman build` without labels
+  keeps the base's ([`gotchas.md`](gotchas.md) § `podman build` keeps the base's labels).
 - Values an expression computes reach a step through `env:`, never inline in `run:`: an input
   or a label carrying a quote would break the script (GitHub docs, "Security hardening for
   GitHub Actions").
+- A secret proves itself before it is needed. The main profile derives the public half of
+  `SIGNING_SECRET` and requires it to be `cosign.pub` byte for byte, so a rotated or mispasted
+  key fails on a push to `main`, not in the release run.
 - Retries are loops in the step or the tool's own flag (`skopeo inspect --retry-times 3`),
   never an action: one pin fewer for a `for` loop.
 

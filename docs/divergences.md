@@ -33,19 +33,24 @@ Files: `Containerfile`, `.github/scripts/resolve-base.sh`, `.github/scripts/lib.
 
 A layer built on Bazzite keeps Bazzite's identity until something rewrites it, and the identity
 is not cosmetic: `image-ref` in `/usr/share/ublue-os/image-info.json` is what Bazzite's shell
-greeting (`/usr/share/ublue-os/motd/env.sh`) prints as the host's image, so an unrewritten file
-calls the host `ghcr.io/ublue-os/bazzite`. Bazzite's rollback helper reads `image-name` too:
-`brh rebase <tag>` builds `ghcr.io/ublue-os/<image-name>:<tag>`, a repository that does not
-exist for this image. The image a host pulls from at `bootc upgrade` is the deployment's
-origin, which `bootc status` prints. The build writes `image-name`, `image-vendor`,
-`image-ref`, `version`, `version-pretty` and `base-version` there, `base-version` keeping the
-base's own `version`; `VARIANT_ID` and `IMAGE_ID` in `/usr/lib/os-release`, the identity
-os-release(5) gives an image; and `Variant` and `Website` in `/etc/xdg/kcm-about-distrorc`, the
-KDE About page, the variant naming the flavour. Sources: os-release(5), bootc's upgrade
-contract (https://bootc-dev.github.io/bootc/), Bazzite's own `image-info.json` and
+greeting (`/usr/share/ublue-os/motd/env.sh`) prints as the host's image and `check-image.sh`
+asserts, so an unrewritten file calls the host `ghcr.io/ublue-os/bazzite`. Bazzite's rollback
+helper reads `image-name` too: `brh rebase <tag>` builds `ghcr.io/ublue-os/<image-name>:<tag>`,
+a repository that does not exist for this image. The image a host pulls from at `bootc upgrade`
+is the deployment's origin, which `bootc status` prints. The build writes `image-name`,
+`image-vendor`, `image-ref`, `version`, `version-pretty` and `base-version` there,
+`base-version` keeping the base's own `version`; `VARIANT_ID` and `IMAGE_ID` in
+`/usr/lib/os-release`, the identity os-release(5) gives an image; and `Variant` and `Website`
+in `/etc/xdg/kcm-about-distrorc`, the KDE About page, the variant naming the flavour. The OCI
+labels are the same identity on the outside, written per build by `image-labels.sh` and
+asserted against the pulled image by `check-image.sh`. The inherited
+`io.artifacthub.package.readme-url` is restated for the same reason: a label left alone hands
+out Bazzite's README as this image's own. Sources: os-release(5), bootc's upgrade contract
+(https://bootc-dev.github.io/bootc/), Bazzite's own `image-info.json` and
 `/usr/bin/bazzite-rollback-helper`.
 
-Files: `build_files/10-image-info.sh` and its test.
+Files: `build_files/10-image-info.sh` and its test, `.github/scripts/image-labels.sh`,
+`.github/scripts/check-image.sh`.
 
 ## Signing trust for our own images
 
@@ -373,6 +378,11 @@ baked into the application resolve on the host. bootc keeps `/opt` read-only and
 must be written into `/var` (bootc.dev, "Filesystem" and "Building images"); the move to
 `/usr/lib/opt` is the pattern bazzite-dx uses for an RPM's `/opt` payload
 (`bazzite-dx/build_files/50-fix-opt.sh`), rewritten so the checks run before the first move.
+Each moved directory carries the `user.component=<name>` xattr, so the chunker of the main
+profile gives it a layer of its own (coreos.github.io/rpm-ostree, "build-chunked-oci",
+"Assigning files to specific layers"): the rpmdb names the package's files under `/opt`, and
+without the xattr the directory lands in the unpackaged-content layer, which changes at every
+release.
 
 Files: `build_files/40-desktop-apps.sh` and `build_files/80-fix-opt.sh` with their tests,
 `build_files/lib/flatpak.sh`, `system_files/etc/yum.repos.d/1password.repo`,
@@ -724,8 +734,14 @@ aurora.
 **A push never publishes.** Bazzite builds, rechunks, tests and pushes in one job gated on the
 event (`bazzite/.github/workflows/build.yml`), where aurora takes `publish` as an input
 (`aurora/.github/workflows/reusable-build.yml`). This repository is the only one of the family
-whose build waits on a lint of its scripts and workflows; aurora runs a just check as a
-workflow of its own (`aurora/.github/workflows/validate-just.yml`).
+that proves the signing secret on every push to `main`, and the only one whose build waits on a
+lint of its scripts and workflows; aurora runs a just check as a workflow of its own
+(`aurora/.github/workflows/validate-just.yml`).
+
+**The artefact that ships is the one that is probed.** Bazzite runs goss on the chunked image
+and is the only member of the family that tests what it ships
+(`bazzite/.github/workflows/build.yml`). `check-image.sh` does the same with the tools the
+image already has, and asserts on the artefact every label `image-labels.sh` wrote.
 
 **Fewer actions, more bash.** The family is split on freeing disk: Bazzite and bazzite-dx run
 `jlumbroso/free-disk-space` (`bazzite/.github/workflows/build.yml:150`,

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="bazzite-mx">
+  <defs>
+    <linearGradient id="mx-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#60a5fa" />
+      <stop offset="0.52" stop-color="#7657ff" />
+      <stop offset="1" stop-color="#a855f7" />
+    </linearGradient>
+    <radialGradient id="mx-mark-bg" cx="0.28" cy="0.18" r="1.1">
+      <stop offset="0" stop-color="#1b1533" />
+      <stop offset="0.62" stop-color="#0b1020" />
+    </radialGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#mx-mark-bg)" stroke="url(#mx-mark)"
+    stroke-width="2" />
+  <text x="32" y="43" text-anchor="middle" font-family="ui-monospace, Menlo, monospace"
+    font-size="27" font-weight="700" fill="url(#mx-mark)">MX</text>
+</svg>

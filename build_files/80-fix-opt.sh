@@ -14,6 +14,9 @@
 #                                   ones are refused
 # Writes: /usr/lib/opt/<name> per directory under /var/opt, and
 #   /usr/lib/tmpfiles.d/bazzite-mx-opt.conf with one `L+` line per name.
+#   Each moved directory carries `user.component=<name>`: no package owns the
+#   path, and the chunker would otherwise put it in the layer every release
+#   changes.
 # Exit status: 0 done; the build stops on a `FAIL: …` line.
 
 # shellcheck source=lib/env.sh
@@ -81,6 +84,7 @@ relocate_opt() {
 
     for name in "${names[@]}"; do
         mv "$var_opt/$name" "$lib_opt/$name"
+        setfattr -n user.component -v "$name" "$lib_opt/$name"
         echo "moved $var_opt/$name to $lib_opt/$name"
     done
 
