@@ -163,6 +163,18 @@ cosign verify --key https://raw.githubusercontent.com/MatrixDJ96/bazzite-mx/main
 The private `cosign.key` is gitignored — it lives only on the maintainer's machine and as a
 GitHub repo secret.
 
+The image also ships that key under `/etc/pki/containers/matrixdj96.pub` with a
+`sigstoreSigned` policy for `ghcr.io/matrixdj96`, so a host can make every future upgrade
+verify itself. Switch the transport once, from a deployment that already carries the policy
+(any release from 44.20260902 on):
+
+```bash
+sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/matrixdj96/bazzite-mx:stable
+```
+
+Hosts left on `ostree-unverified-registry` keep pulling unverified, as before — the policy
+never blocks them (divergence #25).
+
 ## Under the hood
 
 The build flow, conventions, and hard-won gotchas are documented for humans and coding agents

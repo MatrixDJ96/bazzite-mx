@@ -48,7 +48,7 @@ build-mx.sh
   └─ enumerate build_files/mx/[0-9]*-*.sh in version order
        (mapfile -t < <(find … | sort -V))
        │
-       └─ 18 numbered domain scripts (00-image-info.sh … 72-ntfsplus.sh)
+       └─ 19 numbered domain scripts (00-image-info.sh … 72-ntfsplus.sh)
 clean-stage.sh
   ├─ restore pristine /etc/dnf/dnf.conf (from /tmp/dnf.conf.orig)
   ├─ rm -rf /usr/lib/sysimage/libdnf5/*
@@ -75,7 +75,7 @@ Each decade owns one domain; `build-mx.sh` runs the scripts in version order:
 
 | Decade | Domain | Scripts |
 |---|---|---|
-| 00 | Identity / branding | `00-image-info.sh` |
+| 00 | Identity / branding, signing trust | `00-image-info.sh`, `01-image-signing.sh` |
 | 10 | Container runtime | `10-container-runtime.sh` |
 | 20 | Virtualization | `20-virtualization.sh`, `21-virt-manager-flatpak-exclude.sh` |
 | 30 | IDE + git tools | `30-ide.sh`, `35-git-tools.sh` |
@@ -127,7 +127,7 @@ bazzite-mx/
 │   │                              build-mx.sh, copr-helpers.sh,
 │   │                              writeback-helpers.sh, clean-stage.sh,
 │   │                              validate-repos.sh)
-│   ├── mx/                      # 18 numbered domain scripts (<NN>-<domain>.sh)
+│   ├── mx/                      # 19 numbered domain scripts (<NN>-<domain>.sh)
 │   ├── kmods/                   # Out-of-tree kernel module builder (see note above)
 │   └── tests/                   # 10-tests-mx.sh (smoke)
 ├── system_files/                # Rsync'd into / by build.sh (yum.repos.d, skel,

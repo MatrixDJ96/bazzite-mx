@@ -691,6 +691,45 @@ silently reverted delete cannot leave the database shipped and unguarded.
 not the right tool on an atomic image, and the build log carries the same information — and one
 fewer artefact on the torn-writeback surface.
 
+## 25. The image trusts its own signatures
+
+**Upstream**: the base installs `ublue-os-signing` 0.5, which ships `/etc/pki/containers/
+ublue-os.pub`, `registries.d/ublue-os.yaml` (`use-sigstore-attachments: true`) and a
+`sigstoreSigned` scope for `ghcr.io/ublue-os` in `/etc/containers/policy.json`, with
+`default: reject` and a docker `""` catch-all of `insecureAcceptAnything`. Aurora's
+`.github/setup-runner-keys.sh` applies the same shape on the CI runner for its base pulls. A
+downstream image inherits all of it and none of it applies to the downstream's own registry
+scope: `00-image-info.sh` stamps `ostree-image-signed:docker://ghcr.io/matrixdj96/…` as the
+image-ref (what `ujust rebase-helper` offers), yet a host on that transport pulled our image
+through the `""` catch-all, unverified, and reported it verified. `ostree-unverified-registry`
+(what our hosts run today) never consults the policy at all: in ostree-ext it maps to
+`SignatureSource::ContainerPolicyAllowInsecure` (`crates/ostree-ext/src/container/mod.rs:256`),
+and `ostree-image-signed` maps to `ContainerPolicy`, which refuses outright when the policy
+default is `insecureAcceptAnything` (`store.rs:943`) — read from the bootc sources on 2026-09-02.
+
+**Us**: `build_files/mx/01-image-signing.sh` installs the repo's `cosign.pub` as
+`/etc/pki/containers/matrixdj96.pub` (the Containerfile ships the root key through the `ctx`
+stage, so the key has one source), ships `registries.d/matrixdj96.yaml` from `system_files/`,
+and adds the `ghcr.io/matrixdj96` scope with `jq`, written to a sibling file and `mv`'d over
+(gotcha #34). The script asserts the base default is still `reject` and that the `ublue-os`
+scope survived the merge; the smoke test re-asserts every piece on the built image, byte-compares
+the installed key with `/ctx/cosign.pub`, and the cold integrity check probes the three files for
+a NUL tail. Deep audit 2026-09-01, root R2(b).
+
+**Why it matters**: a host switched to the signed transport once,
+
+```bash
+sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/matrixdj96/bazzite-mx:stable
+```
+
+(or `bootc switch --enforce-container-sigpolicy ghcr.io/matrixdj96/bazzite-mx:stable`) has
+every later upgrade rejected unless the manifest carries a signature by our key: a registry
+account takeover or a re-pushed tag stops at the pull. The chicken-and-egg is real and
+one-time: the policy must already be on the host for the first signed pull, so the switch is
+made from a deployment that ships it. Hosts staying on `ostree-unverified-registry` keep the
+old behaviour — nothing breaks, nothing is verified — and `podman pull ghcr.io/matrixdj96/…`
+is verified on every host that ships the policy, regardless of transport.
+
 ## How to extend this list
 
 When adding a new phase, ask: **does this project's use case call for something different from

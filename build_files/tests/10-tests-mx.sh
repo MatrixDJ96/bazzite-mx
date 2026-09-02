@@ -54,6 +54,43 @@ grep -q '^Website=https://github.com/MatrixDJ96/bazzite-mx$' /etc/xdg/kcm-about-
     exit 1
 }
 
+# --- Image signing policy: the image trusts its own key (01-image-signing.sh) ---
+SIGN_KEY=/etc/pki/containers/matrixdj96.pub
+SIGN_POLICY=/etc/containers/policy.json
+SIGN_REGD=/etc/containers/registries.d/matrixdj96.yaml
+if ! cmp -s "$SIGN_KEY" /ctx/cosign.pub; then
+    echo "FAIL: $SIGN_KEY differs from the repo's cosign.pub (or is missing)"
+    exit 1
+fi
+if [ "$(stat -c %a "$SIGN_KEY")" != "644" ]; then
+    echo "FAIL: $SIGN_KEY mode $(stat -c %a "$SIGN_KEY"), expected 644 (world-readable for rootless pulls)"
+    exit 1
+fi
+jq -e '.default[0].type == "reject"' "$SIGN_POLICY" > /dev/null || {
+    echo "FAIL: $SIGN_POLICY default is not reject (the signed transport refuses an insecure default)"
+    jq '.default' "$SIGN_POLICY" || true
+    exit 1
+}
+jq -e --arg key "$SIGN_KEY" '
+    (.transports.docker["ghcr.io/matrixdj96"] | length) == 1
+    and .transports.docker["ghcr.io/matrixdj96"][0].type == "sigstoreSigned"
+    and .transports.docker["ghcr.io/matrixdj96"][0].keyPath == $key
+    and .transports.docker["ghcr.io/matrixdj96"][0].signedIdentity.type == "matchRepository"
+' "$SIGN_POLICY" > /dev/null || {
+    echo "FAIL: $SIGN_POLICY has no sigstoreSigned scope for ghcr.io/matrixdj96 keyed on $SIGN_KEY"
+    jq '.transports.docker["ghcr.io/matrixdj96"]' "$SIGN_POLICY" || true
+    exit 1
+}
+jq -e '(.transports.docker["ghcr.io/ublue-os"] | length) >= 1' "$SIGN_POLICY" > /dev/null || {
+    echo "FAIL: $SIGN_POLICY lost the base ghcr.io/ublue-os scope (merge clobbered the file?)"
+    exit 1
+}
+if ! grep -qxF '  ghcr.io/matrixdj96:' "$SIGN_REGD" || ! grep -qxF '    use-sigstore-attachments: true' "$SIGN_REGD"; then
+    echo "FAIL: $SIGN_REGD missing or not enabling sigstore attachments for ghcr.io/matrixdj96"
+    cat "$SIGN_REGD" 2>/dev/null || true
+    exit 1
+fi
+
 # --- Phase 3: Container runtime packages ---
 CONTAINER_RPMS=(
     podman-compose podman-machine podman-tui bcvk

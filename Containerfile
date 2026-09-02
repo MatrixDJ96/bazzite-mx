@@ -11,6 +11,9 @@ ARG KERNEL_VERSION
 FROM scratch AS ctx
 COPY build_files /build_files
 COPY system_files /system_files
+# The image's own cosign public key (single source: repo root), consumed by
+# build_files/mx/01-image-signing.sh and asserted by the smoke tests.
+COPY cosign.pub /cosign.pub
 
 # akmods carrier: FROM-scratch image holding /kernel-rpms (incl. kernel-devel)
 # matched to the base kernel. Consumed only as an RPM source via bind-mount.

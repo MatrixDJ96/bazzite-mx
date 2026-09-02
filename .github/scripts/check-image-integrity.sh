@@ -98,6 +98,9 @@ REQUIRED=(
     /etc/sysctl.d/90-bazzite-mx-forwarding.conf
     /etc/modules-load.d/90-bazzite-mx-nat.conf
     /etc/pki/rpm-gpg/1password.asc
+    /etc/pki/containers/matrixdj96.pub
+    /etc/containers/policy.json
+    /etc/containers/registries.d/matrixdj96.yaml
     /etc/skel/.config/Code/User/settings.json
     /usr/lib/modprobe.d/bazzite-mx-kvm.conf
     /usr/lib/sysusers.d/bazzite-mx-docker.conf
