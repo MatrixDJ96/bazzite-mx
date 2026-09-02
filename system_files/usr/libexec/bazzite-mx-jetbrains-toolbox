@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# JetBrains Toolbox App for this user: the latest build of JetBrains' own
+# release feed, its tarball checked against the sha256 the feed publishes,
+# unpacked and started once. The user half of `ujust install-jetbrains-toolbox`.
+#
+#   latest | install | status
+#
+# Knobs for the smoke test: FEED_URL (a file:// feed whose links are file://
+# too), CURL_PROTO (default "=https"; the test adds file), NO_LAUNCH=1.
+set -euo pipefail
+
+FEED_URL=${FEED_URL:-'https://data.services.jetbrains.com/products/releases?code=TBA&latest=true&type=release'}
+CURL_PROTO=${CURL_PROTO:-=https}
+# A fixed place: the app is started from there and updates itself inside its
+# own data directory, ~/.local/share/JetBrains/Toolbox.
+APP_DIR=${XDG_DATA_HOME:-$HOME/.local/share}/JetBrains/ToolboxApp
+# The tarball stays here so a second run does not download it again.
+CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/bazzite-mx/jetbrains-toolbox
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+fetch() {
+    curl -fsSL --proto "$CURL_PROTO" "$@"
+}
+
+# installed_build: the build at APP_DIR from the tarball's own bin/build.txt
+# (first line, no whitespace), whoever unpacked it there; empty when there is
+# no runnable Toolbox.
+installed_build() {
+    [ -x "$APP_DIR/bin/jetbrains-toolbox" ] || return 0
+    awk 'NR == 1 { gsub(/[[:space:]]/, ""); print }' "$APP_DIR/bin/build.txt" 2> /dev/null || true
+}
+
+# read_feed: sets BUILD, LINK and CHECKSUM_LINK, or dies naming what the feed
+# lost.
+read_feed() {
+    local json
+    json=$(fetch "$FEED_URL") || die "the JetBrains release feed is unreachable ($FEED_URL)"
+    BUILD=$(jq -r '.TBA[0].build // ""' <<< "$json")
+    LINK=$(jq -r '.TBA[0].downloads.linux.link // ""' <<< "$json")
+    CHECKSUM_LINK=$(jq -r '.TBA[0].downloads.linux.checksumLink // ""' <<< "$json")
+    [ -n "$BUILD" ] && [ -n "$LINK" ] && [ -n "$CHECKSUM_LINK" ] || die "the feed lost its shape (.TBA[0].build / .downloads.linux.link / .checksumLink)"
+    [[ $LINK == *"jetbrains-toolbox-$BUILD.tar.gz" ]] || die "the tarball link ($LINK) does not name build $BUILD"
+}
+
+cmd_latest() {
+    read_feed
+    echo "build $BUILD"
+    echo "tarball $LINK"
+    echo "sha256 $CHECKSUM_LINK"
+}
+
+cmd_status() {
+    local build
+    build=$(installed_build)
+    if [ -n "$build" ]; then
+        echo "installed: build $build at $APP_DIR"
+    else
+        echo "not installed (no runnable Toolbox with its bin/build.txt at $APP_DIR)"
+    fi
+    if [ -d "${XDG_DATA_HOME:-$HOME/.local/share}/JetBrains/Toolbox" ]; then
+        echo "data: ${XDG_DATA_HOME:-$HOME/.local/share}/JetBrains/Toolbox (the app's own directory)"
+    fi
+}
+
+cmd_install() {
+    local tarball expected actual list top
+    read_feed
+    if [ "$(installed_build)" = "$BUILD" ]; then
+        # The marker an earlier form of this helper wrote next to the tree.
+        rm -f "$APP_DIR/.bazzite-mx-build"
+        echo "build $BUILD is already installed at $APP_DIR"
+        return 0
+    fi
+    if pgrep -f "$APP_DIR/bin/jetbrains-toolbox" > /dev/null; then
+        die "Toolbox is running from $APP_DIR: quit it first"
+    fi
+    mkdir -p "$CACHE"
+    tarball=$CACHE/jetbrains-toolbox-$BUILD.tar.gz
+    expected=$(fetch "$CHECKSUM_LINK" | awk 'NR == 1 { print $1 }')
+    [[ $expected =~ ^[0-9a-f]{64}$ ]] || die "the checksum file does not start with a sha256 ($CHECKSUM_LINK)"
+    if [ ! -s "$tarball" ] || [ "$(sha256sum "$tarball" | cut -d' ' -f1)" != "$expected" ]; then
+        echo "downloading build $BUILD ..."
+        fetch -o "$tarball.part" "$LINK" || die "download failed ($LINK)"
+        mv -f "$tarball.part" "$tarball"
+    fi
+    actual=$(sha256sum "$tarball" | cut -d' ' -f1)
+    if [ "$actual" != "$expected" ]; then
+        rm -f "$tarball"
+        die "sha256 mismatch for jetbrains-toolbox-$BUILD.tar.gz: feed says $expected, file is $actual (download removed)"
+    fi
+    echo "sha256 verified: $expected"
+    list=$(tar tzf "$tarball") || die "$tarball is not a gzip tarball"
+    top=$(head -n1 <<< "$list")
+    top=${top%%/*}
+    [ "$top" = "jetbrains-toolbox-$BUILD" ] || die "unexpected top directory '$top' in the tarball"
+    grep -qx "$top/bin/jetbrains-toolbox" <<< "$list" || die "$top/bin/jetbrains-toolbox missing from the tarball (layout changed upstream?)"
+    grep -qx "$top/bin/build.txt" <<< "$list" || die "$top/bin/build.txt missing from the tarball (status and the second run read the build there)"
+    tar xzf "$tarball" -C "$WORK"
+    [ -x "$WORK/$top/bin/jetbrains-toolbox" ] || die "$top/bin/jetbrains-toolbox is not executable"
+    mkdir -p "$(dirname "$APP_DIR")"
+    rm -rf "$APP_DIR.new"
+    mv "$WORK/$top" "$APP_DIR.new"
+    rm -rf "$APP_DIR"
+    mv "$APP_DIR.new" "$APP_DIR"
+    echo "Toolbox build $BUILD unpacked at $APP_DIR"
+    if [ "${NO_LAUNCH:-0}" != 1 ]; then
+        echo "starting it once: the app writes its .desktop entry and data under ~/.local/share/JetBrains"
+        setsid -f "$APP_DIR/bin/jetbrains-toolbox" > /dev/null 2>&1
+    fi
+}
+
+case "${1:-}" in
+    latest) cmd_latest ;;
+    install) cmd_install ;;
+    status) cmd_status ;;
+    *)
+        echo "usage: bazzite-mx-jetbrains-toolbox latest|install|status" >&2
+        exit 1
+        ;;
+esac

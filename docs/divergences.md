@@ -154,7 +154,7 @@ mise per user through Homebrew; here `mise` comes from the COPR its documentatio
 `/etc/profile.d/mise.sh` runs `mise activate bash` in interactive bash (Fedora's `/etc/bashrc`
 sources `profile.d` for non-login shells too); the skel `~/.config/mise/config.toml` names
 node lts, python 3.14, java temurin-21, dotnet 10, installed per user with `mise install`
-(a `setup-dev` recipe arrives with the justfile feature). Other shells activate mise
+(`ujust setup-dev install` seeds the config for an existing account and runs it). Other shells activate mise
 themselves; the package ships their completions.
 
 ## Desktop applications (`40-desktop-apps.sh`, `80-fix-opt.sh`)
@@ -253,8 +253,8 @@ build), gparted and teams-for-linux from the design checkpoint (2026-09-02).
 - **teams-for-linux**: not in the image. A preinstall would put Teams on hosts that do not
   use it (criterion 3) and `flatpak preinstall` synchronises, so removing the entry later
   would uninstall the app (flatpak-preinstall(1), 1.18.1). The Flathub id
-  `com.github.IsmaelMartinez.teams_for_linux` and the `flatpak install` command go in
-  `docs/migration.md` with the justfile feature.
+  `com.github.IsmaelMartinez.teams_for_linux` and the `flatpak install` command are in
+  `docs/migration.md` and in what `ujust migrate apply` prints at its end.
 
 ## Sunshine (`41-sunshine.sh`)
 
@@ -412,6 +412,125 @@ installed per host). The fleet's laptop is an MSI (llaptop-matrix, RTX 4070).
   fixture root with a synthetic tarball of the release layout (positive, and two known-bad
   tarballs refused before anything lands); the real tarball was run through the same code
   on the host of record before the commit; the D-Bus activation of a root helper from
-  `/usr/local/bin` is proven on the laptop in phase 4.
+  `/usr/local/bin` is proven on the laptop (2026-09-04: `ujust setup-msi enable` installed
+  0.5.1, `busctl --system introspect mcontrolcenter.helper /` started the helper as root,
+  pid read back, `setup-msi status` reported the EC firmware).
 - v1 layered `mcontrolcenter` from the COPR `teackot/msi` with rpm-ostree, which is what makes
   `bootc status` report `incompatible` (decision 1.7); nothing is layered here.
+- **Not in the initramfs, by design**: the two modules live under
+  `/usr/lib/modules/<kver>/updates/` and are loaded by `modules-load.d` after the switch-root;
+  `lsinitrd` on the image's `initramfs.img` lists neither (2026-09-04, tree `8f70f30`). A module
+  that dracut does pull in (`amdgpu`, `ntfs3`, the NVIDIA typec/hid ones are inside) cannot be
+  replaced by writing the `.ko` and running `depmod` alone: the kernel loads the copy in the
+  initramfs and the change is silently inert until `dracut` regenerates the image in the same
+  layer (measured on the hub by the FRL round, 2026-09-04: a patched `amdgpu.ko` on disk, the
+  stock one hashed inside the booted initramfs). v2 replaces no in-tree module; the day it
+  does, the build regenerates the initramfs in the same layer and fails unless the module
+  unpacked from it hashes like the installed one (the guard the FRL round added).
+  Second trap from the same round (2026-09-04, hub): `dracut --no-hostonly` run inside the
+  container does not detect an ostree root and drops `ostree-prepare-root` from the image it
+  writes (0 hits against 3 in the base's initramfs), so the deployment stops in the initramfs
+  with no error at build time; a regeneration in-image forces the ostree dracut module and
+  checks the unpacked initramfs for it.
+  Third trap, same round: `rd.driver.blacklist=<module>` is not initramfs-scoped in
+  practice — dracut writes it to `/run/modprobe.d/initramfsblacklist.conf`, `/run` survives
+  the switch-root, and udev never autoloads the module in the real root either (the hub ran
+  its desktop without `amdgpu` on that boot); only an explicit `modprobe` ignores a
+  `blacklist` line.
+
+## ujust recipes: the justfile feature (`70-justfile.sh`, `95-bazzite-mx.just`)
+
+Criteria 1, 2, 3, 4; decision 1.5f (recipes with an upstream name replace the upstream
+recipe, the base justfile modified in the build behind a guard), 1.5c (JetBrains Toolbox
+kept as the v1 recipe, rewritten), 1.7 (a generic migration recipe for every host). Bazzite's
+`ujust` is `just` on `/usr/share/ublue-os/justfile` (`ublue-os-just` 0.57), which imports
+every file under `/usr/share/ublue-os/just/` by name and sets `allow-duplicate-recipes`.
+
+- **How our recipes join**: `95-bazzite-mx.just` is appended as one more `import` line, the
+  master file rewritten onto a fresh inode (the way bazzite-dx adds `95-bazzite-dx.just`,
+  `build_files/60-clean-base.sh:5`, with `>>` there). Measured 2026-09-02 on just 1.57.0:
+  with duplicate names across imports **the earlier import wins** (just manual, "Imports"),
+  so an appended import can never override a base recipe. That is why a recipe of ours with
+  an upstream name lives in the upstream file's place (`84-bazzite-virt.just`,
+  `82-bazzite-sunshine.just`: rsync replaces the file) or, when the upstream file holds
+  other recipes too, the upstream recipe is cut out of its file: `install-jetbrains-toolbox`
+  from `82-bazzite-apps.just` (11 recipes in the base, 10 after; the block from its doc
+  comment to its last body line, the file's other recipes proven unchanged by
+  `just --summary`). The build fails if any name is defined in two files.
+- **Drift guard** (2.5 #4.4 in spirit, decision 1.5f in letter): `00-prep.sh` records every
+  base recipe file's recipe set before `system_files` is copied
+  (`/usr/lib/bazzite-mx/build-state/just.base.summary`, 29 files on the 2026-09-02 base);
+  `70-justfile.sh` refuses a replaced file whose set differs from ours and an override
+  whose recipe the base no longer has, so a recipe upstream adds to `84-bazzite-virt.just`
+  or renames in `82-bazzite-apps.just` stops the build instead of vanishing. `--self-test`:
+  a recipe removed whole with its neighbours intact, an absent recipe refused, a removal
+  that would orphan an `alias` refused, a drifted set refused.
+- **`verify-host`** (invented name, after Bazzite's `verify-image` in
+  `92-bazzite-verify.just`, which only rewrites the transport for `ghcr.io/ublue-os`):
+  `/usr/libexec/bazzite-mx-verify-host` through sudo, one `OK:`/`FAIL:`/`SKIP:`/`INFO:`
+  line per check, exit 1 on a FAIL. Checks: `bootc status` not `incompatible` (bootc
+  `crates/lib/src/utils.rs:23-32`: any rpm-ostree group in the origin), origin
+  `ostree-image-signed:docker://ghcr.io/matrixdj96/<the image's own name>:stable` (a dated
+  tag never updates: 2.5 #4.2), no `packages`, `requested-packages`,
+  `requested-local-packages`, `requested-base-removals`, `requested-modules` (the desktop's
+  RPMs are local ones: 2.5 #2.11; an inactive request lives in `requested-packages` only,
+  gotchas) and no `regenerate-initramfs`, the ghcr.io/matrixdj96 scope with its key and
+  `registries.d` stanza in force and `default` still `reject`, `msi_ec` + `acpi_ec` loaded
+  on a Micro-Star host, NVIDIA GPU (`lspci -d 10de:`) and flavour agreeing with the
+  `nvidia` module loaded, every fstab NTFS row on `ntfs3` and mounted as such, no ntfsplus
+  file or kernel argument; a Firefox Flatpak is reported (INFO), not failed: no Flatpak is
+  required by the image. Positive control: run live on ldesktop-zrombi (v1 image,
+  2026-09-02): 6 FAIL lines (incompatible, unsigned origin, `1password` layered, local
+  initramfs, policy scope, registries.d), exit 1, as the design predicted; the smoke test
+  replays a v1-state fixture (9 FAIL lines) and a migrated one (17 OK lines).
+- **`migrate`** (invented name; design 2.4 called it `migrate-to-signed`):
+  `/usr/libexec/bazzite-mx-migrate plan|apply [TAG]` through sudo, `TAG` default `stable`.
+  Detect, then the steps of design 2.0 § 7, each behind `ugum confirm` and skipped when
+  already done: local copies of `policy.json`/`registries.d` in `/etc` offered back from
+  `/usr/etc` with a backup (2.5 #3d: the image's copy never arrives through the three-way
+  merge), ABORT on a pending deployment (2.5 #3e) and on a booted image without the
+  ghcr.io/matrixdj96 scope (the message gives the one-time unsigned rebase), backups under
+  `/var/tmp/bazzite-mx-migrate/<timestamp>/`, `ostree admin pin booted`, `uupd.timer`
+  stopped for the run, `rpm-ostree uninstall --all` (dry run shown first),
+  `rpm-ostree initramfs --disable`, `rpm-ostree rebase ostree-image-signed:docker://…:TAG`
+  (rpm-ostree, not `bootc switch`: visible, dry-run, and the resulting origin is the same,
+  bootc `utils.rs:161-166`), fstab `ntfs` → `ntfs3` on the type column only after
+  `ntfs3` is proven loadable (`/proc/filesystems`, else `modprobe -n`; 2.5 #4.3), zero
+  `ntfs` rows after, `daemon-reload`, `findmnt --verify --fstab`, ntfsplus files and
+  kernel arguments removed on confirmation (2.5 #5.4). Nothing is uninstalled from Flatpak
+  (2.5 #5.1): the per-user Firefox profile copy, the Teams Flatpak, reboot, rollback and
+  unpin are printed. `--self-test`: the fstab rewrite byte-exact outside the type column
+  (comments and an `ntfs-3g` row untouched), a plan listing the steps on a v1-state
+  fixture, refusals on a pending deployment, a missing scope and a local `policy.json`, a
+  migrated fixture with every step skipped and the residue reported. `plan` run live on
+  the hub (2026-09-02): the three steps listed, ABORT with the unsigned-rebase line, as
+  expected on a v1 image.
+- **Proven on the three hosts** (the hub first, then the two NVIDIA hosts, 2026-09-03/04): the
+  signed rebase is accepted by the policy the v2 deployment carries (the end-to-end proof of the
+  in-image trust), `bootc status` reports `incompatible: false`, the image's initramfs is 87 MB
+  against the 252 MB a host regenerated, `verify-host` exits 0 on all three, the NTFS volumes
+  mount with `ntfs3` (`findmnt --verify --fstab` warns "ntfs3 does not match with on-disk
+  ntfs" on every rewritten row: a warning, exit 0). What the hosts surfaced, and the fixes
+  each with its known-bad fixture: [`gotchas.md`](gotchas.md).
+- **`setup-dev`**: `mise ls` (`status`) or, after seeding `~/.config/mise/config.toml`
+  from `/etc/skel` when the account has none, `mise install` (mise CLI docs,
+  `install`: "installs everything specified in mise.toml", read 2026-09-02). A global
+  config with plain `[tools]` versions needs no `mise trust` ("safe config files do not
+  require trust", mise docs `cli/trust`, read 2026-09-02; measured with the skel config
+  on mise 2026.9.0: `mise ls` lists the four runtimes, no prompt).
+- **`install-jetbrains-toolbox`** replaces Bazzite's, a Homebrew cask
+  (`82-bazzite-apps.just:250-264`): `/usr/libexec/bazzite-mx-jetbrains-toolbox` reads
+  JetBrains' release feed (`data.services.jetbrains.com/products/releases?code=TBA`,
+  `.TBA[0].build`, `.downloads.linux.link`, `.checksumLink`; build 3.7.2.87231 on
+  2026-09-02), downloads the tarball into `~/.cache/bazzite-mx/`, compares its sha256 with
+  the feed's checksum file (a mismatch removes the download), unpacks it under
+  `~/.local/share/JetBrains/ToolboxApp` and starts it once, which is JetBrains' documented
+  Linux install (Toolbox App docs, "Installation", updated 2026-07-20: extract, run
+  `./bin/jetbrains-toolbox`; first start initialises `~/.local/share/JetBrains/Toolbox`
+  and the `.desktop` entry). No pin (Regola RPM); `--proto =https` on curl. The smoke test
+  runs it on a `file://` feed with a synthetic tarball: good build installed and
+  idempotent, wrong sha256 refused with nothing installed, tarball without the binary
+  refused. The v1 recipe did the same download without caching and moved the tree with
+  `rm -rf` while the app could be running; here a running Toolbox stops the install.
+- Not carried over: the v1 `96-bazzite-mx-overrides.just` monolith (every other v1 recipe
+  either returned as its own feature or was dropped with the feature).

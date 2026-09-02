@@ -10,8 +10,22 @@ cp /etc/dnf/dnf.conf "$BUILD_TMP/dnf.conf.base"
 dnf5 config-manager setopt keepcache=1 timeout=60
 grep -q '^keepcache=1' /etc/dnf/dnf.conf || die "dnf.conf: keepcache=1 not applied"
 
-# Snapshot of the base's .repo files, by content: the validator refuses a
-# base file the build modified and treats anything else as an addition.
+# By content: 90-validate-repos.sh refuses a base file the build modified and
+# treats anything else as an addition.
 (cd /etc/yum.repos.d && sha256sum -- *.repo) > "$BUILD_STATE/repos.base.sha256"
 [ -s "$BUILD_STATE/repos.base.sha256" ] || die "no .repo files in the base image"
 log "prep: $(wc -l < "$BUILD_STATE/repos.base.sha256") base repo files recorded"
+
+# By recipe set: 70-justfile.sh refuses to replace a base file whose set
+# drifted from ours, so a recipe upstream added cannot disappear silently.
+JUST_DIR=/usr/share/ublue-os/just
+: > "$BUILD_STATE/just.base.summary"
+for f in "$JUST_DIR"/*.just; do
+    # A file without recipes records an empty set; one just cannot parse is
+    # fatal here rather than at the guard.
+    names=$(recipe_set "$f") || die "just cannot parse the base's $f"
+    names=$(tr '\n' ' ' <<< "$names")
+    printf '%s: %s\n' "$(basename "$f")" "${names% }" >> "$BUILD_STATE/just.base.summary"
+done
+[ -s "$BUILD_STATE/just.base.summary" ] || die "no .just files under $JUST_DIR in the base image"
+log "prep: $(wc -l < "$BUILD_STATE/just.base.summary") base recipe files recorded"

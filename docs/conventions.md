@@ -66,9 +66,20 @@ version; this file carries the reasons and the measured facts behind them.
 - A recipe that replaces one of Bazzite's ships in a file with the same name under
   `system_files/usr/share/ublue-os/just/` (decision 1.5f: same name, upstream's recipe
   removed). The base justfile imports the path, so nothing else changes; the base's file must
-  hold only the recipes we replace (`84-bazzite-virt.just`: one, measured 2026-09-02 with
-  `just --summary`), and a drift guard against the base's snapshot arrives with the justfile
-  feature.
+  hold only the recipes we replace (`84-bazzite-virt.just` and `82-bazzite-sunshine.just`:
+  one each, measured 2026-09-02 with `just --summary`), and `70-justfile.sh` refuses the
+  build when the base's recipe set (recorded by `00-prep.sh` before the copy) differs from
+  ours. When the base file holds other recipes too, the recipe is listed in `OVERRIDES` of
+  `70-justfile.sh`, which cuts it out of the base file and proves the rest unchanged.
+- Our own recipes live in `95-bazzite-mx.just`, imported last. With
+  `allow-duplicate-recipes` and duplicate names across imports the earlier import wins
+  (just manual, "Imports"; measured on just 1.57.0, 2026-09-02): a recipe of ours can never
+  shadow a base recipe from there, and the build fails on any name defined in two files.
+- A recipe that needs more than a few lines of logic calls a helper under
+  `system_files/usr/libexec/bazzite-mx-<x>`, the recipe staying a thin front (help, not as
+  root, `sudo` where root is needed, the call). The helper takes fixture knobs (`ROOT=`,
+  `FIXTURE=`, a `file://` feed) so the smoke test runs the real code positive and known-bad
+  in the build, and ships a `--self-test` when it has pure functions worth pinning.
 - Recipes are `just --unstable --fmt --check` clean and start with `source /usr/lib/ujust/ujust.sh`
   (colours, `Choose`). A `help` action comes before the "not as root" check so the smoke test
   can run the recipe body in the build.
