@@ -710,3 +710,77 @@ exclusive, `--bootc` required, `--format-version 2` writes every parent director
 `--max-layers` default 64); cosign 3.1.3 `sign-blob --help` and `verify-blob --help`;
 `actions/runner-images` `Ubuntu2604-Readme.md` (kernel 7.0.0-1012-azure, Node.js 24.19.0,
 Homebrew 6.0.19 not on `PATH`, Podman 5.7.0, Skopeo 1.21.0, yamllint 1.38.0, shellcheck 0.11.0).
+
+## CI: the schedule, the watcher and the retention (`trigger-release.yml`, `watch-upstream.yml`, `clean.yml`, `watch-upstream.sh`)
+
+Decisions 1.5d (a release from a weekly cron "tipo aurora", an upstream watcher every 6 h, a
+manual dispatch; never from a push), 1.5g (cleanup as a weekly cron in the bazzite/aurora
+form, thresholds declared, aliases excluded, dry run read before the cron is armed), 1.5c (bazzite-63
+7b5f68f: a poll every 6 h). What differs from the family and why:
+
+- **The trigger keeps `release.yml` on one event.** Aurora's
+  `trigger-schedule-stable-image.yml` exists because its release branch is not the default
+  ("we can't schedule builds on non-default branches"); ours is `main`, where a `schedule`
+  would run ("Scheduled workflows run on the latest commit on the default branch", GitHub docs,
+  events `schedule`, read 2026-09-02). The trigger stays because `release.yml` then has a
+  single trigger, `workflow_dispatch`, for the cron, the watcher and the owner: no `if:` on
+  the event inside the jobs, and the `reason` input in the run name is what the watcher
+  coalesces on. The minutes are off `:00` (`20 3 * * 2`, `37 */6 * * *`): "the schedule event
+  can be delayed during periods of high loads [...] High load times include the start of every
+  hour" (same page). A dispatch from `GITHUB_TOKEN` creates the run ("workflow_dispatch and
+  repository_dispatch events always create workflow runs", GitHub docs "Triggering a workflow
+  from a workflow"); the boolean input travels as the string `true` (`-f rechunk=true` on
+  `build.yml` ran the main profile on run 33648149093, 2026-09-02).
+- **The watcher compares digests, through the labels our build writes.** bazzite-dx reads the
+  base's `org.opencontainers.image.version` (`build.yml:89-98`); v1 compared the tag recorded in
+  `base.name`. Here `watch-upstream.sh` compares the digest of `ghcr.io/ublue-os/<base>:stable`
+  (`resolve-base.sh`, the one owner of the coordinates) with the `base.digest` label of our own
+  `:stable`, per flavour: a retag or a `.N` rebuild upstream moves the digest and not the
+  version. The base carries no `base.*` label (measured 2026-09-02); `image-labels.sh` writes
+  both on every image. Fail-closed as in v1 and stricter: a base that cannot be resolved, an
+  image that cannot be inspected or a `:stable` without the label exit 1 and the run is red
+  (refutation 4.1: a missing label read as "stale" would produce a green release every 6 h); a
+  `:stable` that does not exist (`manifest unknown`) is `absent`, nothing to compare.
+- **The variable, not the absence of `:stable`, gates the crons.** The design (2.0 § 6) counted
+  on "our `:stable` absent = no dispatch"; `:stable` exists on both packages and carries the
+  `base.digest` of the current base (MEASURED 2026-09-02 15:26Z), so an upstream move would
+  produce a release the gate cannot promote, one per day. `decide` refuses the dispatch while
+  the repository variable `PROMOTE_STABLE` is not `true`; the trigger job carries the same
+  condition as an `if:`. The variable is the switch on both sides: it lets the gate move
+  `:stable` and it lets the crons create releases.
+- **Coalescing on the run name.** One dispatch per run even when both flavours are stale (one
+  run builds both); none while a release run is queued or in progress, and none when a
+  release with the same `reason` completed in the last 24 h, whatever its conclusion: a
+  stable failure is rebuilt once a day, not four times, and a success whose promotion the
+  gate skipped is not repeated (2.1 § 3). The runs come from the repository-wide endpoint
+  filtered on the workflow's path, because the per-workflow endpoint answers 404 while the
+  file is not on the default branch (`docs/gotchas.md`). The reason is
+  `upstream:<12 hex>+<12 hex>`, one short digest per base, so the same upstream state always
+  produces the same run name.
+- **The retention names its packages.** bazzite and aurora list their packages literally
+  (`clean.yml:23`, `:19`); the design (2.0 § 6) planned anchored regular expressions on
+  `packages` so that `bazzite-mx` could not match another package of the owner. The
+  action's source says `packages` is a plain list unless `expand-packages` is set, which needs
+  a classic PAT and turns the whole string into one regular expression (`docs/gotchas.md`), so
+  the literal pair `bazzite-mx,bazzite-mx-nvidia-open` is both the simpler and the only form
+  that works with `GITHUB_TOKEN`; a literal name cannot match another package. `use-regex`
+  stays for `exclude-tags: ^(stable|staging)$` (v1 also spared `latest`, `stable-44` and the
+  `testing*` aliases, which v2 does not emit). Thresholds as bazzite (`older-than: 90 days`,
+  `keep-n-tagged: 7`, `keep-n-untagged: 7`, `delete-orphaned-images: true`), plus
+  `validate: true`. The dated tags are prunable, as in the family; the GitHub Release outlives
+  them and says so. `dry_run` defaults to `true` and the workflow has no cron: it is armed
+  after the definition of done and the v1 cleanup (decision 1.5g), once a dry run has been
+  read: it must list the two packages and no version of `bazzite-mx-nvidia`.
+- **Runners.** The trigger and the cleanup run on `ubuntu-slim` (Node.js 24, GitHub CLI 2.96,
+  jq; `ubuntu-slim-Readme.md`, image 20260728.2.1, read 2026-09-02): nothing there needs a
+  container engine. The watcher needs skopeo and runs on `ubuntu-26.04`.
+
+Sources read 2026-09-02: GitHub docs "Events that trigger workflows" § schedule (default
+branch, high-load delay, 60-day disabling, 5-minute minimum), "Triggering a workflow from a
+workflow", REST "Workflow runs" (`GET /repos/{owner}/{repo}/actions/runs` with `event`,
+`status`, `created`; the per-workflow endpoint by file name), `gh workflow run` manual (`-f`,
+`--ref`, the workflow by file name); `dataaxiom/ghcr-cleanup-action` README (inputs,
+`expand-packages`, token setup) and `src/main.ts`, `src/config.ts` at v1.2.2; runner-images
+README (`ubuntu-slim` row) and `ubuntu-slim-Readme.md`; aurora
+`trigger-schedule-stable-image.yml`, `clean.yml`; bazzite `clean.yml`; v1 `watch-upstream.yml`,
+`clean.yml` (read as reference, rewritten).

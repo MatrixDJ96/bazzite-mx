@@ -1,0 +1,33 @@
+# The weekly release, as a cron that dispatches release.yml. GitHub disables
+# this cron after 60 days without a commit; refresh-pins.sh reports it.
+name: Trigger Release
+
+on:
+  schedule:
+    - cron: "20 3 * * 2" # Tuesday 03:20 UTC, minute off the hour: schedule events lag
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: bazzite-mx-trigger-release
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    name: Dispatch the release
+    if: vars.PROMOTE_STABLE == 'true'
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f reason=weekly -f promote_stable=true
+          echo "dispatched release.yml: reason=weekly promote_stable=true"

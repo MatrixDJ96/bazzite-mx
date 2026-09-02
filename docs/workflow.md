@@ -70,10 +70,46 @@ gh workflow run release.yml --repo MatrixDJ96/bazzite-mx --ref main -f reason=ma
 gh run list --repo MatrixDJ96/bazzite-mx --workflow release.yml --limit 3
 ```
 
-Until the cutover the gate prints `promotion of :stable not requested` and the run is green
-with the dated tag alone: the pilot host rebases on `:<tag>` ([`migration.md`](migration.md)).
-The weekly trigger and the upstream watcher dispatch with `promote_stable=true`; the repository
-variable `PROMOTE_STABLE` is the switch that lets them move `:stable` (below).
+With `promote_stable` off, or the repository variable `PROMOTE_STABLE` not `true`, the gate
+prints `promotion not requested` and the run is green with the dated tag alone. The weekly
+trigger and the upstream watcher dispatch with `promote_stable=true`, and only while the
+variable is `true` (below): with the switch off the only release runs are the ones you dispatch.
+
+## The weekly trigger and the upstream watcher
+
+Both live on `main` (a `schedule` runs on the default branch only) and both dispatch
+`release.yml` with `reason` and `promote_stable=true`; neither dispatches while
+`PROMOTE_STABLE` is not `true`.
+
+| Workflow | When | What it does |
+|---|---|---|
+| `trigger-release.yml` | Tuesday 03:20 UTC, or a dispatch | one job on `ubuntu-slim`: `gh workflow run release.yml --ref main -f reason=weekly -f promote_stable=true`; skipped, visibly, while the variable is not `true` |
+| `watch-upstream.yml` | every 6 h at :37, or a dispatch (`dry_run`) | `watch-upstream.sh check`: the digest of `ghcr.io/ublue-os/<base>:stable` against the `base.digest` label of our `:stable`, per flavour; `decide`: dispatch only on `stale`, with the variable `true`, no release run queued or running, and no release with the same reason completed in the last 24 h; then the dispatch, `reason=upstream:<12 hex per base>` |
+
+The watcher fails closed: a base that cannot be resolved, an image that cannot be inspected or
+a `:stable` without the label make the run red and dispatch nothing (`UNKNOWN`); the next cron
+retries. A `:stable` that does not exist is `absent`: nothing to compare. The verdict on the
+day of the commit: `current` on both flavours (MEASURED 2026-09-02 15:31Z: v1's `:stable`
+carries the label with the digest of the current base). To read the watcher without
+dispatching:
+
+```bash
+gh workflow run watch-upstream.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=true
+```
+
+## GHCR retention
+
+`clean.yml` runs every Sunday at 00:15 UTC (the family's slot, bazzite and aurora
+`clean.yml:4`; decision 1.5g). It prunes, on `bazzite-mx` and
+`bazzite-mx-nvidia-open` only, the versions older than 90 days beyond the 7 newest tagged and
+the 7 newest untagged, keeps `:stable` and `:staging` whatever their age, and deletes the
+signature, SBOM and attestation referrers whose image is gone. The dated release tags are
+prunable; their GitHub Release stays. `dry_run` defaults to `true`:
+
+```bash
+gh workflow run clean.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=true   # read the log first
+gh workflow run clean.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=false  # owner's OK
+```
 
 The `:staging` tag is re-pointed by every run and is never deleted by version id: on GHCR a
 version is the manifest, and the dated tag and `:staging` share it (measured 2026-09-02 on the
@@ -113,8 +149,8 @@ Checked and set with `gh`, each command run with the owner's OK. State MEASURED 
 | Setting | Why | Check | Set |
 |---|---|---|---|
 | secret `SIGNING_SECRET` | the cosign private key paired with `cosign.pub`; proven on every push to `main` | `gh secret list --repo MatrixDJ96/bazzite-mx` → present | rotate with `gh secret set SIGNING_SECRET < key`, then a push to `main` proves the pair |
-| variable `PROMOTE_STABLE` | the cutover switch: without it no run moves `:stable` | `gh variable list --repo MatrixDJ96/bazzite-mx` → ABSENT (reads as "not true") | `gh variable set PROMOTE_STABLE --repo MatrixDJ96/bazzite-mx --body false` now, `--body true` after the cutover |
-| immutable releases | a release tag never moves and a release is never deleted (docs "Immutable releases": tag locked to its commit, assets frozen, an attestation of the release generated) | `gh api repos/MatrixDJ96/bazzite-mx/immutable-releases` → `enabled: false` | `gh api -X PUT repos/MatrixDJ96/bazzite-mx/immutable-releases` (admin) before the first v2 release |
+| variable `PROMOTE_STABLE` | the switch of the automatic releases and of the promotion: without it no run moves `:stable`, and neither the weekly trigger nor the watcher dispatches a release | `gh variable list --repo MatrixDJ96/bazzite-mx` → `true` | `gh variable set PROMOTE_STABLE --repo MatrixDJ96/bazzite-mx --body false` stops the crons and the promotion, `--body true` restores them |
+| immutable releases | a release tag never moves and a release is never deleted (docs "Immutable releases": tag locked to its commit, assets frozen, an attestation of the release generated) | `gh api repos/MatrixDJ96/bazzite-mx/immutable-releases` → `enabled: true` | `gh api -X PUT repos/MatrixDJ96/bazzite-mx/immutable-releases` (admin); set |
 | default workflow permissions | the token starts read-only; each job declares what it needs | `gh api repos/MatrixDJ96/bazzite-mx/actions/permissions/workflow` → `read` | leave |
 | workflow states | GitHub disables the cron of a public repository after 60 days without a commit; scheduled runs do not count | `refresh-pins.sh --check`, class `workflow` | `gh api -X PUT repos/MatrixDJ96/bazzite-mx/actions/workflows/<id>/enable` |
 | Pages source | the landing page (decision 1.5e), arrives with `deploy-pages.yml` | `gh api repos/MatrixDJ96/bazzite-mx/pages` | with that commit |
@@ -134,18 +170,20 @@ binaries the workflows install take their version from an input (`cosign-release
 
 | Class | Item | Verdicts |
 |---|---|---|
-| `action` | each `uses: owner/repo[/path]@<sha> # <version>` | `OK`, `STALE` (a newer release, or a comment that disagrees with the sha), `UNKNOWN` (no release readable: never taken for OK), `FOREIGN` (the sha is not a commit of that repository) |
-| `binary` | `cosign-release`, `syft-version`, `ORAS_VERSION` (the env of the `install-oras.sh` steps) | `OK`, `STALE`, `UNKNOWN` (compared without the `v`) |
-| `runner` | each `runs-on:` label against the table of `actions/runner-images` | `OK` (listed; "still marked preview" when the badge is there), `STALE` (missing or deprecated), `UNKNOWN` |
-| `workflow` | the state of every workflow of the repository | `OK`, `DISABLED` (with the re-enable command) |
-| `issue` | every `owner/repo#N` cited in a workflow comment | `OK` (open), `CLOSED` (the flag chosen because of it is up for review), `UNKNOWN` |
+| `action` | each `uses: owner/repo[/path]@<sha> # <version>` | `OK`, `STALE`, `UNKNOWN`, `FOREIGN` |
+| `binary` | `cosign-release`, `syft-version`, `ORAS_VERSION` | `OK`, `STALE`, `UNKNOWN` |
+| `runner` | each `runs-on:` label against the `actions/runner-images` README | `OK`, `STALE`, `UNKNOWN` |
+| `workflow` | the state of every workflow of the repository | `OK`, `DISABLED` |
+| `issue` | every `owner/repo#N` cited in a workflow comment | `OK`, `CLOSED`, `UNKNOWN` |
 
-`--apply` rewrites the `action` and `binary` classes only; a runner label, a disabled workflow
-and a closed issue are decisions. After an apply: lint, push to `develop`, and a main-profile
-dispatch when the change touches `reusable-build.yml`. Run `--check` at the start of every
-round that touches `.github/` and after a Fedora or Bazzite release.
+`UNKNOWN` means no release was readable and is never taken for `OK`; `FOREIGN` means the sha is
+not a commit of that repository. `--apply` rewrites the `action` and `binary` classes only: a
+runner label, a disabled workflow and a closed issue each need a human call. After an apply,
+lint, push to `develop`, and dispatch the main profile when `reusable-build.yml` changed. Run
+`--check` whenever you touch `.github/`, and after a Fedora or Bazzite release.
 
 ## What takes the owner's OK
 
-A push to `main`, a dispatch of `release.yml` or `promote.yml`, a delete on GHCR, any change to
-the repository settings above, and anything that touches a host.
+A push to `main`. A dispatch of `release.yml` or `promote.yml`. A delete on GHCR (`clean.yml`
+with `dry_run=false`). Any change to the repository settings above, and anything that touches a
+host.

@@ -91,7 +91,7 @@ jobs:
       - name: Prove the CI scripts fail closed
         run: |
           set -euo pipefail
-          for s in resolve-base image-labels check-image release-tag gate-release changelog refresh-pins; do
+          for s in resolve-base image-labels check-image release-tag gate-release changelog refresh-pins watch-upstream; do
             "./.github/scripts/$s.sh" --self-test
           done
 

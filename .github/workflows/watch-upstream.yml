@@ -1,0 +1,76 @@
+# Dispatches one release run when a base image moves. Every check and the
+# decision itself live in watch-upstream.sh, which fails closed.
+name: Watch Upstream
+
+on:
+  schedule:
+    - cron: "37 */6 * * *" # every six hours at :37 UTC, minute off the hour: schedule events lag
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print the verdict and the decision, dispatch nothing"
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: bazzite-mx-watch-upstream
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Compare the bases and dispatch
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+      actions: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          echo "$GITHUB_TOKEN" | skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Compare the base digests
+        id: check
+        run: ./.github/scripts/watch-upstream.sh check
+
+      - name: Decide on a dispatch
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERDICT: ${{ steps.check.outputs.verdict }}
+          REASON: ${{ steps.check.outputs.reason }}
+          PROMOTE_VAR: ${{ vars.PROMOTE_STABLE }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$DRY_RUN" = true ]; then
+            args+=(--dry-run)
+          fi
+          ./.github/scripts/watch-upstream.sh decide --verdict "$VERDICT" --reason "$REASON" \
+            --promote-var "$PROMOTE_VAR" "${args[@]}"
+
+      # A dispatch from GITHUB_TOKEN does create a run (GitHub docs, "Triggering
+      # a workflow from a workflow"); its reason is what the next run coalesces on.
+      - name: Dispatch a release
+        if: steps.decide.outputs.dispatch == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REASON: ${{ steps.check.outputs.reason }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f reason="$REASON" -f promote_stable=true
+          echo "dispatched release.yml: reason=$REASON promote_stable=true"
