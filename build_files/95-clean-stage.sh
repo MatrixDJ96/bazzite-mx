@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Leave the tree in the state bootc lint expects. Two things
+# stay on purpose: the kernel versionlock, which holds a host on the ogc
+# kernel, and flatpak-add-fedora-repos.service, which puts Flathub on a host.
+#
+# `restore_dnf_conf` asserts keepcache=0, which is the base's own content:
+# were upstream to drop the line, the assertion would blame the restore for a
+# change of the base.
+#
+# Usage: run by build.sh as the last script; no arguments.
+# Writes: /etc/dnf/dnf.conf restored from 00-prep.sh's backup; dnf5's history
+#   removed; the accounts created in the build moved from /etc to /usr/lib;
+#   the rpmdb hardlinked for rpm-ostree; /var and /boot emptied.
+# Exit status: 0 done; the build stops on a `FAIL: …` line.
+
+# shellcheck source=lib/env.sh
+source "$(dirname "$(realpath "$0")")/lib/env.sh"
+
+BASE_DB=/usr/lib/sysimage/rpm-ostree-base-db
+
+# --- the steps ----------------------------------------------------------------
+
+# The backup goes back with a rename, so the file sits on a fresh inode.
+restore_dnf_conf() {
+    mv -f "$BUILD_TMP/dnf.conf.base" /etc/dnf/dnf.conf
+
+    if ! grep -q '^keepcache=0' /etc/dnf/dnf.conf; then
+        fail_build "dnf.conf not restored"
+    fi
+}
+
+remove_dnf_history() {
+    rm -rf /usr/lib/sysimage/libdnf5/*
+}
+
+# Appends <lines> to <lib-file>, on a fresh inode, and proves each landed.
+append_to_lib_file() {
+    local lib_file=$1
+    local lines=$2
+    local line
+
+    {
+        cat "$lib_file" 2> /dev/null || true
+        echo "$lines"
+    } > "$lib_file.new"
+    mv -f "$lib_file.new" "$lib_file"
+
+    while IFS= read -r line; do
+        if ! grep -qxF -- "$line" "$lib_file"; then
+            fail_build "'$line' did not persist in $lib_file"
+        fi
+    done <<< "$lines"
+}
+
+# Accounts created in the build move from <etc-file> to <lib-file>, where
+# NSS reads them too, so a host's /etc merge never drops them. The lines
+# matching <keep> stay and <etc-file> is reset to <reset>.
+relocate_accounts() {
+    local etc_file=$1
+    local lib_file=$2
+    local keep=$3
+    local reset=$4
+    local moving
+
+    moving=$(grep -vE -- "$keep" "$etc_file" || true)
+
+    if [ -z "$moving" ]; then
+        return 0
+    fi
+
+    log "moving from $etc_file to $lib_file:"
+    echo "$moving"
+
+    append_to_lib_file "$lib_file" "$moving"
+    printf '%s\n' "$reset" > "$etc_file.new"
+    mv -f "$etc_file.new" "$etc_file"
+}
+
+# The rpmdb rpm-ostree reads must be the one dnf5 wrote, and a hardlink
+# rather than a symlink (github.com/coreos/rpm-ostree/issues/4554).
+link_rpmdb() {
+    ln -f /usr/share/rpm/rpmdb.sqlite "$BASE_DB/rpmdb.sqlite"
+}
+
+# Every build-time directory under /var goes but cache and log, the build's own
+# mounts: rm -rf would empty them, the dnf cache included, and fail on the
+# mount point. /run and /tmp are the RUN's tmpfs mounts (Containerfile), so
+# nothing written there reaches the image.
+empty_build_directories() {
+    find /var/* -maxdepth 0 -type d ! -name cache ! -name log -exec rm -rf {} +
+
+    find /boot -mindepth 1 -delete
+    mkdir -p /var/tmp
+    chmod 1777 /var/tmp
+}
+
+# --- main ---------------------------------------------------------------------
+
+restore_dnf_conf
+remove_dnf_history
+
+relocate_accounts /etc/passwd /usr/lib/passwd \
+    '^root:' 'root:x:0:0:root:/root:/bin/bash'
+relocate_accounts /etc/group /usr/lib/group \
+    '^(root|wheel):' 'root:x:0:
+wheel:x:10:'
+rm -f /etc/.pwd.lock /etc/passwd- /etc/group- /etc/shadow- /etc/gshadow- /etc/subuid- /etc/subgid-
+
+link_rpmdb
+empty_build_directories
+
+log "clean-stage: tree ready for lint"

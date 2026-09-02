@@ -61,6 +61,8 @@ jobs:
             "$s" --self-test
           done
 
+          ./build_files/tests/run.sh --self-test
+
       - name: Check Form
         run: |
           set -euo pipefail

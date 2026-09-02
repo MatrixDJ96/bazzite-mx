@@ -1,13 +1,14 @@
 # Conventions
 
-Rules for writing scripts, CI and prose in this repo. A rule a file enforces names that file;
-the rest is checked by hand at review.
+Rules for writing build scripts, tests, CI and prose in this repo. A rule a file enforces names
+that file; the rest is checked by hand at review.
 
-Contents: Bash (Form) · positive control · CI · prose · commits.
+Contents: Bash (Form) · build scripts · tests · positive control · CI · prose · commits.
 
 ## Bash
 
-- `#!/usr/bin/env bash` and `set -euo pipefail`.
+- `#!/usr/bin/env bash` and `set -euo pipefail`. A build script carries the shebang and takes
+  the `set` from `lib/env.sh`, which every `NN-<feature>.sh` sources on its first line.
 - Clean under `shellcheck -x -P SCRIPTDIR --severity=warning`, formatted by
   `shfmt --indent 4 --case-indent --binary-next-line --space-redirects`. `-x -P SCRIPTDIR`
   follows the sourced libraries, so a variable a library sets is not reported as undefined.
@@ -27,13 +28,13 @@ Contents: Bash (Form) · positive control · CI · prose · commits.
 ### Form
 
 A script is read by a person before bash runs it, and the person is not the author. These rules
-hold for every file the lint job covers: libraries, the CI scripts and the edit hook. They hold
-in the same spirit for every other file of the repo: a workflow or the Containerfile gets the
-same blank lines between its steps, the same 100 columns and comments that carry a reason,
-never a restatement. The shapes and the width are checked by `.github/scripts/check-form.sh`,
-which the edit hook runs on every shell file an edit touches and the `lint` job on the whole
-shell catalogue; a line that holds a banned shape as data ends in `# form: literal`. The rest
-is checked by hand at review, like § Prose.
+hold for every file the lint job covers: build scripts, libraries, tests, the CI scripts and
+the edit hook. They hold in the same spirit for every other file of the repo: a workflow or the
+Containerfile gets the same blank lines between its steps, the same 100 columns and comments
+that carry a reason, never a restatement. The shapes and the width are checked by
+`.github/scripts/check-form.sh`, which the edit hook runs on every shell file an edit touches
+and the `lint` job on the whole shell catalogue; a line that holds a banned shape as data ends
+in `# form: literal`. The rest is checked by hand at review, like § Prose.
 
 - **Control flow is written as `if … then … fi`.** `cmd || return 1`, `a && b || c`,
   `! cmd || die`, `cmd || { … }` and a subshell `( … ) ||` used as a guard are out: they hide
@@ -42,7 +43,8 @@ is checked by hand at review, like § Prose.
 
 - **Output is captured before `grep -q`.** `cmd | grep -q` is refused by `check-form.sh`:
   `grep -q` exits at the first match and closes the pipe, the writer dies of SIGPIPE and
-  `pipefail` reports a failure once in a few hundred runs, whatever the writer. The
+  `pipefail` reports a failure once in a few hundred runs, whatever the writer
+  ([`gotchas.md`](gotchas.md) § `command | grep -q` under `pipefail` fails on a match). The
   output goes into a variable first, and the grep reads the variable.
 
 - **A fallback is `${var:-…}`, never `|| echo`.** `$(cmd || echo x)` is refused by
@@ -55,10 +57,12 @@ is checked by hand at review, like § Prose.
   element that fails (a grep matching nothing, `just` on a broken file, `head` closing early)
   fails the assignment and `set -e` ends the script.
   `|| true` when nothing found is a value, the fallback naming what was not found;
-  `if ! var=$(…); then` when the failure is an error.
+  `if ! var=$(…); then` when the failure is an error. A `FAIL:` line quoting a probe's output
+  goes through `on_one_line <fallback>` of `tests/lib.sh`, which never leaves it blank.
 
 - **A command's output enters `$(( ))` through a variable.** `check-form.sh` refuses
-  `$((n + $(cmd)))`: an empty output is a syntax error `set -e` does not stop.
+  `$((n + $(cmd)))`: an empty output is a syntax error `set -e` does not stop
+  ([`gotchas.md`](gotchas.md) § An arithmetic syntax error escapes `set -e`).
 
   ```bash
   # before, check-form.sh
@@ -81,10 +85,11 @@ is checked by hand at review, like § Prose.
   a long pattern or message goes into a variable named for what it holds.
 
 - **A name says what the function does or what the variable holds.** No private vocabulary.
-  `die` is named by its effect: `exit_with_error` in the CI scripts (`.github/scripts/lib.sh`,
-  prints `<script>: …`, the script stops), where `print_error` prints the same line and returns
-  1 for a function a caller runs under `if`. A function a caller runs under `if` is named as
-  the question its status answers.
+  `die` is named by its effect: `fail_build` in `lib/log.sh` (prints `FAIL:`, the build stops),
+  `exit_with_error` in the CI scripts (`.github/scripts/lib.sh`, prints `<script>: …`, the
+  script stops), where `print_error` prints the same line and returns 1 for a function a caller
+  runs under `if`. A function a caller runs under `if` is named as the question its status
+  answers.
 
 - **Every script opens with a header**: what it does in one or two sentences; `Usage:` with
   each argument and option on its own line; the exit status; what it writes, files and the
@@ -93,7 +98,9 @@ is checked by hand at review, like § Prose.
 - **A comment says what the code cannot.** The contract of a function when its name does not
   carry it (empty when…, status 0 when…), or the reason for a choice the reader would otherwise
   question. A comment that restates the name or the next line is deleted; a function whose name
-  and arguments say it all has none.
+  and arguments say it all has none. The history behind a choice (dates, versions,
+  measurements, the bug that forced it) lives in `docs/gotchas.md` and the comment points at
+  its heading.
 
 - **A function stays short**, about 25 statements as the guide (blank and comment lines do not
   count): a function that does two things is two functions, and a step sequence reads as a list
@@ -107,6 +114,47 @@ A rewrite for form proves behaviour unchanged: the same arguments, the same exit
 same messages where a test or a doc cites them, every self-test green before and after, every
 known-bad still red after it. The rules above add to the earlier bullets of this section and to
 § Positive control; they replace none.
+
+## Build scripts
+
+- One script per feature, `NN-<feature>.sh` under `build_files/`, sourcing `lib/env.sh` first.
+  `build.sh` runs them in version order and stops at the first failure.
+- The gate `90-validate-repos.sh` runs after the installs and refuses a vendored file that is
+  absent, differs from the vendored copy or carries `enabled=1`; a base repository file the
+  build modified; any other added file left enabled; and an enabled set, as `dnf5 repolist`
+  reports it, that differs from the base's. It reads the snapshots `00-prep.sh` recorded, so a
+  file under a name nobody listed is caught too.
+- The enablement lives in the `.repo` file, never in `dnf5 config-manager setopt`. `setopt`
+  writes to an override file under `/etc/dnf/repos.override.d/` and leaves the repository file
+  untouched (`man dnf5-config-manager`), so the state would sit in a file the gate's byte
+  comparison never reads; its `dnf5 repolist` comparison is what fails the build on it.
+- Nothing is pinned to a release for vendor RPMs and GitHub releases: the build resolves the
+  latest, and a pin enters only against an observed problem, with the observation cited. One
+  exception: the base image is pinned to the digest CI resolved (`resolve-base.sh`), so the
+  three flavours build against a known base.
+- A package `%post` runs in the build, not on the host. Read it with `rpm -qp --scripts` before
+  the package enters a script, and handle every effect that belongs to a host explicitly. A
+  `groupadd` in a `%post` lands in `/etc/group`; `95-clean-stage.sh` relocates the accounts to
+  `/usr/lib/passwd` and `/usr/lib/group`, where NSS reads them, so a host's `/etc` merge cannot
+  drop them.
+- Writes to files the base image ships end on a fresh inode (`mv`, `install`, `sed -i`,
+  `rsync`) where it costs nothing. What a runner change would reopen is in
+  [`gotchas.md`](gotchas.md) § Torn writeback on a 6.17-azure runner kernel.
+
+## Tests
+
+- `tests/NN-<feature>.sh` with the same stem as the build script. `tests/run.sh` refuses a
+  build script without a test and a test without a build script, so a feature cannot land
+  without its test.
+- A test prints `OK: <what>` or `FAIL: <what>` per check and exits 0. The runner fails the
+  build on any `FAIL:` line and on a non-zero exit. It also fails on a test that printed no
+  `OK:` line, which is what catches a test whose checks never ran.
+- Tests run offline (`--network=none`) on the tree `95-clean-stage.sh` left, with tmpfs on
+  `/run`, `/tmp`, `/var/log` and `/var/cache`: they see what the image ships, not what the
+  build had, and a test that touches dnf5 cannot leave a log behind for `bootc container lint`.
+- A check several tests make is a function of `tests/lib.sh`, sourced first:
+  `check_unit_state`, `check_self_test`, and `on_one_line` for a probe's output quoted in a
+  `FAIL:` line. A check made once stays in its test.
 
 ## Positive control
 
@@ -137,6 +185,8 @@ Where each one runs:
 | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.github/scripts/*.sh`                                    | `lint` job, `build.yml`                                                                                                                                   |
 | `check-form.sh`                                           | `lint` job, `build.yml`, which then runs the check itself over the whole shell catalogue; `.claude/hooks/lint-edit.sh` runs it on every edited shell file |
+| `90-validate-repos.sh`                                    | the test RUN, called by its paired test                                                                                                                   |
+| `tests/run.sh`                                            | `lint` job, `build.yml`, after the CI scripts                                                                                                             |
 
 ## CI
 
@@ -152,7 +202,9 @@ Where each one runs:
   from it would put caller and callee in the same group and the callee would wait for the run
   that started it.
 - Every third-party `uses:` is pinned to a commit SHA with the version in a trailing comment.
-- `ubuntu-26.04` for jobs that need podman or skopeo, which every job here does.
+- `ubuntu-26.04` for jobs that need podman or skopeo, which every job here does. It is also the
+  runner whose kernel keeps in-place writeback intact, so a runner change is a change to that
+  measurement ([`gotchas.md`](gotchas.md) § Torn writeback on a 6.17-azure runner kernel).
 - `runner.temp` is not available in a job-level `env:`; steps read `$RUNNER_TEMP`.
 - A dispatch on a branch runs that branch's copy of the file,
   `gh workflow run build.yml --ref <branch>`.
@@ -165,7 +217,8 @@ Where each one runs:
 ## Prose
 
 A claim in a doc, a comment or a script's output names its source (a file, a manual page, a
-URL). No linter reads prose: it is checked by hand at review.
+URL) or the `docs/gotchas.md` entry that records the measurement with its date; a date or a
+"measured" anywhere else is deleted. No linter reads prose: it is checked by hand at review.
 
 ## Commits
 

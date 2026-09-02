@@ -1,6 +1,7 @@
 # Workflow
 
-How a change reaches a host: the branches and the profiles they run.
+How a change reaches a host: the branches and the profiles they run. The build itself is in
+[`architecture.md`](architecture.md).
 
 Contents: branches and profiles · run the lint job locally · what takes the owner's OK.
 
@@ -12,10 +13,27 @@ Contents: branches and profiles · run the lint job locally · what takes the ow
 
 The `lint` job runs shellcheck, `check-form.sh` and `check-commits.sh` (every commit of the
 pushed ref, `conventions.md` § Commits) on the runner, then shfmt and yamllint inside
-`quay.io/fedora/fedora:44`. The `--self-test` of every script under `.github/scripts/` runs
-right after ShellCheck, before the checks it proves.
+`quay.io/fedora/fedora:44`. The `--self-test` of every script under `.github/scripts/` and of
+`tests/run.sh` runs right after ShellCheck, before the checks it proves.
 
 `build.yml` ignores pushes that touch only `**.md`, `docs/`, `.claude/` or `LICENSE`.
+
+A force-push that replaces the history may create no `push` run ([`gotchas.md`](gotchas.md) § A
+force-push of a rewritten history may create no `push` run). Read the push run of the new head
+first, for `build.yml`; `--commit` wants the full sha, and an empty list means the run is
+missing:
+
+```bash
+gh run list --repo MatrixDJ96/bazzite-mx --workflow <workflow> --event push \
+  --commit "$(git rev-parse <branch>)"
+```
+
+Dispatch only what is missing: a `build.yml` dispatch cancels a push run of the same ref
+(`cancel-in-progress`). For `main`:
+
+```bash
+gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref main
+```
 
 ## Run the lint job locally
 
