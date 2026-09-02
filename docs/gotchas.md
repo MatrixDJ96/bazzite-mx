@@ -8,9 +8,10 @@ Contents, in the order of the entries: torn writeback on 6.17-azure · just dupl
 ujust.sh readonly names · kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set ·
 command | grep -q · modinfo /lib/modules path · modprobe -n -v on a loaded module · podman
 build labels · stub-resolv.conf left in the image · remove-unwanted-software v9 · skopeo and
-containers-storage · setup-oras versions · cosign verify and referrers · inactive package
-request · 1Password BrowserSupport gid · local RPM blocks the rebase · EXIT trap and local ·
-private install marker · mise dotnet SDK · kbuild fragment compiles nothing · mount -t ntfs
+containers-storage · workflow off the default branch · setup-oras versions · cosign verify and
+referrers · inactive package request · 1Password BrowserSupport gid · local RPM blocks the
+rebase · EXIT trap and local · private install marker · mise dotnet SDK · rollback onto a
+pruned tag · ghcr-cleanup-action patterns · kbuild fragment compiles nothing · mount -t ntfs
 helper · module panics at first use · NTFS drivers' modes and case · udisks defaults outside
 allow · pre-flight without the changed script · OGC kernel changelog · NTFSPLUS EINVAL · skel
 and existing accounts · KXmlGui write-back · flags in a command substitution · findmnt --verify
@@ -146,6 +147,16 @@ namespace of its own to open podman's rootless storage and the runner denies it 
 while podman itself works. What a step needs from a local image is read with
 `podman image inspect`; skopeo is used on `docker://` references only.
 
+## A workflow that is not on the default branch has no runs endpoint
+
+`gh run list --workflow release.yml` and the API path
+`GET /repos/{owner}/{repo}/actions/workflows/release.yml/runs` answer
+`HTTP 404: workflow release.yml not found on the default branch` while the file exists only on
+a branch (measured 2026-09-02). `gh workflow run release.yml --ref <branch>` resolves the file
+the same way. Runs of such a workflow are read from the repository-wide endpoint filtered on
+`.path` (`watch-upstream.sh`), and a workflow is dispatched on a branch only once its file is
+on the default branch too.
+
 ## `setup-oras` installs only the ORAS versions embedded in its own release
 
 `oras-project/setup-oras` v2.0.1 resolves `version` against a list shipped in the action,
@@ -236,6 +247,27 @@ the SDK landed in `dotnet-root`, with `DOTNET_ROOT` set in that directory. A han
 in `~/.dotnet` with the variable exported gets the new SDK and runtime next to it and its
 `dotnet` muxer rewritten (measured 2026-09-05 with SDK 10.0.300). `ujust setup-dev help` says
 so; the other runtimes stay under `installs/`.
+
+## A rollback deployment whose origin tag was pruned from GHCR boots but never updates
+
+`ujust migrate apply <tag>` and a `bootc switch` onto a dated tag write that tag into the
+deployment's origin. Once `clean.yml` or a cleanup by id has removed the tag from the package,
+the deployment still boots, its commit being local, and `bootc upgrade` on it finds nothing to
+pull: the host reports the rollback as healthy and stale at the same time. Measured 2026-09-04
+on a laptop whose rollback carried `44.20260904.2` after that tag was deleted; the deployment
+went away with the next upgrade of the booted one, which is the only thing a dated origin
+needs. `verify-host` reads the booted deployment only: a rollback on a dated tag shows in
+`rpm-ostree status` and nowhere else.
+
+## `ghcr-cleanup-action` matches `packages` by pattern only with `expand-packages`
+
+`use-regex: true` reaches `delete-tags` and `exclude-tags`; `packages` stays a comma-separated
+list of literal names unless `expand-packages: true`, which a wildcard character in the value
+switches on by itself, and which lists the owner's packages through the Packages API and
+requires a classic PAT (`src/main.ts` and `src/config.ts` at v1.2.2, read 2026-09-02 and again
+2026-09-06; `GITHUB_TOKEN` is refused there). With `expand-packages` and `use-regex`, the whole
+`packages` string is one regular expression, not a list of them. `clean.yml` names the three
+packages one by one.
 
 ## A kbuild fragment gated on a kernel config symbol compiles nothing and exits 0
 

@@ -226,7 +226,9 @@ check_runners() {
     done
 }
 
-# check_workflows: one row per workflow of the repository with its state.
+# check_workflows: one row per workflow of the repository with its state; GitHub
+# disables a public repository's cron after 60 days without repository activity
+# (GitHub docs, `schedule` event).
 check_workflows() {
     local workflows rows path state enable
 

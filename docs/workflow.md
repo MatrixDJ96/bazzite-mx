@@ -1,10 +1,11 @@
 # Workflow
 
-How a change reaches a host: the branches, the release run and the pin refresh. The build
-itself is in [`architecture.md`](architecture.md).
+How a change reaches a host: the branches, the release run, the retention and the pin refresh.
+The build itself is in [`architecture.md`](architecture.md).
 
 Contents: branches and profiles · run the lint job locally · probe a pre-flight image by hand ·
-the release run · promotion and the recovery signer · keeping the pins fresh.
+the release run · promotion and the recovery signer ·
+the weekly trigger and the upstream watcher · GHCR retention · keeping the pins fresh.
 
 ## Branches and profiles
 
@@ -141,6 +142,56 @@ release, and reads no repository variable: the dispatch is the owner's OK.
 gh workflow run promote.yml --repo MatrixDJ96/bazzite-mx --ref main -f release_tag='44.YYYYMMDD'
 gh workflow run sign-image.yml --repo MatrixDJ96/bazzite-mx --ref main \
   -f image='ghcr.io/matrixdj96/<image>:<tag>'
+```
+
+## The weekly trigger and the upstream watcher
+
+Both live on `main`, because a `schedule` runs on the default branch only, and both dispatch
+`release.yml` with a `reason` and `promote_stable=true`. Neither dispatches while
+`PROMOTE_STABLE` is not `true`.
+
+| Workflow              | When                                                            | What it does                                                             |
+| --------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `trigger-release.yml` | `20 3 * * 0` (Sunday 03:20 UTC), or a dispatch                  | dispatches `release.yml` with `reason=weekly`, held as below             |
+| `watch-upstream.yml`  | `37 */6 * * *` (every 6 h at :37), or a dispatch with `dry_run` | compares the base digests with our `:stable`, then dispatches on `stale` |
+
+`trigger-release.yml` carries `if: vars.PROMOTE_STABLE == 'true'` on its job, so a skipped run
+shows why. `watch-upstream.sh weekly` then holds the dispatch while a release run is queued or
+running, or a release already carries the day's UTC date (`<fedora>.<yyyymmdd>[.N]`). The date
+is the release's tag, so a watcher release cut before 00:00Z does not hold a weekly after it. A
+release list or a run list it cannot read, or a release list that is blank or no JSON list,
+makes the run red, with no dispatch.
+
+`watch-upstream.sh decide` dispatches only when all four conditions hold:
+
+- the verdict is `stale`;
+- `PROMOTE_STABLE` is `true`;
+- no release run is queued or running;
+- no release with the same reason started in the last 24 hours.
+
+The reason it passes is `upstream:<12 hex per base>`.
+
+The watcher fails closed. A base that cannot be resolved, an image that cannot be inspected or
+a `:stable` without the label make the run red and dispatch nothing; the next cron retries. A
+`:stable` that does not exist is `absent`: there is nothing to compare. To read the verdict
+without dispatching:
+
+```bash
+gh workflow run watch-upstream.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=true
+```
+
+## GHCR retention
+
+`clean.yml` runs on `15 0 * * 0` (Sunday 00:15 UTC) and names the three packages in full. It
+prunes the versions older than 90 days beyond the 7 newest tagged and the 7 newest untagged,
+and excludes `:stable` and `:staging` whatever their age. The `.sig` images and the SBOM
+referrer of an image that is gone go with it; the attestations live in GitHub's store and stay.
+The dated release tags are prunable; their GitHub Release stays. A dispatch defaults to a dry
+run:
+
+```bash
+gh workflow run clean.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=true   # read the log
+gh workflow run clean.yml --repo MatrixDJ96/bazzite-mx --ref main -f dry_run=false
 ```
 
 ## Keeping the pins fresh
