@@ -6,12 +6,19 @@ How an image is built, what each stage may touch, and where the state of a build
 
 ```
 Containerfile
-  ctx      FROM scratch, COPY build_files, system_files, cosign.pub   never part of the image, bound at /ctx
-  image    FROM ${BASE_IMAGE}
-    RUN /ctx/build_files/build.sh                    mounts: /var/cache, /var/log (cache), /tmp (tmpfs)
+  ctx           FROM scratch, COPY build_files, system_files, cosign.pub   never part of the image, bound at /ctx
+  kmod-builder  FROM ${BASE_IMAGE}: build_files/kmods/build-kmods.sh --self-test, then the build → /out/<kver>/updates/*.ko
+  image         FROM ${BASE_IMAGE}
+    RUN /ctx/build_files/build.sh                    mounts: /kmods (from kmod-builder), /var/cache, /var/log (cache), /tmp (tmpfs)
     RUN /ctx/build_files/tests/run.sh                offline; tmpfs on /run and /tmp
     RUN bootc container lint --fatal-warnings        offline; tmpfs on /run
 ```
+
+The kernel modules are built by the base image itself (it ships `kernel-devel` for its own
+kernel, versionlocked, plus gcc, make, binutils and git-core; measured 2026-09-02), so no akmods
+carrier stage exists. The staged modules are bound at `/kmods`, a root-level mount point buildah
+removes after the RUN: a stage mount under `/tmp`, `/var` or `/run` makes clean-stage's
+`find -delete` fail on the read-only bind (measured 2026-09-02).
 
 `BASE_IMAGE` is the only variable between the two flavours; `IMAGE_NAME` follows it (`resolve-base.sh` prints both) and `VERSION` is the release tag, empty for sandbox and pre-flight builds (the image then calls itself `<base version>.dev`). CI and `/preflight` resolve it to a
 digest with `.github/scripts/resolve-base.sh`, which also reads the base's kernel from its
@@ -39,7 +46,9 @@ digest with `.github/scripts/resolve-base.sh`, which also reads the base's kerne
 | `33-mise.sh` | mise from the vendored `jdxcode/mise` COPR (key asserted); activation and default runtimes come from system_files |
 | `40-desktop-apps.sh` | Firefox and gparted from Fedora, `deny org.mozilla.firefox/*` appended to the base's Flatpak filter, 1Password from the vendored repo (key asserted, `/var/opt` created first, the `.repo` its %post rewrites put back, polkit actions and groups checked) |
 | `41-sunshine.sh` | Sunshine from the vendored COPR `lizardbyte/stable` (key asserted): KMS capabilities, udev and modules-load files checked, user unit disabled for everyone, Bazzite's Portal announcement removed, recipe `82-bazzite-sunshine.just` (replacing the base's) checked |
+| `kmods/build-kmods.sh` | kmod-builder stage: for every `kmods/<name>/source.env` (URL, pinned COMMIT, KO_NAME, KO_BUILD_PATH, KO_VERSION) fetch the commit, prove the checkout is that commit, `make -C /usr/src/kernels/<kver> M=<clone> modules`, `strip --strip-debug`, stage under `/out/<kver>/updates/`, assert readable, vermagic for `<kver>`, MODULE_VERSION; `--self-test` |
 | `45-kde-defaults.sh` | KDE defaults from system_files: two Plasma update scripts (clock seconds, a panel per screen), skel Konsole shortcut file and PowerShell profile, the `setup-panels` recipe; the script proves the files landed where their consumers read them and are well formed |
+| `50-kmods.sh` | installs the staged `msi-ec.ko` and `acpi_ec.ko` into `/usr/lib/modules/<kver>/updates/` (depmod searches `updates` first: kmod `tools/depmod.c:913-917`), runs `depmod`, asserts vermagic, version and that `modprobe` resolves each name to the new copy; nothing loads them at boot |
 | `80-fix-opt.sh` | every `/var/opt/<name>` an RPM unpacked moves to `/usr/lib/opt/<name>`, with a generated `usr/lib/tmpfiles.d/bazzite-mx-opt.conf` (`L+` per name) that recreates the `/var/opt` link at boot; checks before the first move, `--self-test` |
 | `90-validate-repos.sh` | repository gate: vendored files present, identical and disabled; base files untouched; additions disabled; `--self-test` |
 | `95-clean-stage.sh` | dnf.conf restored, dnf history removed, accounts relocated to `/usr/lib`, rpmdb hardlinked, `/var` `/run` `/tmp` `/boot` swept (aurora `clean-stage.sh`, bazzite `finalize`, `cleanup`) |
@@ -63,7 +72,7 @@ One tree, copied over `/` by `01-system-files.sh`. What lives where:
 | `usr/lib/modules-load.d/*.conf` | modules loaded at boot (`ip_tables.conf`: `iptable_nat` for docker-in-docker) |
 | `usr/lib/modprobe.d/bazzite-mx-*.conf` | module options (`kvm ignore_msrs`) |
 | `usr/lib/tmpfiles.d/bazzite-mx-*.conf` | `/var` directories packages ship and clean-stage removes; a host recreates them at boot (`bazzite-mx-opt.conf` is not in system_files: `80-fix-opt.sh` generates it from what sits under `/var/opt`) |
-| `usr/libexec/` | helpers recipes call (`bazzite-dx-kvmfr-setup`, bazzite-dx's file byte for byte) |
+| `usr/libexec/` | helpers recipes call: `bazzite-dx-kvmfr-setup` (bazzite-dx's file byte for byte), `bazzite-mx-msi-setup` (the root half of `setup-msi`: modules-load, modprobe, MControlCenter installed per host under `/usr/local` and `/etc/dbus-1`; `ROOT=` and `DMI_VENDOR_FILE=` for its smoke test) |
 | `usr/share/ublue-os/just/*.just` | `ujust` recipes; a file with a base file's name replaces that file (the base justfile already imports it), a new file is imported by the justfile feature |
 | `usr/share/plasma/shells/org.kde.plasma.desktop/contents/updates/bazzite-mx-*.js` | Plasma update scripts: plasmashell runs each once per user at start, in file-name order, and records it in `~/.config/plasmashellrc` (`[Updates] performed`); the way Plasma and Bazzite (`bazzite-pins.js`) ship one-shot per-user defaults |
 | `etc/skel/.config/`, `etc/skel/.local/share/` | per-user defaults a new account starts from (VS Code `update.mode`, mise runtimes, PowerShell profile, Konsole `kxmlgui5/konsole/sessionui.rc`); hooks seed them for existing accounts where it matters |

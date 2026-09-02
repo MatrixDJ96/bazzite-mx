@@ -16,13 +16,14 @@ source.
 ## Layout
 
 ```
-Containerfile               one recipe; BASE_IMAGE is the only variable; RUN build, RUN tests, RUN lint
+Containerfile               one recipe; BASE_IMAGE is the only variable; kmod-builder stage, then RUN build, RUN tests, RUN lint
 build_files/build.sh        orchestrator: NN-<feature>.sh in version order
 build_files/lib/            env.sh (paths, sourced first), log.sh, repos.sh (install_from_repo, copr_install_isolated), gpg.sh (assert_key_fingerprint)
 build_files/NN-<feature>.sh one script per feature (00 prep … 90 validate-repos, 95 clean-stage)
 build_files/tests/          run.sh (runner + pairing guard) and one NN-<feature>.sh test per script
+build_files/kmods/          build-kmods.sh (kmod-builder stage, --self-test) and <name>/source.env per module (URL, pinned COMMIT)
 system_files/               copied over / by 01-system-files.sh, one tree for both flavours: vendored .repo files and
-                            vendor keys (etc/), modules-load and setup hooks (usr/), see docs/architecture.md
+                            vendor keys (etc/), modules-load, setup hooks and recipe helpers (usr/), see docs/architecture.md
 cosign.pub                  the public key the image trusts for ghcr.io/matrixdj96 (11-image-signing.sh)
 .github/scripts/            resolve-base.sh (base digest + kernel, one owner, --self-test)
 .github/workflows/          build.yml (sandbox: lint + both flavours, no push, no release)

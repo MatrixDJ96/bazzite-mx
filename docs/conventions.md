@@ -45,6 +45,12 @@ version; this file carries the reasons and the measured facts behind them.
   moves every `/var/opt/<name>` to `/usr/lib/opt/<name>` and writes the tmpfiles line that
   recreates the link on the host. Paths baked into the application keep their `/opt/...`
   form; the smoke test checks them with `readlink`, not `-x` (the link dangles in the build).
+- An out-of-tree kernel module is a `build_files/kmods/<name>/source.env` (URL, full COMMIT,
+  KO_NAME, KO_BUILD_PATH, KO_VERSION) built by the kmod-builder stage against the base's own
+  `kernel-devel`; the pin is to a commit on purpose (decision 1.5g), the checkout is proven
+  to be that commit, and the staged `.ko` is asserted readable, stamped for the image's kernel
+  (vermagic; v1 gotcha #33: a mismatch never loads) and at the expected MODULE_VERSION. The
+  modules are unsigned; the recipe that loads them says so when modprobe refuses them.
 - A package `%post` runs in the build, not on the host: what it does is read
   (`rpm -qp --scripts`) before the package enters a script, and every effect that belongs to a
   host (a group in `/etc/group`, a unit enabled) is handled explicitly. `groupadd` in a `%post`
