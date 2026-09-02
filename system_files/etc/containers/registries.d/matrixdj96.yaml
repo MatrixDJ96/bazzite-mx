@@ -1,0 +1,6 @@
+# Sigstore signatures for our images live next to the image on GHCR, as the
+# base's own ublue-os.yaml declares for its scope. The most specific scope
+# wins (containers-registries.d(5)), so this file leaves that entry alone.
+docker:
+  ghcr.io/matrixdj96:
+    use-sigstore-attachments: true

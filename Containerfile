@@ -8,11 +8,22 @@
 # aurora Containerfile.in:142-143). The build context is bound at /ctx from a
 # scratch stage, never copied into the image (bazzite-dx Containerfile:3-6).
 ARG BASE_IMAGE=ghcr.io/ublue-os/bazzite:stable
+# Identity (10-image-info.sh): the image name matches the flavour
+# (resolve-base.sh prints it), VERSION is the release tag or empty for a
+# sandbox/pre-flight build.
+ARG IMAGE_NAME=bazzite-mx
+ARG IMAGE_VENDOR=matrixdj96
+ARG VERSION=
 
 FROM scratch AS ctx
 COPY build_files /build_files
+COPY system_files /system_files
+COPY cosign.pub /cosign.pub
 
 FROM ${BASE_IMAGE}
+ARG IMAGE_NAME
+ARG IMAGE_VENDOR
+ARG VERSION
 
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=cache,dst=/var/cache \

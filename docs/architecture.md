@@ -6,14 +6,14 @@ How an image is built, what each stage may touch, and where the state of a build
 
 ```
 Containerfile
-  ctx      FROM scratch, COPY build_files            never part of the image, bound at /ctx
+  ctx      FROM scratch, COPY build_files, system_files, cosign.pub   never part of the image, bound at /ctx
   image    FROM ${BASE_IMAGE}
     RUN /ctx/build_files/build.sh                    mounts: /var/cache, /var/log (cache), /tmp (tmpfs)
     RUN /ctx/build_files/tests/run.sh                offline; tmpfs on /run and /tmp
     RUN bootc container lint --fatal-warnings        offline; tmpfs on /run
 ```
 
-`BASE_IMAGE` is the only variable between the two flavours. CI and `/preflight` resolve it to a
+`BASE_IMAGE` is the only variable between the two flavours; `IMAGE_NAME` follows it (`resolve-base.sh` prints both) and `VERSION` is the release tag, empty for sandbox and pre-flight builds (the image then calls itself `<base version>.dev`). CI and `/preflight` resolve it to a
 digest with `.github/scripts/resolve-base.sh`, which also reads the base's kernel from its
 `ostree.linux` label (the akmods carrier is picked by that kernel).
 
@@ -26,6 +26,9 @@ digest with `.github/scripts/resolve-base.sh`, which also reads the base's kerne
 | `lib/log.sh` | `group`, `endgroup`, `log`, `die` |
 | `lib/repos.sh` | `install_from_repo <id> <pkg>..` (vendored `.repo`, enabled for one transaction), `copr_install_isolated <owner/project> <pkg>..` (aurora `copr-helpers.sh:4-23`) |
 | `00-prep.sh` | dnf keeps its cache during the build (aurora `build-prep.sh:8-9`); records the base's `.repo` files by checksum |
+| `01-system-files.sh` | `rsync -rlpvK` of `system_files/` over the tree: every file lands on a fresh inode with the mode git stores |
+| `10-image-info.sh` | identity: `image-info.json` (name, vendor, signed `image-ref`, `version`, `base-version`), os-release `VARIANT_ID`/`IMAGE_ID`, KDE About page (bazzite-dx `00-image-info.sh` form) |
+| `11-image-signing.sh` | `cosign.pub` → `/etc/pki/containers/matrixdj96.pub`; `policy.json` scope `ghcr.io/matrixdj96` = `sigstoreSigned` + `matchRepository` (written with jq to a new file, then renamed) |
 | `90-validate-repos.sh` | repository gate: vendored files present, identical and disabled; base files untouched; additions disabled; `--self-test` |
 | `95-clean-stage.sh` | dnf.conf restored, dnf history removed, accounts relocated to `/usr/lib`, rpmdb hardlinked, `/var` `/run` `/tmp` `/boot` swept (aurora `clean-stage.sh`, bazzite `finalize`, `cleanup`) |
 | `tests/run.sh` | test runner: pairing guard (every `NN-x.sh` has `tests/NN-x.sh` and vice versa), `OK:`/`FAIL:` protocol, `--self-test` |

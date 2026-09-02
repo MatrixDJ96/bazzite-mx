@@ -85,6 +85,7 @@ jobs:
           set -euo pipefail
           podman build \
             --build-arg BASE_IMAGE="${{ steps.base.outputs.base_image }}" \
+            --build-arg IMAGE_NAME="${{ steps.base.outputs.image_name }}" \
             --tag "localhost/bazzite-mx:${{ matrix.flavour }}" \
             .
           podman image inspect --format 'built {{.Id}} size {{.Size}}' "localhost/bazzite-mx:${{ matrix.flavour }}"

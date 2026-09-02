@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Resolve a base image to the coordinates every build consumes: the digest the
 # build pins to, the version the release title quotes, the kernel the akmods
-# carrier is picked by. One owner for the schema, used by CI and the pre-flight.
+# carrier is picked by, and the image name the flavour maps to. One owner for the schema, used by CI and the pre-flight.
 #
 #   resolve-base.sh <flavour>            flavour: bazzite | bazzite-nvidia-open
 #   resolve-base.sh --from-json <file> <flavour>   parse a saved `skopeo inspect`
@@ -24,13 +24,8 @@ inspect_remote() {
 resolve() {
     local flavour=$1 json=$2
     local digest kernel version fedora
-    case "$flavour" in
-        bazzite | bazzite-nvidia-open) ;;
-        *)
-            err "unknown flavour '$flavour' (bazzite | bazzite-nvidia-open)"
-            return 1
-            ;;
-    esac
+    local image_name
+    image_name=$(image_of "$flavour") || return 1
     digest=$(jq -r '.Digest // empty' <<< "$json")
     kernel=$(jq -r '.Labels["ostree.linux"] // empty' <<< "$json")
     version=$(jq -r '.Labels["org.opencontainers.image.version"] // empty' <<< "$json")
@@ -49,8 +44,9 @@ resolve() {
     fedora=${kernel##*.fc}
     fedora=${fedora%%.*}
     printf '%s\n' \
-        "base_name=${REGISTRY}/${flavour}" \
-        "base_image=${REGISTRY}/${flavour}@${digest}" \
+        "image_name=${image_name}" \
+        "base_name=${BASE_REGISTRY}/${flavour}" \
+        "base_image=${BASE_REGISTRY}/${flavour}@${digest}" \
         "base_digest=${digest}" \
         "base_version=${version}" \
         "kernel_version=${kernel}" \
@@ -92,12 +88,11 @@ report_digests() {
 self_test() {
     local good bad n=0
     good='{"Digest":"sha256:9556db65991d57a03a7dc18e4ba28a686d8bcdcd6b61235aa69c8267bb22ff76","Labels":{"ostree.linux":"7.2.1-ogc4.1.fc44.x86_64","org.opencontainers.image.version":"44.20260902"}}'
-    # Known-good input resolves, and the derived Fedora version is right.
     resolve bazzite "$good" | grep -qx 'fedora_version=44' || fail "self-test: known-good input did not resolve"
+    resolve bazzite-nvidia-open "$good" | grep -qx 'image_name=bazzite-mx-nvidia-open' || fail "self-test: image_name not derived"
+    resolve bazzite-nvidia "$good" | grep -qx 'image_name=bazzite-mx-nvidia' || fail "self-test: the closed flavour's image_name not derived"
     resolve bazzite "$good" | grep -qx 'base_image=ghcr.io/ublue-os/bazzite@sha256:9556db65991d57a03a7dc18e4ba28a686d8bcdcd6b61235aa69c8267bb22ff76' \
         || fail "self-test: base_image not pinned to the digest"
-    # Every known-bad input must fail: missing kernel label, missing version,
-    # malformed digest, unknown flavour.
     for bad in \
         "$(jq -c 'del(.Labels["ostree.linux"])' <<< "$good")" \
         "$(jq -c 'del(.Labels["org.opencontainers.image.version"])' <<< "$good")" \
