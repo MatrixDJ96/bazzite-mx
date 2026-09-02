@@ -43,9 +43,11 @@ jobs:
       - name: Build Image
         env:
           BASE_IMAGE: ${{ steps.base.outputs.base_image }}
+          IMAGE_NAME: ${{ steps.base.outputs.image_name }}
         run: |
           set -euo pipefail
           podman build \
             --build-arg BASE_IMAGE="$BASE_IMAGE" \
+            --build-arg IMAGE_NAME="$IMAGE_NAME" \
             --tag "$IMAGE" \
             .

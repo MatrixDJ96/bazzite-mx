@@ -1,6 +1,6 @@
 # yamllint, run by the lint job of build.yml as `yamllint --strict .` inside
 # quay.io/fedora/fedora:44, over every YAML file of the tree: the workflows,
-# and this file.
+# this file and the registries.d file under system_files.
 extends: default
 
 rules:

@@ -4,7 +4,7 @@ A personal [bootc](https://bootc-dev.github.io/bootc/) image on top of
 [Bazzite](https://bazzite.gg) (KDE desktop, `stable` stream): the system layer only, with
 applications left to Flatpak and mutable userspace to distrobox.
 
-Three flavours, one recipe; only the base image differs:
+Three flavours, one recipe; only the base image and the image name differ:
 
 | Image                    | Base                                          | For                         |
 | ------------------------ | --------------------------------------------- | --------------------------- |
@@ -14,12 +14,17 @@ Three flavours, one recipe; only the base image differs:
 
 What the image changes over Bazzite, and why, is [`docs/divergences.md`](docs/divergences.md).
 
+## What the image adds
+
+- Signing trust for `ghcr.io/matrixdj96/*`: a host pulls only what this repository signed.
+
 ## Build it yourself
 
 ```bash
 # resolve-base.sh pins the base to its current digest, the way CI does
 eval "$(./.github/scripts/resolve-base.sh bazzite)"   # or bazzite-nvidia-open, bazzite-nvidia
-podman build --build-arg BASE_IMAGE="$base_image" --tag localhost/bazzite-mx .
+podman build --build-arg BASE_IMAGE="$base_image" --build-arg IMAGE_NAME="$image_name" \
+    --tag localhost/bazzite-mx .
 ```
 
 ## Documentation
