@@ -1,0 +1,238 @@
+# The only workflow that publishes, dispatched by hand, by the weekly trigger
+# or by the watcher, never by a push. Four jobs in a row: version resolves the
+# tag and the three bases, build runs the release profile of
+# reusable-build.yml, gate verifies the three images by digest and writes the
+# tags, release publishes the GitHub Release. :stable moves only when the
+# dispatch asks for it and the repository variable PROMOTE_STABLE is "true"
+# (docs/workflow.md § The release run).
+name: Release
+run-name: "Release: ${{ inputs.reason }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: >-
+          Why this release runs (manual, weekly, upstream:<digest>); shown as the run name
+        type: string
+        required: true
+      promote_stable:
+        description: >-
+          Move :stable to this release (also needs the repository variable PROMOTE_STABLE=true)
+        type: boolean
+        default: false
+      release_tag:
+        description: >-
+          Force the release tag (<fedora>.<yyyymmdd>[.<n>], free on GHCR and on the releases);
+          empty resolves today's tag
+        type: string
+        required: false
+        default: ""
+
+permissions: {}
+
+# Releases queue behind one another and are never cancelled: the watcher and
+# the trigger coalesce on this group.
+concurrency:
+  group: bazzite-mx-release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      release_tag: ${{ steps.tag.outputs.release_tag }}
+      base_digest_bazzite: ${{ steps.bases.outputs.base_digest_bazzite }}
+      base_digest_bazzite_nvidia_open: ${{ steps.bases.outputs.base_digest_bazzite_nvidia_open }}
+      base_digest_bazzite_nvidia: ${{ steps.bases.outputs.base_digest_bazzite_nvidia }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Anonymous, GHCR answers 403 on a package never published and the probe
+      # would fail closed; logged in it answers "name unknown".
+      - name: Login to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          echo "$GITHUB_TOKEN" | skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      # A forced tag still passes the probes: taken on a package or a release,
+      # it is refused here rather than at the gate.
+      - name: Resolve Release Tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCED_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          ./.github/scripts/resolve-base.sh bazzite > "$RUNNER_TEMP/base.env"
+          if [ -n "$FORCED_TAG" ]; then
+            ./.github/scripts/release-tag.sh --tag "$FORCED_TAG" "$RUNNER_TEMP/base.env"
+          else
+            ./.github/scripts/release-tag.sh "$RUNNER_TEMP/base.env"
+          fi
+
+      # Read once here: the gate holds every build job to these digests, so a
+      # base that moves during the run cannot slip into one flavour.
+      - name: Resolve Bases
+        id: bases
+        run: |
+          set -euo pipefail
+          ./.github/scripts/resolve-base.sh --digests
+
+  build:
+    name: Build
+    needs: version
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: ./.github/workflows/reusable-build.yml
+    with:
+      release_tag: ${{ needs.version.outputs.release_tag }}
+      rechunk: true
+      publish: true
+    secrets:
+      SIGNING_SECRET: ${{ secrets.SIGNING_SECRET }}
+
+  gate:
+    name: Gate
+    needs: [version, build]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download Env Files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/release
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      - name: Login to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          echo "$GITHUB_TOKEN" | skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          # cosign and gh attestation verify read the docker credentials
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Gate Images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
+          PROMOTE_INPUT: ${{ inputs.promote_stable }}
+          PROMOTE_VAR: ${{ vars.PROMOTE_STABLE }}
+          BASE_DIGEST_BAZZITE: ${{ needs.version.outputs.base_digest_bazzite }}
+          BASE_DIGEST_BAZZITE_NVIDIA_OPEN: >-
+            ${{ needs.version.outputs.base_digest_bazzite_nvidia_open }}
+          BASE_DIGEST_BAZZITE_NVIDIA: ${{ needs.version.outputs.base_digest_bazzite_nvidia }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            --base "bazzite=$BASE_DIGEST_BAZZITE"
+            --base "bazzite-nvidia-open=$BASE_DIGEST_BAZZITE_NVIDIA_OPEN"
+            --base "bazzite-nvidia=$BASE_DIGEST_BAZZITE_NVIDIA"
+          )
+
+          if [ "$PROMOTE_INPUT" = true ] && [ "$PROMOTE_VAR" = true ]; then
+            args+=(--promote)
+          else
+            echo "promotion of :stable not requested:" \
+              "input promote_stable=$PROMOTE_INPUT, variable PROMOTE_STABLE='${PROMOTE_VAR}'"
+          fi
+
+          ./.github/scripts/gate-release.sh release \
+            --release-tag "$RELEASE_TAG" \
+            --revision "$GITHUB_SHA" \
+            "${args[@]}" \
+            "$RUNNER_TEMP"/release/release-*.env
+
+  release:
+    name: Release
+    needs: [version, gate]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      # 500 commits, so the changelog reaches the previous release's revision.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 500
+
+      - name: Download Env Files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/release
+
+      - name: Install ORAS
+        env:
+          ORAS_VERSION: 1.3.4
+        run: |
+          set -euo pipefail
+          ./.github/scripts/install-oras.sh "$ORAS_VERSION" "$RUNNER_TEMP/oras"
+          echo "$RUNNER_TEMP/oras" >> "$GITHUB_PATH"
+
+      - name: Write Release Notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+
+          title=$(./.github/scripts/changelog.sh release \
+            --release-tag "$RELEASE_TAG" \
+            --out "$RUNNER_TEMP/changelog.md" \
+            "$RUNNER_TEMP"/release/release-*.env)
+
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/changelog.md"
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
+          TITLE: ${{ steps.notes.outputs.title }}
+        run: |
+          set -euo pipefail
+
+          gh release create "$RELEASE_TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$TITLE" \
+            --notes-file "$RUNNER_TEMP/changelog.md" \
+            --latest
+
+          echo "release $RELEASE_TAG created: $TITLE"

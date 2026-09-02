@@ -152,9 +152,32 @@ seen red on a lesion before its first green counts.
 - Values an expression computes reach a step through `env:`, never inline in `run:` (an input
   or a label with a quote would break the script; GitHub docs, "Security hardening for GitHub
   Actions", read 2026-09-02).
-- A secret proves itself before it is needed: the main profile signs the chunked manifest with
+- A secret proves itself before it is needed: the main profile signs the chunked image's digest with
   `SIGNING_SECRET` and verifies with `cosign.pub`, so a rotated or mispasted key fails on a
   push to `main`, not in the release run.
+- Publishing is an input, never an event: every step that reaches GHCR sits behind
+  `if: inputs.publish`, `publish` is passed by `release.yml` alone, and `release.yml` has one
+  trigger, `workflow_dispatch`. A job's permissions cannot follow an input, so the callee
+  declares the set its publishing steps need and every caller grants it (GitHub docs, reusable
+  workflows: a caller may only maintain or reduce them); the token of a sandbox run can write
+  packages and no step uses it.
+- An image travels between jobs by digest, never by tag: the build job writes
+  `release-<flavour>.env` and uploads it as an artifact; the gate inspects
+  `docker://<image>@<digest>`. A `:staging` tag left by an earlier run of the same day would
+  carry the same version (2.5 #2.7).
+- A verifier is shown failing before its first pass: the gate runs `cosign verify` with
+  `cosign.pub` and `gh attestation verify --repo MatrixDJ96/bazzite-mx` on the flavour's own
+  base (the `base.digest` the build pinned) first, and only a signature-class rejection counts
+  (a network error also exits non-zero).
+- A release tag is written once: the gate refuses to copy onto a `:<tag>` that already points
+  at another digest; `:stable` is the one alias that moves, and only through the gate or
+  `promote.yml`. Immutable releases are enabled on the repository for the same reason.
+- Binaries the workflows install take their version from an input (`cosign-release`,
+  `syft-version`, `ORAS_VERSION`), never "latest"; `refresh-pins.sh` reads those inputs. The
+  `ubuntu-26.04` runner ships podman, skopeo, docker, gh, jq and yq, not cosign, syft or oras
+  (runner-images `Ubuntu2604-Readme.md`, read 2026-09-02).
+- Retries are loops in the step (`podman push` twice, three attempts; `skopeo --retry-times`),
+  not an action: one pin fewer for a `for` loop.
 
 ## Commits
 

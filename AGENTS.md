@@ -28,10 +28,15 @@ system_files/               copied over / by 01-system-files.sh, one tree for bo
                             vendor keys (etc/), modules-load, setup hooks, ujust recipes, their helpers and the host.sh they share (usr/),
                             see docs/architecture.md
 cosign.pub                  the public key the image trusts for ghcr.io/matrixdj96 (11-image-signing.sh)
-.github/scripts/            resolve-base.sh (base digest + kernel), image-labels.sh (the labels file), check-image.sh (probe of the built image); each one owner, each --self-test
-.github/workflows/          build.yml (lint, then reusable-build.yml: sandbox profile on develop/PR, main profile on main or dispatch `rechunk`), reusable-build.yml (both flavours; no push, no release)
+.github/scripts/            resolve-base.sh (base digest + kernel), image-labels.sh (the labels file), check-image.sh (probe of the built image),
+                            release-tag.sh (the release tag), gate-release.sh (verify by digest, tag, promote), changelog.sh (release notes),
+                            refresh-pins.sh (pin refresh); each one owner, each --self-test (run by the lint job)
+.github/workflows/          build.yml (lint, then reusable-build.yml: sandbox profile on develop/PR, main profile on main or dispatch `rechunk`),
+                            reusable-build.yml (both flavours; publish only from release.yml), release.yml (dispatch only: version, build,
+                            gate, release), promote.yml (move :stable, the cutover), sign-image.yml (recovery signer)
 .claude/                    Claude Code: settings.json, hooks/lint-edit.sh, commands/preflight.md
-docs/                       architecture.md (build flow, state, gates, CI), conventions.md (bash, tests, CI, commits), divergences.md (what changes over Bazzite, why), gotchas.md (measured facts), migration.md (moving a host to v2)
+docs/                       architecture.md (build flow, state, gates, CI), conventions.md (bash, tests, CI, commits), divergences.md (what changes over Bazzite, why),
+                            gotchas.md (measured facts), migration.md (moving a host to v2), workflow.md (branches, the release run, cutover, repo settings, pins)
 ```
 
 The remaining features and the release pipeline arrive one feature per commit; this file grows
@@ -66,7 +71,8 @@ with them. What the image changes over Bazzite, and why, is `docs/divergences.md
    chunked image a host would pull, its probe and a test signature with the repo's key, and
    takes its own explicit OK from the owner; that profile is proven first on the branch with
    `gh workflow run build.yml --ref <branch> -f rechunk=true`. Releases never come from a push
-   (decision 1.5d).
+   (decision 1.5d): `release.yml` is dispatch-only, and its dispatch, like `promote.yml`'s,
+   takes the owner's OK (`docs/workflow.md`).
 6. **Conventional Commits**, one commit per verified feature (script + test + doc together).
    Never `--force`, `--no-verify` or `--amend` without an explicit ask.
 7. **Cite the source of every choice**: the upstream file and line, the manual page, the URL
@@ -75,9 +81,11 @@ with them. What the image changes over Bazzite, and why, is `docs/divergences.md
    object; env vars `SCREAMING_SNAKE_CASE`; outputs `snake_case`, the same key everywhere;
    concurrency groups literal `bazzite-mx-<phase>[-<key>]`, never `${{ github.workflow }}` (a
    `workflow_call` callee inherits the caller's name and deadlocks on its own group).
-9. **Runners**: `ubuntu-26.04` for anything that needs podman, skopeo or Homebrew;
+9. **Runners and pins**: `ubuntu-26.04` for anything that needs podman, skopeo or Homebrew;
    `ubuntu-slim` only for jobs that use `gh`, `jq`, `curl`. Every `uses:` is pinned to a commit
-   SHA with the version in a trailing comment.
+   SHA with the version in a trailing comment, every installed binary to a version input.
+   `./.github/scripts/refresh-pins.sh --check` opens every round that touches `.github/`
+   (`docs/workflow.md` § Keeping the pins fresh); no bot refreshes them.
 
 ## Cheatsheet
 
@@ -85,7 +93,7 @@ with them. What the image changes over Bazzite, and why, is `docs/divergences.md
 # Resolve the base and write the labels the way CI does
 ./.github/scripts/resolve-base.sh bazzite | tee /var/tmp/bazzite-mx-base.env   # base_image=... kernel_version=...
 ./.github/scripts/image-labels.sh /var/tmp/bazzite-mx-base.env "" "$(git rev-parse HEAD)" > /var/tmp/bazzite-mx-labels.txt
-for s in resolve-base image-labels check-image; do ./.github/scripts/$s.sh --self-test; done   # each prints "self-test ok"
+for s in resolve-base image-labels check-image release-tag gate-release changelog refresh-pins; do ./.github/scripts/$s.sh --self-test; done
 
 # Probe a built image the way CI does (labels, /run and /tmp, lint, packages, modules, version)
 ./.github/scripts/check-image.sh localhost/bazzite-mx:preflight /var/tmp/bazzite-mx-labels.txt
@@ -93,9 +101,16 @@ for s in resolve-base image-labels check-image; do ./.github/scripts/$s.sh --sel
 # Run the main profile (chunked image, probe, test signature) on a branch
 gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref develop -f rechunk=true
 
-# Lint like CI
-scripts=$({ git ls-files '*.sh'; git grep -l '^#!/usr/bin/env bash'; } | sort -u | tr '\n' ' ')   # .sh files and the libexec helpers
-shellcheck -x -P SCRIPTDIR --severity=warning $scripts                          # -x -P: follow the sourced libraries
+# Pins: the table (exit 0 always), then the rewrite of the stale actions and binaries
+./.github/scripts/refresh-pins.sh --check
+./.github/scripts/refresh-pins.sh --apply
+
+# A release (owner's OK first; :stable moves only with promote_stable AND vars.PROMOTE_STABLE)
+gh workflow run release.yml --repo MatrixDJ96/bazzite-mx --ref main -f reason=manual
+
+# Lint like CI: the .sh files and the extensionless libexec helpers
+scripts=$({ git ls-files '*.sh'; git grep -l '^#!/usr/bin/env bash'; } | sort -u | tr '\n' ' ')
+shellcheck -x -P SCRIPTDIR --severity=warning $scripts
 podman run --rm -v "$PWD:/repo:ro,z" -w /repo quay.io/fedora/fedora:44 \
   bash -c "dnf -q install -y shfmt yamllint >/dev/null; shfmt -d -i 4 -ci -bn -sr $scripts; yamllint --strict ."
 
