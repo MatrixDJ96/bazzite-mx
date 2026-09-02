@@ -12,13 +12,17 @@ gates, in order.
 ```
 Containerfile
   ctx           FROM scratch, COPY build_files, system_files, cosign.pub   bound at /ctx, never in the image
+  kmod-builder  FROM ${BASE_IMAGE}: build_files/kmods/build-kmods.sh --self-test, then the build:
+                  BTF prepared (vmlinux extracted, pahole built from the kernel's tag), each module → /out/<kver>/updates/*.ko
   image         FROM ${BASE_IMAGE}
-    RUN /ctx/build_files/build.sh                  mounts: /var/cache and /var/log (cache), /run and /tmp (tmpfs)
+    RUN /ctx/build_files/build.sh                  mounts: /kmods (from kmod-builder), /var/cache and /var/log (cache), /run and /tmp (tmpfs)
     RUN /ctx/build_files/tests/run.sh              offline; tmpfs on /run, /tmp, /var/log, /var/cache
     RUN rpm -V --nomtime python3-setuptools && bootc container lint …    offline; tmpfs on /run
 ```
 
-Why `/run` is a tmpfs is on the `RUN` itself in the `Containerfile`.
+The base image builds the kernel modules itself, so there is no akmods carrier stage. The
+staged modules are bound at `/kmods`, a root-level mount point buildah removes after the RUN;
+why that path and why `/run` is a tmpfs is on the `RUN` itself in the `Containerfile`.
 
 `BASE_IMAGE` and `IMAGE_NAME` are the two variables between the three flavours, both mapped
 from the flavour by `resolve-base.sh`. CI and `/preflight` resolve the base to a digest with
@@ -42,13 +46,16 @@ Each script owns one artefact and ships a `--self-test`.
 | Path                      | Role                                                                                                                                             |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `build.sh`                | runs `NN-<feature>.sh` in version order, one group each, stops at the first failure                                                              |
-| `lib/env.sh`              | sourced first: `CTX`, `BUILD_FILES`, `BUILD_TMP`, `BUILD_STATE`, `PYTHONDONTWRITEBYTECODE`, then every library                                   |
+| `lib/env.sh`              | sourced first: `CTX`, `BUILD_FILES`, `BUILD_TMP`, `BUILD_STATE`, `PYTHONDONTWRITEBYTECODE`, then every library but `kmod.sh`                     |
 | `lib/log.sh`              | `group`, `endgroup`, `log`, `fail_build`                                                                                                         |
 | `lib/repos.sh`            | `install_from_repo`, `enabled_repos`                                                                                                             |
 | `lib/flatpak.sh`          | `deny_flatpak <ref>`: one deny line in the base's Flatpak filter                                                                                 |
 | `lib/just.sh`             | `recipe_set`, `has_recipe`; output captured before any grep                                                                                      |
+| `lib/kmod.sh`             | `kernel_version`, `assert_module`; shared with the kmod-builder stage                                                                            |
 | `lib/gpg.sh`              | the `KEY_FPR` table, `key_fingerprint` and `assert_key_fingerprint`                                                                              |
-| `00-prep.sh`              | dnf keeps its cache and waits 60 s against COPR and mirror flakes; the base's repositories and recipe sets are recorded                          |
+| `kmods/build-kmods.sh`    | the kmod-builder stage: BTF prepared (vmlinux extracted, pahole built from the kernel's tag), then per module fetch, build, strip, stage, assert |
+| `kmods/<name>/source.env` | one module: URL, pinned commit, object path                                                                                                      |
+| `00-prep.sh`              | dnf keeps its cache and waits 60 s against COPR and mirror flakes; the base's repositories, recipe sets and module dependencies are recorded     |
 | `01-system-files.sh`      | `rsync` of `system_files/` over the tree, every file on a fresh inode; the fixed-gid groups                                                      |
 | `10-image-info.sh`        | identity: `image-info.json`, os-release, the KDE About page                                                                                      |
 | `11-image-signing.sh`     | the public key and the `policy.json` scope for `ghcr.io/matrixdj96`                                                                              |
@@ -62,6 +69,7 @@ Each script owns one artefact and ships a `--self-test`.
 | `40-desktop-apps.sh`      | Firefox, gparted, 1Password, and the Firefox Flatpak denied                                                                                      |
 | `41-sunshine.sh`          | Sunshine from its COPR, its user unit left disabled, its menu entry routed to the recipe                                                         |
 | `45-kde-defaults.sh`      | the Plasma update scripts, the skel files and their login hook                                                                                   |
+| `50-kmods.sh`             | installs the staged modules under `updates/`, runs depmod, asserts each                                                                          |
 | `70-justfile.sh`          | the ujust recipes: drift guard, import, format check                                                                                             |
 | `80-fix-opt.sh`           | `/var/opt/<name>` moves to `/usr/lib/opt/<name>` with a tmpfiles line                                                                            |
 | `90-validate-repos.sh`    | the repository gate, run after the last install                                                                                                  |
@@ -71,8 +79,8 @@ Each script owns one artefact and ships a `--self-test`.
 | `tests/NN-<feature>.sh`   | one smoke test per build script, same stem                                                                                                       |
 
 Numbering, as the tree uses it: `00-09` preparation, `10-19` identity and trust, `20-49`
-services, packages and desktop defaults, `70-79` justfile, `80-89` fix-ups, `90-99` gates and
-cleanup. The file name is the only statement of the order.
+services, packages and desktop defaults, `50-59` kernel modules, `70-79` justfile, `80-89`
+fix-ups, `90-99` gates and cleanup. The file name is the only statement of the order.
 
 ## system_files/
 
@@ -85,6 +93,7 @@ One tree, copied over `/` by `01-system-files.sh`.
 | `etc/containers/registries.d/matrixdj96.yaml`  | sigstore attachments for our own scope                                                                                                                                                                                                                                                                                     |
 | `etc/profile.d/mise.sh`                        | activation, in bash only                                                                                                                                                                                                                                                                                                   |
 | `etc/skel/`                                    | per-user defaults: VS Code, mise, PowerShell, the Konsole shortcuts                                                                                                                                                                                                                                                        |
+| `usr/lib/bazzite-mx/host.sh`                   | what `msi-setup` reads about the host (the MSI modules-load path), and `exit_with_error` and `require_root`                                                                                                                                                                                                                |
 | `usr/lib/modprobe.d/bazzite-mx-kvm.conf`       | the KVM options                                                                                                                                                                                                                                                                                                            |
 | `usr/lib/modules-load.d/ip_tables.conf`        | `iptable_nat`, which docker-in-docker needs                                                                                                                                                                                                                                                                                |
 | `usr/lib/sysusers.d/bazzite-mx-groups.conf`    | the fixed gids of `docker` and `libvirt`                                                                                                                                                                                                                                                                                   |
@@ -101,7 +110,7 @@ One tree, copied over `/` by `01-system-files.sh`.
 | Where                                              | Lifetime                       | Content                                                       |
 | -------------------------------------------------- | ------------------------------ | ------------------------------------------------------------- |
 | `/tmp/bazzite-mx-build/` (`BUILD_TMP`)             | the build `RUN` (tmpfs)        | backups a later script restores                               |
-| `/usr/lib/bazzite-mx/build-state/` (`BUILD_STATE`) | shipped in the image           | the base's repository and recipe snapshots                    |
+| `/usr/lib/bazzite-mx/build-state/` (`BUILD_STATE`) | shipped in the image           | the base's repository, recipe and module-dependency snapshots |
 | `/var/cache`, `/var/log`                           | cache mounts, not in the image | the dnf cache and logs                                        |
 
 ## Gates, in order

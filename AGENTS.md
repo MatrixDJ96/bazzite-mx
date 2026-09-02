@@ -29,10 +29,10 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 ## Layout
 
 - `build_files/` — `build.sh` runs `NN-<feature>.sh` in version order; `lib/` the sourced
-  libraries; `tests/` one smoke test per script plus `run.sh`. Each file's role:
-  `docs/architecture.md`.
+  libraries; `tests/` one smoke test per script plus `run.sh`; `kmods/<name>/source.env` one
+  out-of-tree module. Each file's role: `docs/architecture.md`.
 - `system_files/` — copied over `/`: vendored `.repo` files and keys, setup hooks, ujust
-  recipes.
+  recipes and their `usr/libexec/bazzite-mx-*` helpers.
 - `.github/scripts/` — one owner per CI artefact, each with a `--self-test`.
 
 ## Conventions
@@ -47,8 +47,9 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 - A script that guards something ships a `--self-test` that feeds it known-bad input and
   requires the failure; what an assertion counts comes from an independent record, never from
   the thing under test (`docs/conventions.md` § Positive control).
-- Vendor RPMs stay unpinned; a pin enters only against an observed problem, cited. The base
-  digest and the vendor keys (`KEY_FPR` in `lib/gpg.sh`) are pinned on purpose.
+- Vendor RPMs and GitHub releases stay unpinned; a pin enters only against an observed problem,
+  cited. The base digest, the module commits and the vendor keys (`KEY_FPR` in `lib/gpg.sh`)
+  are pinned on purpose.
 - A third-party package comes from a `.repo` vendored under `system_files/etc/yum.repos.d/`,
   every section `enabled=0`, installed with `install_from_repo`: `90-validate-repos.sh` fails
   the build on a repository left enabled or modified.

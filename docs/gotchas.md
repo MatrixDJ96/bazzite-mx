@@ -6,12 +6,12 @@ rules themselves live in [`conventions.md`](conventions.md).
 
 Contents, in the order of the entries: torn writeback on 6.17-azure · just duplicate recipe ·
 ujust.sh readonly names · kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set ·
-command | grep -q · stub-resolv.conf left in the image · remove-unwanted-software v9 ·
-force-push without a push run · 1Password BrowserSupport gid · pre-flight without the changed
-script · skel and existing accounts · KXmlGui write-back · image-info.json vs OCI label day ·
-FAIL branch before its verdict · sunshine --version home · Docker FORWARD policy and libvirt ·
-recipe description line · vendor build-log warnings · arithmetic error escapes set -e ·
-scriptlet rewrote a .pyc.
+command | grep -q · modinfo /lib/modules path · stub-resolv.conf left in the image ·
+remove-unwanted-software v9 · force-push without a push run · 1Password BrowserSupport gid ·
+pre-flight without the changed script · skel and existing accounts · KXmlGui write-back ·
+image-info.json vs OCI label day · FAIL branch before its verdict · sunshine --version home ·
+Docker FORWARD policy and libvirt · recipe description line · vendor build-log warnings · no
+BTF from kernel-devel · arithmetic error escapes set -e · scriptlet rewrote a .pyc.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -84,14 +84,22 @@ it, dry runs carrying `set -euo pipefail` too.
 
 `grep -q` exits at the first match and closes the pipe; a writer still producing output dies of
 SIGPIPE, the pipeline's status is 141 and `pipefail` reports a failure. Measured 2026-09-02: a
-helper's `status | grep -q` turned a passing check red during a pre-flight. Capture the output
-in a variable, then grep the variable. The shape can pass for months and fail on a base change:
-`tests/95-clean-stage.sh` read the kernel lock through `dnf5 versionlock list | grep -q` and
-was green while the list held five entries; the base of 2026-09-07 (`44.20260907`, kernel
-7.2.3-ogc3.1) locks every qt6 and plasma package too, the list runs to 3179 lines, and the
-three flavours went red on `tests: FAILED` with a docs-only change (measured 2026-09-07, status
-141 reproduced in the base). The test captures the list first. Every `| grep -q` of the repo
-captures first and `check-form.sh` refuses the shape.
+helper's `status | grep -q` turned a passing check red during the pre-flight of the
+kernel-modules feature. Capture the output in a variable, then grep the variable. The shape can
+pass for months and fail on a base change: `tests/95-clean-stage.sh` read the kernel lock
+through `dnf5 versionlock list | grep -q` and was green while the list held five entries; the
+base of 2026-09-07 (`44.20260907`, kernel 7.2.3-ogc3.1) locks every qt6 and plasma package too,
+the list runs to 3179 lines, and the three flavours went red on `tests: FAILED` with a
+docs-only change (measured 2026-09-07, status 141 reproduced in the base). The test captures
+the list first. Every `| grep -q` of the repo captures first and `check-form.sh` refuses the
+shape.
+
+## `modinfo -F filename` and `modprobe --show-depends` print `/lib/modules/...`
+
+The module tools print the legacy path even when the file lives under `/usr/lib/modules`
+(`/lib` being a symlink to `usr/lib`), so a literal string comparison against the staged path
+fails (measured 2026-09-02). `50-kmods.sh` compares `realpath` of the resolved module against
+`realpath` of the file it installed.
 
 ## A networked RUN leaves `/run/systemd/resolve/stub-resolv.conf` in the image
 
@@ -148,10 +156,10 @@ after a first `-1` broke the browser integration, nekochigura refusing a gid und
 buildah keys a `RUN` layer on its command string and its parent layer; the content behind a
 `--mount=type=bind,from=ctx` is not hashed into it. After a change under `build_files/` or
 `system_files/`, a pre-flight whose base layers are cached reports `Using cache` on the
-build step and exits 0 in about three minutes with an image built from the old scripts.
-Measured 2026-09-04: the closed flavour's pre-flight after a new feature printed ten
-`Using cache` lines, while `--no-cache` produced the real build. CI is not affected, a fresh
-runner having no layer cache.
+kmod-builder and build steps and exits 0 in about three minutes with an image built from the
+old scripts. Measured 2026-09-04: the closed flavour's pre-flight after a new feature printed
+ten `Using cache` lines, while `--no-cache` produced the real build. CI is not affected, a
+fresh runner having no layer cache.
 
 ## A skel file reaches no account that already exists
 
@@ -239,10 +247,11 @@ bazzite, bazzite-dx, aurora and amyos).
 `just --list`, which `ujust` runs, shows one description per recipe and takes it from the last
 comment line above the recipe, not from the whole comment block. Measured 2026-09-12 with just
 1.57.0: a two-line comment lists as `foo # second line of the description`, the first line
-lost. So the description comment of `82-bazzite-sunshine.just` (113 columns) stays on one line:
-wrapping it to the 100 columns of `docs/conventions.md` § Form would silently cut what a user
-reads in `ujust`. `.just` files are outside the shell catalogue `check-form.sh` measures, so
-nothing enforces the limit there anyway.
+lost. So the description comments of `82-bazzite-sunshine.just` (113 columns) and
+`95-bazzite-mx.just` (102 columns) stay on one line: wrapping them to the 100 columns of
+`docs/conventions.md` § Form would silently cut what a user reads in `ujust`. `.just` files are
+outside the shell catalogue `check-form.sh` measures, so nothing enforces the limit there
+anyway.
 
 ## Two build-log warnings come from the vendors
 
@@ -272,6 +281,17 @@ unit the package ships only under `/usr/lib/systemd/user/`; `30-ide.sh` enables 
 from the sysusers scriptlets of the packages installed: `systemd-sysusers --dry-run` in the
 base image alone prints both, `plugdev.conf` belonging to no package and colliding with
 `openrazer.conf:3` of `openrazer`.
+
+## A module built against kernel-devel gets no BTF
+
+kbuild writes a module's BTF with pahole against `vmlinux` in the kernel build tree. The base's
+`kernel-devel` ships no `vmlinux` and no pahole, so every module printed
+`Skipping BTF generation … due to unavailability of vmlinux`, and on the OGC kernel
+`warning: pahole version differs from the one used to build the kernel`
+(`CONFIG_PAHOLE_VERSION=131`; Fedora 44 ships dwarves 1.30 and, in testing, 1.32; measured
+2026-09-23). `scripts/extract-vmlinux` recovers a `vmlinux` with its `.BTF` section from the
+kernel image, and pahole 1.31 built from its tag gives the modules `.BTF` and `.BTF.base`,
+which `strip --strip-debug` keeps.
 
 ## An arithmetic syntax error escapes `set -e`
 

@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Prepare the build: dnf keeps its cache across builds, and the base image's
-# repository files, enabled repositories and recipe sets are recorded, so the
-# gates that run later can tell what the build changed.
+# repository files, enabled repositories, recipe sets and module dependencies
+# are recorded, so the gates that run later can tell what the build changed.
 #
 # Usage: run by build.sh as the first script; no arguments.
 # Writes: $BUILD_TMP/dnf.conf.base, restored by 95-clean-stage.sh;
 #   $BUILD_STATE/repos.base.sha256 and repos.base.enabled, read by
 #   90-validate-repos.sh; $BUILD_STATE/just.base.summary, read by
-#   70-justfile.sh.
+#   70-justfile.sh; $BUILD_STATE/modules.base.dep.gz, read by
+#   tests/50-kmods.sh.
 # Exit status: 0 done; the build stops on a `FAIL: …` line.
 
 # shellcheck source=lib/env.sh
@@ -72,9 +73,29 @@ record_base_recipe_sets() {
     log "prep: $(wc -l < "$snapshot") base recipe files recorded"
 }
 
+# The base's own modules.dep, gzipped: 50-kmods.sh re-runs depmod over the
+# whole tree, the base's modules with it, and tests/50-kmods.sh requires every
+# recorded line back, so a base module ours displaced is caught.
+record_base_module_deps() {
+    local snapshot=$BUILD_STATE/modules.base.dep.gz
+    local deps=(/usr/lib/modules/*/modules.dep)
+
+    if [ "${#deps[@]}" -ne 1 ] || [ ! -f "${deps[0]}" ]; then
+        fail_build "expected one modules.dep in the base image, found: ${deps[*]}"
+    fi
+
+    # -n: the base normalises this file's mtime to a value gzip cannot put in
+    # its header, and the warning is exit 2, which set -e takes for a failure.
+    # Dropping name and mtime also makes the record reproducible.
+    gzip -nc "${deps[0]}" > "$snapshot"
+
+    log "prep: $(wc -l < "${deps[0]}") base module dependency lines recorded"
+}
+
 # --- main ---------------------------------------------------------------------
 
 keep_dnf_cache
 record_base_repo_files
 record_base_enabled_repos
 record_base_recipe_sets
+record_base_module_deps

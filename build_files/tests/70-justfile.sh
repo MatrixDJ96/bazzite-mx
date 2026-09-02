@@ -2,7 +2,10 @@
 # Smoke test of 70-justfile.sh: our recipe file imported once, every recipe
 # reachable exactly once, and the self-test of 70-justfile.sh run; then the
 # recipes that print more after their call print it only when the call
-# succeeded, run as nobody against stubs.
+# succeeded, run as nobody against stubs. The helpers' own cases live in
+# their tests and self-tests (docs/conventions.md § Positive control), their
+# files are proven in place by tests/01-system-files.sh; what needs a booted
+# host is proven there.
 #
 # Usage: run by tests/run.sh inside the image (offline, on the cleaned tree).
 # Output: one `OK: <what>` or `FAIL: <what>` line per check, on stdout.
@@ -17,7 +20,7 @@ JUST_DIR=/usr/share/ublue-os/just
 MASTER=/usr/share/ublue-os/justfile
 OURS=$JUST_DIR/95-bazzite-mx.just
 SNAPSHOT=$BUILD_STATE/just.base.summary
-OUR_RECIPES="setup-panels"
+OUR_RECIPES="setup-msi setup-panels"
 REPLACING_RECIPES="setup-sunshine setup-virtualization"
 
 # --- the recipe files ---------------------------------------------------------
@@ -120,12 +123,15 @@ check_help() {
 }
 
 # --- a failed call is the recipe's status -------------------------------------
-# setup-panels prints what plasmashell answered, setup-sunshine enable and
-# disable report the service and its status reads the unit: the recipe runs
-# as nobody (the recipes refuse root) with stubs of gdbus, systemctl and
-# getcap first on PATH: under STUB_FAILS the first two refuse and getcap
-# prints no capability, so the line and the status can be read in the build.
-# Known-bad: setup-panels exited 0 after a failed gdbus
+# setup-msi enable prints a
+# `Done.` line after its call, setup-panels prints what plasmashell
+# answered, setup-sunshine enable and disable report the service and its
+# status reads the unit: the recipe runs as nobody (the recipes refuse root)
+# with stubs of sudo, gdbus, systemctl and getcap first on PATH: under
+# STUB_FAILS the first three refuse and getcap prints no capability, so the
+# line and the status can be read in the build.
+# Known-bad: the recipes printed `Done.` and exited 0 after a helper that had
+# printed `ERROR:` and exited 1; setup-panels exited 0 after a failed gdbus
 # call, the pipe into sed hiding its status; setup-sunshine reported the
 # service enabled after a systemctl that had refused.
 
@@ -135,6 +141,15 @@ fixture_recipe_stubs() {
     mkdir -p "$dir/bin" "$dir/home"
     chmod 755 "$dir" "$dir/bin"
     chmod 777 "$dir/home"
+    cat > "$dir/bin/sudo" << 'STUB'
+#!/usr/bin/bash
+if [ "${STUB_FAILS:-0}" = 1 ]; then
+    echo "ERROR: stub refused $*"
+    exit 1
+fi
+
+echo "stub ran $*"
+STUB
     cat > "$dir/bin/gdbus" << 'STUB'
 #!/usr/bin/bash
 if [ "$1" = call ] && [ "${STUB_FAILS:-0}" = 1 ]; then
@@ -214,7 +229,7 @@ fi
 
 exec /usr/sbin/getcap "$@"
 STUB
-    chmod 755 "$dir/bin/gdbus" "$dir/bin/systemctl" "$dir/bin/getcap"
+    chmod 755 "$dir/bin/sudo" "$dir/bin/gdbus" "$dir/bin/systemctl" "$dir/bin/getcap"
 }
 
 # run_recipe_as_nobody <stubs> <recipe> <action>: the recipe's output; its
@@ -463,14 +478,14 @@ check_recipes_reject_an_unknown_option() {
     fi
 }
 
-# The two recipes with a Choose menu exit 0 and print no `Unknown option:`
+# The three recipes with a Choose menu exit 0 and print no `Unknown option:`
 # when the menu answers nothing, as on a cancel or without a terminal.
 # Known-bad: the empty answer fell to `*)`, `Unknown option:` and exit 1.
 check_menu_recipes_accept_an_empty_answer() {
     local dir=$1
     local recipe output failed=""
 
-    for recipe in setup-sunshine setup-virtualization; do
+    for recipe in setup-msi setup-sunshine setup-virtualization; do
         if ! output=$(STUB_FAILS=1 run_recipe_as_nobody "$dir" "$recipe" "") \
             || grep -q '^Unknown option:' <<< "$output"; then
             failed+=" $recipe"
@@ -495,6 +510,7 @@ check_self_test 70-justfile.sh bash "$CTX/build_files/70-justfile.sh"
 
 stubs=$(mktemp -d)
 fixture_recipe_stubs "$stubs"
+check_recipe_stops_on_a_failed_call "$stubs" setup-msi enable Done.
 check_recipe_stops_on_a_failed_call "$stubs" setup-panels "" "stub applied the panels"
 check_recipe_stops_on_a_failed_call "$stubs" setup-sunshine enable "Sunshine enabled for"
 check_recipe_stops_on_a_failed_call "$stubs" setup-sunshine disable "Sunshine disabled for"
