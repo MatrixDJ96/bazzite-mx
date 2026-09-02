@@ -255,3 +255,49 @@ build), gparted and teams-for-linux from the design checkpoint (2026-09-02).
   would uninstall the app (flatpak-preinstall(1), 1.18.1). The Flathub id
   `com.github.IsmaelMartinez.teams_for_linux` and the `flatpak install` command go in
   `docs/migration.md` with the justfile feature.
+
+## Sunshine (`41-sunshine.sh`)
+
+Criteria 1, 2, 3, 4; decision 1.5e (RPM from the COPR `lizardbyte/stable`, an enabling
+recipe, the base's virtual-monitor helpers reused). Bazzite dropped its Sunshine RPM
+(commit 079fa8ad, 2026-03-26) and its `setup-sunshine` installs the Flatpak per host, with a
+Homebrew beta path for Deck images. The RPM is in the image because the Flatpak cannot do
+what the fleet uses it for: "Flatpak does not support KMS capture"
+(`docs/getting_started.md:235`) and "KMS screencasting requires elevated privileges which
+are not allowed for Flatpak or AppImage packages" (`docs/troubleshooting.md:237`,
+LizardByte/Sunshine master, read 2026-09-02); the same page notes KMS "will soon be phased
+out in favour of XDG Portal Capture", which the RPM supports too.
+
+- Package `Sunshine` (capital S) `2026.516.143833-1.fc44` from the COPR the Sunshine docs
+  name (`docs/getting_started.md:213`: `sudo dnf copr enable lizardbyte/stable`), vendored
+  as `sunshine.repo` with `enabled=0`, the COPR key shipped (fingerprint `1827 C306 E994
+  4D99 DF4C ACF1 43B8 4301 E4F6 8234`, valid to 2029-10-04, measured 2026-09-02) and the
+  COPR file's `priority=1` dropped (it would let the repository override Fedora's packages
+  on a host that enabled it). v1 used the community COPR `pvermeer/sunshine` because the
+  official one lacked the capability and Fedora builds; both objections are gone: the
+  official RPM ships `/usr/bin/sunshine` with `cap_sys_admin,cap_sys_nice=p` (`rpm --qf
+  '%{FILECAPS}'`, 2026-09-02) and a Fedora 44 build. The capability is what KMS capture
+  needs; it also means a compromised Sunshine process holds `CAP_SYS_ADMIN` for the user
+  running it, accepted as in v1 because the unit is opt-in and the hosts are single-user.
+- What the RPM ships and the build only checks: the user unit
+  `app-dev.lizardbyte.app.Sunshine.service` (`Alias=sunshine.service`,
+  `WantedBy=graphical-session.target`), `60-sunshine.rules` (`/dev/uinput` and `/dev/uhid`
+  to group `input` with `uaccess`), `60-sunshine.conf` (modules-load `uhid`). Its `%post`
+  runs `modprobe uhid` and, only where `rpm-ostree` is absent, `udevadm` reloads; in the
+  build both are no-ops and the files apply at boot.
+- The unit is disabled for every user (`systemctl --global disable`, aurora
+  `17-cleanup.sh:32`; asserted after the install rather than assumed from the presets) and
+  enabled per user by the recipe: streaming is opt-in.
+- Bazzite's announcement `sunshine-brew.msg.json` ("Sunshine will soon be removed from the
+  base Bazzite image, and you will need to reinstall it in Bazzite Portal") fires for any
+  user whose journal mentions sunshine and whose user units include the RPM's: removed, as
+  v1 did.
+- Recipe `setup-sunshine` (file `82-bazzite-sunshine.just`, replacing Bazzite's 336-line
+  recipe): `status`, `enable`/`disable` (`systemctl --user`), `portal`, `virtual-monitor`
+  (the "Virtual Monitor" app of Bazzite's recipe rewritten for the RPM: the base's
+  `sunshine-start-vmon`/`sunshine-stop-vmon` called directly, `~/.config/sunshine/apps.json`
+  seeded from the package's `apps.json`, the `ExecStopPost` drop-in). Not carried over:
+  install/update/uninstall paths (the RPM follows the image), the Deck and Homebrew
+  branches (no Deck image in the fleet), the "Fix Error 503" switch that writes
+  `KWIN_WAYLAND_NO_PERMISSION_CHECKS=1` into the user's environment (a KWin permission
+  bypass; returns as its own step if a host needs it).
