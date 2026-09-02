@@ -8,7 +8,7 @@ which files carry it; the guards themselves live in the build script and its tes
 
 Contents: three flavours · image identity · signing trust · hook framework · Docker CE ·
 virtualization · VS Code · git tools · command-line tools · mise · desktop applications ·
-Sunshine · KDE defaults · ujust recipes · the cleaned stage · CI.
+Sunshine · KDE defaults · MSI laptop · ujust recipes · the cleaned stage · CI.
 
 ## Three flavours, one recipe
 
@@ -18,7 +18,8 @@ This image follows all three, and the base image and the name it maps to are the
 differences between them. A host reaches the changes below only through an image built on its
 own stack's base. The recipe therefore stays one file with `BASE_IMAGE` and `IMAGE_NAME` as its
 variables, and `resolve-base.sh` maps a flavour to a base image and pins it to a digest. The
-closed-driver base carries a kernel of its own. Source: `bazzite`'s
+closed-driver base carries a kernel of its own, so the kmod-builder stage compiles the
+out-of-tree modules against the kernel each base ships. Source: `bazzite`'s
 `.github/workflows/build.yml`, the image matrix of the `push-ghcr` job, where the closed-driver
 images, `bazzite-nvidia` and its GNOME twin, take the `ogc-lts` kernel.
 
@@ -485,11 +486,50 @@ Files: `build_files/45-kde-defaults.sh` and its test, the two scripts under
 `system_files/usr/share/ublue-os/user-setup.hooks.d/12-bazzite-mx-copy-paste.sh`, and the
 recipe `setup-panels` in `system_files/usr/share/ublue-os/just/95-bazzite-mx.just`.
 
+## MSI laptop: kernel modules and MControlCenter
+
+The fleet's laptop is an MSI machine whose fan curves, shift modes, keyboard backlight and
+battery thresholds are reachable only through its embedded controller. Two out-of-tree modules
+and a per-host install cover it, and nothing here loads on any other machine. **msi-ec**
+(BeardOverflow/msi-ec) is pinned to a commit of `main`. The ogc kernel builds its in-tree copy,
+but that copy prints no version and lags the project. Ours lands under `updates/`, which depmod
+searches before `kernel/` (kmod's `tools/depmod.c`). The base's copy is signed and carries DMI
+aliases, so stock Bazzite loads it at boot on any MSI laptop, Secure Boot on or off; ours has
+neither, so here msi-ec loads only through `setup-msi`, and never with Secure Boot on.
+**acpi_ec** (saidsay-so/acpi_ec) creates the root-only character device `/dev/ec` that
+MControlCenter falls back to for fan speeds when `/sys/kernel/debug/ec/ec0/io` is absent, and
+it is absent: the ogc kernel leaves `CONFIG_ACPI_EC_DEBUGFS` unset.
+
+The builder is the base image itself, not an akmods carrier, Bazzite installing `kernel-devel`
+for its kernel and versionlocking it. The kernel's build system is called directly rather than
+the modules' own `make`, which targets `/lib/modules/$(uname -r)/build`, the runner's kernel
+and not the image's. Both modules are unsigned, the kernel setting `CONFIG_MODULE_SIG_ALL=y`
+but not `CONFIG_MODULE_SIG_FORCE`. They load with a taint when Secure Boot is off and are
+refused when it is on, the IMA architecture policy then enforcing module signatures
+(`security/integrity/ima/ima_efi.c`); the recipe prints that reason when modprobe fails. MOK
+enrolment is out of scope. Nothing loads them at boot, since every other host never touches
+them. `ujust setup-msi enable`, gated on the DMI vendor `Micro-Star`, writes the modules-load
+file and loads them now. They stay out of the initramfs by design.
+
+MControlCenter (dmitry-s93/MControlCenter) is installed per host from the tarball of its latest
+GitHub release, with no pin, being neither on Flathub nor shipped as an AppImage. Upstream's
+installer puts the GUI, the root helper, the D-Bus policy and the activation file under `/usr`,
+which on a bootc host is the image. Ours puts everything under `/usr/local` and
+`/etc/dbus-1/system.d`, both of which dbus-broker's launcher and `system.conf` already search.
+The helper goes to `/usr/local/bin` and not to `libexec` because SELinux labels the former as
+`bin_t` while `/usr/local/libexec` falls to `usr_t`. The privilege model is upstream's: the
+helper runs as root and every local user may send to it, accepted on a single-user machine.
+
+Files: `build_files/50-kmods.sh` and its test, `build_files/kmods/build-kmods.sh`,
+`build_files/kmods/msi-ec/source.env`, `build_files/kmods/acpi_ec/source.env`,
+`build_files/lib/kmod.sh`, `system_files/usr/libexec/bazzite-mx-msi-setup`, and the recipe
+`setup-msi` in `system_files/usr/share/ublue-os/just/95-bazzite-mx.just`.
+
 ## ujust recipes
 
 Bazzite's `ujust` is `just` run on `/usr/share/ublue-os/justfile`, which imports every file
-under `/usr/share/ublue-os/just/` by name and sets `allow-duplicate-recipes`. One recipe of
-ours joins it: `setup-panels`.
+under `/usr/share/ublue-os/just/` by name and sets `allow-duplicate-recipes`. Two recipes of
+ours join it: `setup-panels` and `setup-msi`.
 
 `95-bazzite-mx.just` is appended as one more `import` line, the way bazzite-dx adds its own
 file (`bazzite-dx/build_files/60-clean-base.sh`). With duplicate names across imports the

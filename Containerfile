@@ -18,6 +18,16 @@ COPY build_files /build_files
 COPY system_files /system_files
 COPY cosign.pub /cosign.pub
 
+# --- kmod-builder: the out-of-tree modules ------------------------------------
+
+# The base image is the builder: it ships kernel-devel for its own kernel and
+# the toolchain, so no akmods carrier stage.
+FROM ${BASE_IMAGE} AS kmod-builder
+RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
+    --mount=type=tmpfs,dst=/tmp \
+    /ctx/build_files/kmods/build-kmods.sh --self-test \
+    && /ctx/build_files/kmods/build-kmods.sh
+
 # --- image: build, test, lint -------------------------------------------------
 
 FROM ${BASE_IMAGE} AS image
@@ -25,10 +35,13 @@ ARG IMAGE_NAME
 ARG IMAGE_VENDOR
 ARG VERSION
 
-# /run is a tmpfs because buildah binds the host's resolv.conf under it and
-# the path would otherwise stay in the image (docs/gotchas.md § A networked
-# RUN leaves `/run/systemd/resolve/stub-resolv.conf` in the image).
+# /kmods is a root-level mount point, never under /var: clean-stage empties
+# /var, which fails on a read-only bind mount. /run is a tmpfs because buildah
+# binds the host's resolv.conf under it and the path would otherwise stay in
+# the image (docs/gotchas.md § A networked RUN leaves
+# `/run/systemd/resolve/stub-resolv.conf` in the image).
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
+    --mount=type=bind,from=kmod-builder,source=/out,target=/kmods \
     --mount=type=cache,dst=/var/cache \
     --mount=type=cache,dst=/var/log \
     --mount=type=tmpfs,dst=/run \

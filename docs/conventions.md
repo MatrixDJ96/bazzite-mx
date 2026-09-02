@@ -30,14 +30,14 @@ CI · prose · commits.
 ### Form
 
 A script is read by a person before bash runs it, and the person is not the author. These rules
-hold for every file the lint job covers: build scripts, libraries, tests, the libexec helpers,
-the boot hooks, the CI scripts and the edit hook. They hold in the same spirit for every other
-file of the repo: a workflow, the Containerfile, a justfile, a Plasma update script, a `.repo`
-or `.conf` file gets the same blank lines between its steps, the same 100 columns and comments
-that carry a reason, never a restatement. The shapes and the width are checked by
-`.github/scripts/check-form.sh`, which the edit hook runs on every shell file an edit touches
-and the `lint` job on the whole shell catalogue; a line that holds a banned shape as data ends
-in `# form: literal`. The rest is checked by hand at review, like § Prose.
+hold for every file the lint job covers: build scripts, libraries, tests, the kmod builder, the
+libexec helpers, the boot hooks, the CI scripts and the edit hook. They hold in the same spirit
+for every other file of the repo: a workflow, the Containerfile, a justfile, a Plasma update
+script, a `.repo` or `.conf` file gets the same blank lines between its steps, the same 100
+columns and comments that carry a reason, never a restatement. The shapes and the width are
+checked by `.github/scripts/check-form.sh`, which the edit hook runs on every shell file an
+edit touches and the `lint` job on the whole shell catalogue; a line that holds a banned shape
+as data ends in `# form: literal`. The rest is checked by hand at review, like § Prose.
 
 - **Control flow is written as `if … then … fi`.** `cmd || return 1`, `a && b || c`,
   `! cmd || die`, `cmd || { … }` and a subshell `( … ) ||` used as a guard are out: they hide
@@ -138,10 +138,10 @@ in `# form: literal`. The rest is checked by hand at review, like § Prose.
 
 - **A name says what the function does or what the variable holds.** No private vocabulary.
   `die` is named by its effect: `fail_build` in `lib/log.sh` (prints `FAIL:`, the build stops),
-  `exit_with_error` in the CI scripts (`.github/scripts/lib.sh`, prints `<script>: …`, the
-  script stops), where `print_error` prints the same line and returns 1 for a function a caller
-  runs under `if`. A function a caller runs under `if` is named as the question its status
-  answers: `has_recipe`.
+  `exit_with_error` in the host helpers (prints `ERROR:`, the command stops) and in the CI
+  scripts (`.github/scripts/lib.sh`, prints `<script>: …`, the script stops), where
+  `print_error` prints the same line and returns 1 for a function a caller runs under `if`. A
+  function a caller runs under `if` is named as the question its status answers: `has_recipe`.
 
 - **Every script opens with a header**: what it does in one or two sentences; `Usage:` with
   each argument and option on its own line; the exit status; what it writes, files and the
@@ -189,9 +189,12 @@ known-bad still red after it. The rules above add to the earlier bullets of this
   1Password forces the rule: its `%post` rewrites the vendored file with `enabled=1`, the build
   puts the vendored copy back, and the gate proves it.
 - Nothing is pinned to a release for vendor RPMs and GitHub releases: the build resolves the
-  latest, and a pin enters only against an observed problem, with the observation cited. One
-  exception: the base image is pinned to the digest CI resolved (`resolve-base.sh`), so the
-  three flavours build against a known base.
+  latest, and a pin enters only against an observed problem, with the observation cited. Two
+  exceptions. The base image is pinned to the digest CI resolved (`resolve-base.sh`), so the
+  three flavours build against a known base; the out-of-tree kernel modules are pinned to a
+  full commit, so a rebuild against a new base kernel cannot also change the module's source.
+  pahole is neither latest nor pinned: the kmod-builder stage builds it from the tag the
+  kernel's `CONFIG_PAHOLE_VERSION` names, so it moves with the base kernel.
 - A vendor's signing key is pinned on purpose: the armored key ships under
   `system_files/etc/pki/rpm-gpg/`, the `.repo` reads it with `gpgkey=file://`, and the feature
   script calls `assert_key_fingerprint` before the install. The fingerprint is pinned once in
@@ -205,6 +208,14 @@ known-bad still red after it. The rules above add to the earlier bullets of this
   tmpfiles `L+` line per name to recreate the link on the host. Paths baked into the
   application keep their `/opt/...` form, so its smoke test checks them with `readlink` and not
   with `-x`: the link dangles in the build.
+- An out-of-tree kernel module is a `build_files/kmods/<name>/source.env`, built by the
+  kmod-builder stage against the base's own `kernel-devel`. It carries `URL`, the full
+  `COMMIT`, `KO_NAME`, `KO_BUILD_PATH` and `KO_VERSION`. The builder proves the checkout is the
+  pinned commit.
+  Then `assert_module` requires a readable module stamped for the image's kernel and, when
+  `KO_VERSION` is set, that `MODULE_VERSION`. The modules are unsigned: when modprobe refuses
+  one, the helper's `ERROR:` line carries modprobe's own reason and names Secure Boot as the
+  cause of a rejected key.
 - A package `%post` runs in the build, not on the host. Read it with `rpm -qp --scripts` before
   the package enters a script, and handle every effect that belongs to a host explicitly. A
   `groupadd` in a `%post` lands in `/etc/group`; `95-clean-stage.sh` relocates the accounts to
@@ -226,6 +237,13 @@ known-bad still red after it. The rules above add to the earlier bullets of this
   ([`gotchas.md`](gotchas.md) § `just`: the earlier import wins on a duplicate recipe name), so
   `70-justfile.sh` fails the build on any name defined in two files and checks that the master
   justfile exposes every name of ours and still parses.
+- A recipe that needs more than a few lines of logic calls a helper under
+  `system_files/usr/libexec/bazzite-mx-<x>`, the recipe staying a thin front: the `help` text,
+  the not-as-root check, `sudo` where root is needed, the call. A recipe that prints a line
+  after the call prints it only when the call succeeded, so a failed helper is the recipe's own
+  status (`tests/70` runs those recipes as `nobody` against a stub). The helper takes fixture
+  knobs (`ROOT=`, `DMI_VENDOR_FILE=`) so the smoke test runs the real code, positive and
+  known-bad, inside the build.
 - Recipes are `just --unstable --fmt --check` clean and start with
   `source /usr/lib/ujust/ujust.sh`, which brings the colours and `Choose`. The `help` action
   comes before the not-as-root check so the smoke test can run the recipe body in the build.
@@ -303,6 +321,7 @@ Where each one runs:
 | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.github/scripts/*.sh`                                    | `lint` job, `build.yml`                                                                                                                                   |
 | `check-form.sh`                                           | `lint` job, `build.yml`, which then runs the check itself over the whole shell catalogue; `.claude/hooks/lint-edit.sh` runs it on every edited shell file |
+| `kmods/build-kmods.sh`                                    | kmod-builder stage, before the real build                                                                                                                 |
 | `70-justfile.sh`, `80-fix-opt.sh`, `90-validate-repos.sh` | the test RUN, called by their paired test                                                                                                                 |
 | `tests/run.sh`                                            | `lint` job, `build.yml`, after the CI scripts                                                                                                             |
 
