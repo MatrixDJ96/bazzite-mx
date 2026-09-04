@@ -8,7 +8,7 @@ which files carry it; the guards themselves live in the build script and its tes
 
 Contents: three flavours · image identity · signing trust · hook framework · Docker CE ·
 virtualization · VS Code · git tools · command-line tools · mise · desktop applications ·
-Sunshine · KDE defaults · MSI laptop · ujust recipes · the cleaned stage · CI.
+Sunshine · KDE defaults · MSI laptop · NTFSPLUS · ujust recipes · the cleaned stage · CI.
 
 ## Three flavours, one recipe
 
@@ -524,6 +524,98 @@ Files: `build_files/50-kmods.sh` and its test, `build_files/kmods/build-kmods.sh
 `build_files/kmods/msi-ec/source.env`, `build_files/kmods/acpi_ec/source.env`,
 `build_files/lib/kmod.sh`, `system_files/usr/libexec/bazzite-mx-msi-setup`, and the recipe
 `setup-msi` in `system_files/usr/share/ublue-os/just/95-bazzite-mx.just`.
+
+## NTFSPLUS on every flavour
+
+NTFSPLUS is the from-scratch read/write NTFS driver on iomap and folios that Linux 7.1 carries
+as `fs/ntfs`, written by Namjae Jeon, the author of exFAT and ksmbd. It and `ntfs3` coexist by
+design (`fs/ntfs3/Kconfig`: `depends on !NTFS_FS || m`). The image builds the author's
+standalone packaging of the same code (`namjaejeon/linux-ntfs`) for all three flavours alike,
+under `updates/`, which depmod searches before the in-tree `kernel/` (kmod's `tools/depmod.c`),
+pinned by hand to a merge commit of `main`: `ntfs-next` is force-pushed and its tip may be
+mid-rework. The module is `ntfs.ko` and registers the filesystem type `ntfs`: "ntfsplus" is the
+project's name, never the module's nor the mount type's. Its kbuild fragment is gated on
+`CONFIG_NTFS_FS`, so `source.env` forces the symbol on the make line
+([`gotchas.md`](gotchas.md) § A kbuild fragment gated on a kernel config symbol compiles
+nothing and exits 0). Like the MSI modules, `ntfs.ko` is unsigned and the kernel refuses it
+when Secure Boot is on, so the image requires Secure Boot off: with it on, the type `ntfs` has
+no driver on 7.2, the image's module shadowing the kernel's signed one.
+
+The 7.2 kernel of `bazzite` and `bazzite-nvidia-open` builds `fs/ntfs` as a module of the same
+name, so the image's `ntfs.ko` takes its place and the kernel's type `ntfs` stays NTFSPLUS, in
+newer code: the pin carries mainline `ntfs:` fixes that v7.2.9 lacks, among them the
+`invalidate_lock` in `ntfs_filemap_page_mkwrite` and the `$MFTMirr` write offset. The 6.18
+kernel of `bazzite-nvidia` has no `fs/ntfs`, and once it sets `CONFIG_NTFS_FS` its `ntfs3`
+registers a read-only `ntfs` type of its own and carries the `fs-ntfs` alias
+([`gotchas.md`](gotchas.md) § The 6.18 `ntfs3` claims `fs-ntfs` once the kernel sets
+`CONFIG_NTFS_FS`). Of two drivers registering one type the first loaded gets it: `ntfs3` only
+warns when the name is taken, while NTFSPLUS fails its load. On such a kernel `55-ntfsplus.sh`
+writes `/usr/lib/modprobe.d/bazzite-mx-ntfs.conf`, `alias fs-ntfs ntfs` and
+`softdep ntfs3 pre: ntfs`: an alias in the configuration wins over the aliases a module carries,
+used "as a last resort" (modprobe.d(5)), and the softdep loads NTFSPLUS before every `ntfs3`, so
+the type `ntfs` is NTFSPLUS's on 6.18 as on 7.2. kmod ignores a softdep that fails to load
+(`kmod_module_probe_insert_module` in kmod 34.2's `libkmod/libkmod-module.c`), so with Secure
+Boot on `ntfs3` still loads, and once it is loaded its read-only `ntfs` takes the type. The
+build fails unless `fs-ntfs` resolves to `updates/ntfs.ko` alone, and, where the file ships,
+unless `ntfs3` inserts `updates/ntfs.ko` first.
+
+The type `ntfs` reaches the kernel: the build removes the two generic `mount.ntfs` and
+`mount.ntfs-fuse` links ntfs-3g installs, under both spellings, `/usr/bin` and the
+`/usr/sbin -> bin` symlink ([`gotchas.md`](gotchas.md) § `mount -t ntfs` reaches the kernel
+driver only when no `mount.ntfs` helper exists). `mount.ntfs-3g` and `ntfsprogs` stay, so
+`mount -t ntfs-3g` remains the explicit FUSE route and `ntfs3` its own type. An `ntfs` row of
+fstab, `mount -t ntfs` and the volumes udisks mounts, from the file manager or
+`udisksctl mount`, all land on NTFSPLUS: Fedora builds udisks2 with `ntfs_drivers=ntfs,ntfs3`,
+its first try being the type `ntfs` (`udisks2.spec`, rhbz#2182206). On Bazzite all three reach
+ntfs-3g through `mount.ntfs`. One route stays Bazzite's: the SD cards (`mmcblk*`) and the `sd*`
+volumes labelled `steamgames` that `jupiter-sd-mounting-btrfs` mounts on its own
+(`99-steamos-automount.rules`, `99-framework-steam-automount.rules`), which
+`/usr/libexec/hwsupport/steamos-automount.sh` of the Bazzite base mounts as `lowntfs-3g`.
+
+NTFSPLUS defaults to `errors=continue`, which disarms its checks at mount: a volume Windows left
+dirty, or hibernated with `hiberfil.sys` in its root, would mount read-write without a warning
+and a dirty one have its flag cleared at unmount, where `ntfs3` refuses a dirty volume
+(`super.c` of `namjaejeon/linux-ntfs` at the commit `source.env` pins, `fs/ntfs3/super.c`).
+`errors=remount-ro` mounts those two read-only (`Mounting read-only` in the kernel log), so
+fstab rows and udisks mounts carry it; a `mount -t ntfs` by hand takes it on its command line.
+`ujust migrate` adds it to every `ntfs` row of fstab without an `errors=` option, and
+`verify-host` fails such a row. udisks' builtin `ntfs:ntfs_defaults` is `uid`, `gid` and
+`windows_names` and its `ntfs:ntfs_allow` has no `errors`
+(`strings /usr/libexec/udisks2/udisksd`), so the image ships `/etc/udisks2/mount_options.conf`
+with both keys, each the builtin set plus `errors=remount-ro`: a key there replaces the builtin
+set whole, and the defaults must be a subset of the allowed options (udisks, «Configurable mount
+options»), which `tests/55-ntfsplus.sh` compares with the builtin sets. NTFSPLUS never reads
+whether `$LogFile` is clean (no `ntfs_is_logfile_clean` at the pin), so the option does not
+cover a volume fast startup left with pending log records and no dirty flag, a data volume being
+the usual one: it mounts read-write and its `$LogFile` is emptied (`load_system_files`). Fast
+startup off in Windows covers it. A volume mounted read-only by the option says so in the kernel
+log and in an `INFO:` line of `verify-host`; it is writable again after Windows shuts down fully
+and a remount.
+
+NTFSPLUS accepts only its own options (`ntfs_parameters` in `super.c` at the pin): `uid`, `gid`,
+`umask`, `dmask`, `fmask`, `nls`, `iocharset`, `errors`, `show_sys_files`, `showmeta`,
+`case_sensitive`, `disable_sparse`, `mft_zone_multiplier`, `preallocated_size`, `sys_immutable`,
+`nohidden`, `hide_dot_files`, `windows_names`, `acl`, `discard`, `sparse`, `nocase`,
+`native_symlink`, `symlink`, besides the generic ones `mount(8)` handles. An `ntfs` row a
+Bazzite host wrote for ntfs-3g, carrying one of ntfs-3g's own (`big_writes`, `locale=`,
+`remove_hiberfile`, `permissions`), fails its mount on the image, and on `ntfs3` too
+([`migration.md`](migration.md) § The first rebase goes through the unsigned transport). No mask
+is written either, so a row without `umask`, `fmask` or `dmask` takes what Windows wrote from
+0755 under `ntfs3` to 0777 under NTFSPLUS, writable by every account ([`gotchas.md`](gotchas.md)
+§ The two NTFS kernel drivers agree on modes and case under a mask, with permissive exceptions);
+`umask=022` in the row gives 0755 back. A host keeps `ntfs3` by writing it in the row, which
+`verify-host` reports and accepts. Bazzite's `ntfs-nag.service`, its warning about running games
+from NTFS drives, stays enabled for every user.
+
+A module built for the wrong kernel API dies at its first mount with vermagic and modinfo green
+([`gotchas.md`](gotchas.md) § A kernel module can pass vermagic and modinfo and panic at its
+first use), and fstab mounts fire at boot before the journal is on disk. The build has no
+kernel to mount with, so a pin bump takes a mount on a booted host of each kernel series
+before it ships. Recovery after a boot panic: pick the previous deployment in the boot menu,
+then make it the default with `rpm-ostree rollback && systemctl reboot`.
+
+Files: `build_files/55-ntfsplus.sh` and its test, `build_files/kmods/ntfsplus/source.env`,
+`system_files/etc/udisks2/mount_options.conf`.
 
 ## ujust recipes
 

@@ -24,6 +24,7 @@ What the image changes over Bazzite, and why, is [`docs/divergences.md`](docs/di
 - Sunshine with the KMS capabilities its RPM carries (`ujust setup-sunshine`).
 - KDE defaults: clock seconds, a panel per screen, Ctrl+C to copy in Konsole.
 - Signing trust for `ghcr.io/matrixdj96/*`: a host pulls only what this repository signed.
+- NTFSPLUS, built from its author's tree, as the type `ntfs` on all three flavours.
 - Host recipes `ujust migrate` and `ujust verify-host`.
 
 ## Build it yourself

@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # What the verify-host, migrate and msi-setup helpers read about the host,
-# the error helpers all three call, the privilege one migrate and msi-setup.
+# the fstab errors= rewrite and the verification migrate judges it on, and the
+# error helpers all three call, the privilege one migrate and msi-setup.
 # Sourced by those three and by tests/helpers/verify-host.sh, never run; the
 # sourcing script sets its own `set` options.
 #
 # FIXTURE=<dir>: every file is read under <dir> and every command's output
-# under <dir>/cmd/, so a helper runs on a synthetic host in the smoke tests.
+# under <dir>/cmd/, so a helper runs on a synthetic host in the smoke tests;
+# fstab_verify_output (findmnt --verify on the running root) reads the host
+# whatever the fixture: its caller (migrate apply) runs under sudo, which drops
+# FIXTURE.
 # Output contract: `ERROR: <reason>` on stderr is what the recipes and the
 # tests read.
 
@@ -90,6 +94,80 @@ src_flatpaks() {
     fi
 }
 
+# unescape_fstab_field <field>: the field as libmount reads it. fstab(5)
+# writes a space as `\040`: a backslash and exactly three octal digits, and
+# nothing else is an escape (`\x20` and `\c` stay as they are, which printf
+# '%b' would not honour).
+unescape_fstab_field() {
+    local field=$1
+    local decoded='' byte
+
+    while [[ $field =~ ^([^\\]*)\\([0-7][0-7][0-7])(.*)$ ]]; do
+        printf -v byte "\\${BASH_REMATCH[2]}"
+        decoded+=${BASH_REMATCH[1]}$byte
+        field=${BASH_REMATCH[3]}
+    done
+
+    printf '%s' "$decoded$field"
+}
+
+# unescaped_on_one_line: the mount points on stdin, one per line as fstab
+# writes them, on one line as libmount reads them, a blank between.
+unescaped_on_one_line() {
+    local point line=""
+
+    while IFS= read -r point; do
+        line+="$(unescape_fstab_field "$point") "
+    done
+
+    printf '%s' "${line% }"
+}
+
+# src_block_device <fstab source>: the device the source of an fstab row
+# resolves to, empty only when it is absent (an unplugged volume). The field
+# is read as fstab(5) writes it (unescape_fstab_field), as findfs does not
+# decode `\040` (LABEL=New\040Volume is unable to resolve). UUID=, LABEL=,
+# PARTUUID= and PARTLABEL= go through findfs(8), whose `unable to resolve`
+# is the one answer that means absent: any other failure ends the helper
+# with `ERROR:`, an unreadable probe being no evidence of absence. A path
+# stands for itself when it exists. Fixture: "<source> <device>" lines in
+# cmd/devices, the source unescaped and compared whole.
+src_block_device() {
+    local source answer device
+
+    source=$(unescape_fstab_field "$1")
+
+    if [ -n "$FIXTURE" ]; then
+        # Through the environment: awk -v would unescape a `\040` on its own.
+        FSTAB_SOURCE="$source" awk '{
+            fstab_source = $0
+            sub(/[[:space:]]+[^[:space:]]+[[:space:]]*$/, "", fstab_source)
+            if (fstab_source == ENVIRON["FSTAB_SOURCE"]) {
+                print $NF
+            }
+        }' "$FIXTURE/cmd/devices"
+        return 0
+    fi
+
+    case "$source" in
+        UUID=* | LABEL=* | PARTUUID=* | PARTLABEL=*)
+            answer=$(LC_ALL=C findfs "$source" 2>&1 || true)
+            device=$(grep -m 1 '^/' <<< "$answer" || true)
+
+            if [ -n "$device" ]; then
+                echo "$device"
+            elif [[ $answer != *"unable to resolve"* ]]; then
+                exit_with_error "findfs could not read $source: ${answer:-no output}"
+            fi
+            ;;
+        *)
+            if [ -e "$source" ]; then
+                echo "$source"
+            fi
+            ;;
+    esac
+}
+
 # --- the image and its origin -------------------------------------------------
 
 # image_name: empty when image-info.json is unreadable.
@@ -127,6 +205,134 @@ policy_scope_type() {
     policy=$(host_file /etc/containers/policy.json)
     jq -r --arg s "$VENDOR_SCOPE" '.transports.docker[$s][0].type // ""' "$policy" \
         2> /dev/null || true
+}
+
+# --- fstab and NTFS -----------------------------------------------------------
+
+# mount_fstype <target>: the type mounted at <target>, the point as libmount
+# reads it (a space is a space, not `\040`), empty when nothing is; of a
+# stack the topmost (an `x-systemd.automount` row lists `autofs` and, once
+# triggered, the volume's type over it: docs/gotchas.md § A triggered
+# automount stacks the volume's type over `autofs`). A fixture lists
+# "<target> <fstype>" lines under cmd/mounts (blanks or a tab between,
+# trailing blanks ignored), the target compared whole (a prefix is not a
+# mount) and passed through the environment: awk -v would unescape a `\040`
+# on its own. A fixture spells the target as fstab does; on a host findmnt
+# prints /var/mnt for /mnt, which ostree links to var/mnt.
+mount_fstype() {
+    local mount_point=$1
+
+    if [ -n "$FIXTURE" ]; then
+        MOUNT_TARGET="$mount_point" awk '{
+            target = $0
+            sub(/[[:space:]]+[^[:space:]]+[[:space:]]*$/, "", target)
+            if (target == ENVIRON["MOUNT_TARGET"]) {
+                print $NF
+            }
+        }' "$FIXTURE/cmd/mounts" | tail -n 1
+        return 0
+    fi
+
+    findmnt -n -o FSTYPE --mountpoint "$mount_point" 2> /dev/null | tail -n 1 || true
+}
+
+# mount_read_only <target>: the topmost mount at <target> carries `ro`. A
+# fixture lists the read-only targets, one per line, under cmd/mounts-ro.
+mount_read_only() {
+    local mount_point=$1
+    local options
+
+    if [ -n "$FIXTURE" ]; then
+        grep -qxF "$mount_point" "$FIXTURE/cmd/mounts-ro" 2> /dev/null
+        return
+    fi
+
+    options=$(findmnt -n -o OPTIONS --mountpoint "$mount_point" 2> /dev/null | tail -n 1 || true)
+    [[ ,$options, == *,ro,* ]]
+}
+
+# fstab_entries <fstab>: the rows, comments and blank lines dropped.
+# A CRLF table keeps its `\r` in the rewriters; here it is dropped so the type
+# of a row that ends at its type reads as the type and not as `ntfs\r`.
+fstab_entries() {
+    local fstab=$1
+
+    grep -vE '^\s*(#|$)' "$fstab" 2> /dev/null | sed 's/\r$//' || true
+}
+
+# add_ntfs_errors_option <in> <out>: every entry of type `ntfs` without an
+# errors= option gains `errors=remount-ro`, under which NTFSPLUS mounts a dirty
+# or hibernated volume read-only (docs/divergences.md § NTFSPLUS on every
+# flavour); comments, blank lines and every other byte pass through unchanged.
+# The type may end the row: fstab(5) makes the last three fields optional. A
+# row may start with blanks, which libmount skips (docs/gotchas.md § A fstab
+# row may start with whitespace). Only the first non-blank character of a line
+# opens a comment, so a source field may carry a `#` (docs/gotchas.md § A `#`
+# inside an fstab field is not a comment).
+add_ntfs_errors_option() {
+    local input=$1 output=$2
+    local fields='[[:space:]]*[^#[:space:]][^[:space:]]*[[:space:]]+[^[:space:]]+[[:space:]]+'
+    local typed="^(${fields}ntfs)" option=errors=remount-ro
+
+    sed -E \
+        -e "/${typed}([[:space:]]|\$)/!b" \
+        -e "/${typed}[[:space:]]+([^[:space:]]*,)?errors=/b" \
+        -e "s/${typed}([[:space:]]+[^[:space:]]+)/\\1\\2,${option}/" \
+        -e "s/${typed}([[:space:]]*)\$/\\1 ${option}\\2/" \
+        "$input" > "$output"
+}
+
+# fstab_verify_output <fstab>: everything findmnt --verify prints on that
+# table, the summary line included, messages in C so the callers can read
+# them; the status is not the verdict, a stale nofail row making it 1 on any
+# table that carries one (docs/gotchas.md § `findmnt --verify` reports an
+# unplugged `nofail` volume as an error). The findings go to stdout, the
+# summary to stderr: into a pipe stdout is block-buffered and the summary
+# would land inside a cut line past 4096 bytes, so stdout is line-buffered.
+fstab_verify_output() {
+    local fstab=$1
+
+    LC_ALL=C stdbuf -oL findmnt --verify --tab-file "$fstab" 2>&1 || true
+}
+
+FSTAB_VERIFY_SUMMARY='^(Success, no errors or warnings detected'
+FSTAB_VERIFY_SUMMARY+='|[0-9]+ parse errors?, [0-9]+ errors?, [0-9]+ warnings?)$'
+
+# fstab_verify_answers <fstab>: findmnt gave its verdict on that table, the
+# summary line it ends with (`Success, no errors or warnings detected` or
+# `N parse errors, N errors, N warnings`). A findmnt that never ran prints
+# nothing, one that died on a malformed row prints its diagnostic and no
+# summary (docs/gotchas.md § `findmnt --verify` reports an unplugged `nofail`
+# volume as an error); a caller judging a rewrite refuses both instead of
+# reading an empty error set as a clean one.
+fstab_verify_answers() {
+    local fstab=$1
+    local output
+
+    output=$(fstab_verify_output "$fstab")
+    grep -qE "$FSTAB_VERIFY_SUMMARY" <<< "$output"
+}
+
+# fstab_verify_errors <fstab>: findmnt's `[E]` lines on that table, each
+# prefixed with its mount point, sorted. A stale nofail row (a volume that is
+# not plugged in) is one before any rewrite, so a rewrite is judged on the
+# errors it adds, never on the count.
+fstab_verify_errors() {
+    local fstab=$1
+
+    fstab_verify_output "$fstab" \
+        | awk '/^[^[:space:]]/ { target = $0 } /^[[:space:]]*\[E\]/ { print target ": " $0 }' \
+        | tr -s ' ' \
+        | sort -u
+}
+
+# new_verify_errors <before> <after>: the error lines <after> has and <before>
+# has not; empty when the rewrite adds none.
+new_verify_errors() {
+    local before=$1
+    local after=$2
+
+    comm -13 <(fstab_verify_errors "$before") <(fstab_verify_errors "$after")
 }
 
 # --- residue ------------------------------------------------------------------

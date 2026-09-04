@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Smoke test of /usr/libexec/bazzite-mx-verify-host, the helper behind ujust
 # verify-host, on host-shaped fixtures: a migrated host, one before the
-# migration, one on the signed transport with the wrong tag and key, an MSI
-# host that turned setup-msi off, and a flavour that does not match the GPU.
-# What needs a booted host is proven there.
+# migration, one on the signed transport with the wrong tag and key, ntfs and
+# ntfs3 rows, an MSI host that turned setup-msi off, the volume rows fstab(5)
+# allows with one unplugged, and a flavour that does not match the GPU; then
+# the block-device resolver of host.sh on findfs stubs. What needs a booted
+# host is proven there.
 #
 # Usage: run by tests/run.sh inside the image (offline, on the cleaned tree).
 # Output: one `OK: <what>` or `FAIL: <what>` line per check, on stdout.
@@ -36,6 +38,7 @@ MIGRATED_OK_CHECKS=(
     'MSI host: acpi_ec'
     'no MSI residue'
     'NVIDIA'
+    'fstab: /mnt/win'
     'no ntfsplus residue'
     'no ntfsplus kernel argument'
     'no Firefox Flatpak'
@@ -76,6 +79,10 @@ fixture_migrated_host() {
     printf 'msi_ec 16384 0 - Live 0x0\nacpi_ec 12288 0 - Live 0x0\nnvidia 1000 0 - Live 0x0\n' \
         > "$fixture/proc/modules"
     printf 'msi-ec\nacpi_ec\n' > "$fixture/etc/modules-load.d/bazzite-mx-msi.conf"
+    printf 'UUID=1 / btrfs subvol=root 0 0\n%s\n' \
+        'UUID=2 /mnt/win ntfs defaults,nofail,errors=remount-ro 0 0' > "$fixture/etc/fstab"
+    printf '/mnt/win ntfs\n' > "$fixture/cmd/mounts"
+    printf 'UUID=2 /dev/sdb1\n' > "$fixture/cmd/devices"
     printf 'root=UUID=1 rw\n' > "$fixture/cmd/kargs"
     printf 'org.kde.okular\n' > "$fixture/cmd/flatpaks"
 
@@ -180,6 +187,7 @@ check_verify_host_on_unmigrated_fixture() {
         'policy.json has no sigstoreSigned scope'
         'MSI host: msi_ec not loaded'
         'MSI host: acpi_ec not loaded'
+        'fstab: /mnt/win is ntfs without errors=remount-ro (ujust migrate adds it)'
         'ntfsplus residue: /etc/modprobe.d/ntfsplus.conf'
         'MSI residue: /etc/modules-load.d/msi-ec.conf'
         "/etc/yum.repos.d/1password.repo differs from the image's copy"
@@ -194,6 +202,7 @@ check_verify_host_on_unmigrated_fixture() {
         "regenerate-initramfs":true,"initramfs-args":["--hostonly"]' 44.20260831
     jq 'del(.transports.docker["ghcr.io/matrixdj96"])' "$good/etc/containers/policy.json" \
         > "$fixture/etc/containers/policy.json"
+    printf 'UUID=2 /mnt/win ntfs defaults,nofail 0 0\n' > "$fixture/etc/fstab"
     printf 'nvidia 1000 0 - Live 0x0\n' > "$fixture/proc/modules"
     printf 'blacklist ntfsplus\n' > "$fixture/etc/modprobe.d/ntfsplus.conf"
     printf 'msi-ec\n' > "$fixture/etc/modules-load.d/msi-ec.conf"
@@ -219,13 +228,17 @@ check_verify_host_on_unmigrated_fixture() {
 # Known-bad: a host on the signed transport with every remaining defect at
 # once: a dated tag, a policy whose key is missing and whose default is not
 # reject, registries.d without the attachments, an NVIDIA GPU (refused by
-# bazzite-mx) with the module unloaded, a kernel argument naming ntfsplus.
+# bazzite-mx) with the module unloaded, an ntfs3 row not mounted and one
+# mounted by FUSE, a kernel argument naming ntfsplus; and an ntfs-3g row
+# whose mount point carries `\040`, reported decoded (known-bad: printed as
+# fstab writes it, `/mnt/fu\040se`).
 check_verify_host_on_signed_but_wrong_fixture() {
     local good=$1
     local image=$2
     local fixture=$good/../bad2
     local origin policy_rewrite output fail_lines unreported missing_key
     local expected_fails=()
+    local fuse_line='INFO: fstab rows on ntfs-3g (FUSE, the explicit route, left alone): /mnt/fu se'
     local gpu_fail='NVIDIA GPU present but the image is' gpu_not='nvidia module not loaded'
 
     if [[ $image == *nvidia* ]]; then
@@ -250,6 +263,11 @@ check_verify_host_on_signed_but_wrong_fixture() {
         > "$fixture/etc/containers/registries.d/matrixdj96.yaml"
     printf '%s\n' "$NVIDIA_GPU_LINE" > "$fixture/cmd/lspci-nvidia"
     printf 'msi_ec 16384 0 - Live 0x0\nacpi_ec 12288 0 - Live 0x0\n' > "$fixture/proc/modules"
+    printf 'UUID=1 / btrfs subvol=root 0 0\nUUID=2 /mnt/win ntfs3 defaults,nofail 0 0\n' \
+        > "$fixture/etc/fstab"
+    printf 'UUID=3 /mnt/data ntfs3 defaults,nofail 0 0\n' >> "$fixture/etc/fstab"
+    printf 'UUID=7 /mnt/fu\\040se ntfs-3g defaults,nofail 0 0\n' >> "$fixture/etc/fstab"
+    printf '/mnt/data fuseblk\n' > "$fixture/cmd/mounts"
     printf 'root=UUID=1 rw module_blacklist=ntfsplus\n' > "$fixture/cmd/kargs"
 
     missing_key='policy.json: ghcr.io/matrixdj96 scope names key'
@@ -260,6 +278,8 @@ check_verify_host_on_signed_but_wrong_fixture() {
         'policy.json: default is'
         'registries.d/matrixdj96.yaml missing or without use-sigstore-attachments'
         "$gpu_fail"
+        'fstab: /mnt/win is ntfs3 but not mounted'
+        'fstab: /mnt/data is ntfs3 in fstab but mounted as fuseblk'
         'kernel arguments mention ntfsplus: module_blacklist=ntfsplus'
     )
 
@@ -269,13 +289,50 @@ check_verify_host_on_signed_but_wrong_fixture() {
     unreported=$(unreported_of "$fail_lines" "${expected_fails[@]}")
 
     if [ "$VERIFY_HOST_STATUS" -eq 1 ] && [ -z "$unreported" ] \
-        && ! grep -qF "$gpu_not" <<< "$fail_lines"; then
+        && ! grep -qF "$gpu_not" <<< "$fail_lines" \
+        && grep -qF "$fuse_line" <<< "$output"; then
         echo "OK: verify-host names every defect of the signed-but-wrong fixture" \
-            "(${#expected_fails[@]} defects named, exit 1)"
+            "(${#expected_fails[@]} defects named, exit 1) and the FUSE row decoded"
     else
         echo "FAIL: verify-host on the signed-but-wrong fixture: exit $VERIFY_HOST_STATUS," \
             "defects not named: $(on_one_line none ',' <<< "$unreported");" \
             "$(grep -E '^(FAIL|ERROR)' <<< "$output" | on_one_line 'no matching line')"
+    fi
+}
+
+# The NTFS rows beyond the migrated host's: an ntfs3 row is the host's choice,
+# reported as INFO and checked like an ntfs one. Known-bad: an ntfs row whose
+# device is present but not mounted blamed a dirty volume, which NTFSPLUS
+# mounts; the line names the refused option or the module instead. Known-bad:
+# a volume mounted read-only because dirty passed silently; a row asking `ro`
+# is not reported.
+check_verify_host_on_ntfs_rows_fixture() {
+    local good=$1
+    local fixture=$good/../ntfs-rows
+    local output
+
+    cp -a "$good/." "$fixture/"
+    printf 'UUID=3 /mnt/data ntfs3 defaults,nofail 0 0\n' >> "$fixture/etc/fstab"
+    printf 'UUID=4 /mnt/ro ntfs3 ro,nofail 0 0\n' >> "$fixture/etc/fstab"
+    printf '/mnt/data ntfs3\n/mnt/ro ntfs3\n' > "$fixture/cmd/mounts"
+    printf '/mnt/data\n/mnt/ro\n' > "$fixture/cmd/mounts-ro"
+
+    run_verify_host "$fixture"
+    output=$VERIFY_HOST_OUTPUT
+
+    if grep -qxF "INFO: fstab rows on ntfs3 (the host's choice over NTFSPLUS): /mnt/data /mnt/ro" \
+        <<< "$output" \
+        && grep -q '^OK: fstab: /mnt/data is ntfs3 and mounted with ntfs3' <<< "$output" \
+        && grep -q '^INFO: fstab: /mnt/data (ntfs3) is mounted read-only' <<< "$output" \
+        && ! grep -q '^INFO: fstab: /mnt/ro (ntfs3) is mounted read-only' <<< "$output" \
+        && grep -q '^FAIL: fstab: /mnt/win is ntfs but not mounted (journalctl -b | grep ntfs' \
+            <<< "$output" \
+        && ! grep -q 'dirty volume' <<< "$output"; then
+        echo "OK: verify-host reports an ntfs3 row as the host's choice and names a refused" \
+            "option, not a dirty volume, for an unmounted ntfs row"
+    else
+        echo "FAIL: verify-host on the ntfs and ntfs3 rows:" \
+            "$(grep -E '^(FAIL|OK|INFO).*ntfs' <<< "$output" | on_one_line 'no matching line')"
     fi
 }
 
@@ -305,6 +362,88 @@ check_verify_host_on_msi_without_optin_fixture() {
     fi
 }
 
+# An external volume that is not plugged in: its nofail row is not mounted
+# and its device is absent, which is what the row allows for, so the line is
+# INFO and the exit status stays 0; the same row without nofail is a FAIL,
+# the boot having to wait for that device. Then the other row shapes fstab(5)
+# allows.
+check_verify_host_on_unplugged_volume_fixture() {
+    local good=$1
+    local fixture=$good/../unplugged
+    local output
+
+    cp -a "$good/." "$fixture/"
+    printf 'UUID=3 /mnt/ext ntfs3 defaults,nofail 0 0\n' >> "$fixture/etc/fstab"
+
+    run_verify_host "$fixture"
+    output=$VERIFY_HOST_OUTPUT
+
+    if [ "$VERIFY_HOST_STATUS" -eq 0 ] && ! grep -q '^FAIL:' <<< "$output" \
+        && grep -q '^INFO: fstab: /mnt/ext (ntfs3, nofail): device absent, not mounted' \
+            <<< "$output" \
+        && grep -q '^OK: fstab: /mnt/win is ntfs and mounted with ntfs' <<< "$output"; then
+        echo "OK: verify-host reports an unplugged nofail volume as INFO, exit 0"
+    else
+        echo "FAIL: verify-host on the unplugged nofail volume (exit $VERIFY_HOST_STATUS):" \
+            "$(grep -E '^(FAIL|ERROR)|^INFO: fstab: /mnt/ext' <<< "$output" \
+                | on_one_line 'no matching line')"
+    fi
+
+    sed -i 's/^UUID=3 .*/UUID=3 \/mnt\/ext ntfs3 defaults 0 0/' "$fixture/etc/fstab"
+
+    run_verify_host "$fixture"
+    output=$VERIFY_HOST_OUTPUT
+
+    if [ "$VERIFY_HOST_STATUS" -eq 1 ] \
+        && grep -q '^FAIL: fstab: /mnt/ext is ntfs3 but its device UUID=3 is absent' \
+            <<< "$output"; then
+        echo "OK: verify-host fails the same row without nofail, naming the absent device"
+    else
+        echo "FAIL: verify-host on the unplugged volume without nofail" \
+            "(exit $VERIFY_HOST_STATUS):" \
+            "$(grep -E '^(FAIL|ERROR)' <<< "$output" | on_one_line 'no matching line')"
+    fi
+
+    # A noauto row is not mounted by design; an x-systemd.automount row
+    # carries autofs until the first access and the volume's type over it
+    # afterwards (known-bad: the stack read as `autofs\nntfs3`, a FAIL with a
+    # bare second line); a label with a space is written `\040` in fstab and
+    # resolved unescaped; the plugged-in volume that did not mount stays the
+    # FAIL.
+    printf 'UUID=1 / btrfs subvol=root 0 0\nUUID=2 /mnt/win ntfs3 defaults,nofail 0 0\n' \
+        > "$fixture/etc/fstab"
+    printf 'UUID=4 /mnt/opt ntfs3 noauto,nofail 0 0\n' >> "$fixture/etc/fstab"
+    printf 'UUID=5 /mnt/auto ntfs3 nofail,x-systemd.automount 0 0\n' >> "$fixture/etc/fstab"
+    printf 'UUID=6 /mnt/auto2 ntfs3 nofail,x-systemd.automount 0 0\n' >> "$fixture/etc/fstab"
+    printf 'LABEL=New\\040Volume\\0401 /mnt/new\\040disk\\0401 ntfs3 defaults,nofail 0 0\n' \
+        >> "$fixture/etc/fstab"
+    printf 'LABEL=Games\\040Disk /mnt/games\\040disk ntfs3 defaults,nofail 0 0\n' \
+        >> "$fixture/etc/fstab"
+    printf '/mnt/win ntfs3\n/mnt/auto autofs\n/mnt/auto2 autofs\n/mnt/auto2 ntfs3\n' \
+        > "$fixture/cmd/mounts"
+    printf '/mnt/games disk ntfs3\n' >> "$fixture/cmd/mounts"
+    printf 'UUID=2 /dev/sdb1\nUUID=5 /dev/sdc1\nUUID=6 /dev/sde1\nLABEL=New Volume 1 /dev/sdd1\n' \
+        > "$fixture/cmd/devices"
+
+    run_verify_host "$fixture"
+    output=$VERIFY_HOST_OUTPUT
+
+    if [ "$VERIFY_HOST_STATUS" -eq 1 ] \
+        && grep -q '^INFO: fstab: /mnt/opt (ntfs3, noauto): not mounted, as the row asks' \
+            <<< "$output" \
+        && grep -q "^OK: fstab: /mnt/auto is ntfs3, armed by systemd's automount" <<< "$output" \
+        && grep -q '^OK: fstab: /mnt/auto2 is ntfs3 and mounted with ntfs3' <<< "$output" \
+        && grep -q '^OK: fstab: /mnt/games disk is ntfs3 and mounted with ntfs3' <<< "$output" \
+        && grep -q '^FAIL: fstab: /mnt/new disk 1 is ntfs3 but not mounted' <<< "$output" \
+        && [ "$(grep -c '^FAIL:' <<< "$output")" -eq 1 ]; then
+        echo "OK: verify-host reads noauto, x-systemd.automount and \\040 fields as fstab(5)" \
+            "does, one FAIL for the plugged-in volume that did not mount"
+    else
+        echo "FAIL: verify-host on the noauto/automount/escaped rows (exit $VERIFY_HOST_STATUS):" \
+            "$(grep -E '^(FAIL|INFO|OK: fstab)' <<< "$output" | on_one_line 'no matching line')"
+    fi
+}
+
 # A host without an NVIDIA GPU on an NVIDIA flavour is a defect; the other
 # direction is the signed-but-wrong fixture's.
 check_verify_host_on_gpu_mismatch() {
@@ -326,6 +465,47 @@ check_verify_host_on_gpu_mismatch() {
     fi
 }
 
+# --- the block-device resolver ------------------------------------------------
+
+# The real route of src_block_device, findfs(8) stubbed on PATH: a device
+# path is the device, `unable to resolve` is absent, and any other answer
+# (known-bad) ends the helper with ERROR instead of passing for absent.
+check_block_device_resolver_on_findfs_stubs() {
+    local stubs output
+
+    stubs=$(mktemp -d)
+    printf '#!/usr/bin/env bash\necho /dev/stub1\n' > "$stubs/findfs"
+    chmod +x "$stubs/findfs"
+    output=$(FIXTURE='' PATH=$stubs:$PATH bash -c \
+        'source /usr/lib/bazzite-mx/host.sh; src_block_device "UUID=1"' 2>&1 || true)
+
+    if [ "$output" != /dev/stub1 ]; then
+        echo "FAIL: src_block_device on a resolving findfs: '$output'"
+    fi
+
+    printf '#!/usr/bin/env bash\necho "findfs: unable to resolve '"'"'$1'"'"'" >&2\nexit 1\n' \
+        > "$stubs/findfs"
+    output=$(FIXTURE='' PATH=$stubs:$PATH bash -c \
+        'source /usr/lib/bazzite-mx/host.sh; src_block_device "UUID=1"; echo "rc=$?"' 2>&1 || true)
+
+    if [ "$output" != rc=0 ]; then
+        echo "FAIL: src_block_device on an absent device: '$output'"
+    fi
+
+    printf '#!/usr/bin/env bash\necho "findfs: error: cannot open /dev/sda: EIO" >&2\nexit 2\n' \
+        > "$stubs/findfs"
+    output=$(FIXTURE='' PATH=$stubs:$PATH bash -c \
+        'source /usr/lib/bazzite-mx/host.sh; src_block_device "UUID=1"' 2>&1 || true)
+
+    if grep -q '^ERROR: findfs could not read UUID=1: findfs: error' <<< "$output"; then
+        echo "OK: src_block_device resolves, reads absent and refuses an unreadable findfs"
+    else
+        echo "FAIL: src_block_device on a failing findfs passed: '$output'"
+    fi
+
+    rm -rf "$stubs"
+}
+
 # --- main ---------------------------------------------------------------------
 
 work=$(mktemp -d)
@@ -334,10 +514,13 @@ fixture_migrated_host "$work/ok" "$image"
 check_verify_host_on_migrated_fixture "$work/ok"
 check_verify_host_on_unmigrated_fixture "$work/ok" "$image"
 check_verify_host_on_signed_but_wrong_fixture "$work/ok" "$image"
+check_verify_host_on_ntfs_rows_fixture "$work/ok"
 check_verify_host_on_msi_without_optin_fixture "$work/ok"
+check_verify_host_on_unplugged_volume_fixture "$work/ok"
 
 if [[ $image == *nvidia* ]]; then
     check_verify_host_on_gpu_mismatch "$work/ok"
 fi
 
+check_block_device_resolver_on_findfs_stubs
 rm -rf "$work"

@@ -55,12 +55,12 @@ prepare_btf() {
 
 # --- one module ---------------------------------------------------------------
 
-# Sets URL, COMMIT, KO_NAME, KO_BUILD_PATH and KO_VERSION from
+# Sets URL, COMMIT, KO_NAME, KO_BUILD_PATH, KO_VERSION and KO_BUILD_ARGS from
 # <source.env>.
 read_source_env() {
     local source_env=$1
 
-    unset URL COMMIT KO_NAME KO_BUILD_PATH KO_VERSION
+    unset URL COMMIT KO_NAME KO_BUILD_PATH KO_VERSION KO_BUILD_ARGS
     # shellcheck disable=SC1090
     source "$source_env"
 }
@@ -92,7 +92,8 @@ build_module() {
     local dir=$2
     local kernel_source=$3
 
-    make -C "$kernel_source" M="$dir" PAHOLE="$PAHOLE" modules
+    # shellcheck disable=SC2086  # KO_BUILD_ARGS is a list of VAR=value words
+    make -C "$kernel_source" M="$dir" PAHOLE="$PAHOLE" modules ${KO_BUILD_ARGS:-}
 
     if [ ! -f "$dir/$KO_BUILD_PATH" ]; then
         fail_build "$name: $KO_BUILD_PATH not produced by the build"
@@ -115,7 +116,7 @@ stage_module() {
     fi
 
     log "kmod $name: $KO_NAME.ko for $kernel, $(stat -c %s "$staged") bytes," \
-        "version '${KO_VERSION:-}', commit $COMMIT"
+        "version '${KO_VERSION:-}', commit $COMMIT${KO_BUILD_ARGS:+, make args '$KO_BUILD_ARGS'}"
 }
 
 # --- the build ----------------------------------------------------------------
