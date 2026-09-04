@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Move a host from a Bazzite-style deployment (unsigned transport, layered
-# packages, local initramfs)
+# packages, local initramfs, `ntfs` rows of fstab without an errors= option)
 # to the state this image expects, in one pending deployment, the reboot left
 # to the user. Every mutating step asks first except step 2, which writes the
 # backups, pins the booted deployment and stops uupd.timer. The root half of
@@ -10,8 +10,8 @@
 #                                                 (root: ostree admin config-diff)
 #        bazzite-mx-migrate apply [TAG]           do it, asking before each step but 2
 #        bazzite-mx-migrate --self-test           prove the plan on good and bad hosts,
-#                                                 and apply's update, timer and backup
-#                                                 guards
+#                                                 the fstab rewrite and its verify, and
+#                                                 apply's update, timer and backup guards
 #   TAG defaults to stable; a dated release tag pins the host to that release.
 #   FIXTURE=<dir> (plan only): files read under <dir>, command outputs under
 #   <dir>/cmd/ (host.sh).
@@ -20,7 +20,7 @@
 #   A failed self-test prints `self-test: …` on stdout instead.
 # Writes (apply): /var/tmp/bazzite-mx-migrate/<timestamp>/ with the backups,
 #   the root taken to 0700 root:root so no second account reaches them,
-#   the origin through rpm-ostree, /etc/containers when restored,
+#   the origin through rpm-ostree, /etc/fstab, /etc/containers when restored,
 #   the residue files moved from /etc/modprobe.d and /etc/modules-load.d into
 #   the backup, the ntfsplus kernel arguments deleted from the pending
 #   deployment (step 6b).
@@ -46,9 +46,10 @@ TIMER_WAS_ACTIVE=0
 BACKUP=
 
 # CONTAINERS_RESTORED set by step 0, DEPLOYMENT_QUEUED by steps 3, 4, 5
-# and 6b; read by describe_what_the_run_changed.
+# and 6b, FSTAB_REWRITTEN by step 6; read by describe_what_the_run_changed.
 CONTAINERS_RESTORED=0
 DEPLOYMENT_QUEUED=0
+FSTAB_REWRITTEN=0
 
 # Filled by detect_host_state, read by the plan and every apply step.
 BOOTED=
@@ -61,6 +62,7 @@ IMAGE=
 TARGET=
 SCOPE_OK=0
 CONFIG_HITS=
+NTFS_ROWS=
 RESIDUE_FILES=
 RESIDUE_KARGS=
 
@@ -85,6 +87,10 @@ describe_what_the_run_changed() {
     if [ "$DEPLOYMENT_QUEUED" -eq 1 ]; then
         changed+=", the pending deployment the steps before it queued"
         next="reboot into it, or rpm-ostree cleanup -p, then apply again"
+    fi
+
+    if [ "$FSTAB_REWRITTEN" -eq 1 ]; then
+        changed+=", the fstab rewrite of step 6"
     fi
 
     echo "what the run changed stands ($changed): $next"
@@ -115,6 +121,15 @@ src_config_diff() {
     else
         ostree admin config-diff
     fi
+}
+
+# --- fstab --------------------------------------------------------------------
+
+# The `ntfs` rows without an errors= option.
+ntfs_rows() {
+    local fstab=$1
+
+    fstab_entries "$fstab" | awk '$3 == "ntfs" && $4 !~ /(^|,)errors=/'
 }
 
 # --- what the host has --------------------------------------------------------
@@ -172,8 +187,10 @@ detect_image_and_policy() {
     CONFIG_HITS=$(grep -E "$shadowing" <<< "$config_diff" || true)
 }
 
-detect_residue() {
+detect_fstab_and_residue() {
     local kargs
+
+    NTFS_ROWS=$(ntfs_rows "$(host_file /etc/fstab)")
 
     RESIDUE_FILES=$({
         ntfsplus_files
@@ -191,7 +208,7 @@ detect_residue() {
 detect_host_state() {
     detect_deployment
     detect_image_and_policy
-    detect_residue
+    detect_fstab_and_residue
 }
 
 # --- the plan -----------------------------------------------------------------
@@ -203,6 +220,15 @@ scope_state() {
         echo present
     else
         echo MISSING
+    fi
+}
+
+# The points as libmount reads them (a space is a space, not `\040`).
+ntfs_mount_points() {
+    if [ -n "$NTFS_ROWS" ]; then
+        awk '{ print $2 }' <<< "$NTFS_ROWS" | unescaped_on_one_line
+    else
+        echo none
     fi
 }
 
@@ -233,6 +259,7 @@ print_host_summary() {
     printf '  %-31s %s\n' "booted deployment pinned" "$PINNED"
     printf '  %-31s %s\n' "policy scope $VENDOR_SCOPE" "$(scope_state)"
     printf '  %-31s %s\n' "local policy/registries.d" "$(config_hits_on_one_line)"
+    printf '  %-31s %s\n' "ntfs rows without errors=" "$(ntfs_mount_points)"
     printf '  %-31s %s\n' "residue" "$(residue_on_one_line)"
     echo
 }
@@ -274,6 +301,13 @@ print_steps() {
         echo "  5. (origin already $TARGET: skipped)"
     fi
 
+    if [ -n "$NTFS_ROWS" ]; then
+        echo "  6. /etc/fstab: errors=remount-ro on $(wc -l <<< "$NTFS_ROWS") ntfs row(s);" \
+            "daemon-reload; findmnt --verify"
+    else
+        echo "  6. (no ntfs row without errors= in fstab: skipped)"
+    fi
+
     if [ -n "$RESIDUE_FILES$RESIDUE_KARGS" ]; then
         echo "  6b. remove residue: $(residue_on_one_line)"
     fi
@@ -312,7 +346,7 @@ check_preconditions() {
 # --- the apply steps ----------------------------------------------------------
 
 # Every step but 2 and 7 prints `step N: …` first, then asks; a declined 3, 4
-# or 5 aborts, a declined 0 or 6b only skips (docs/migration.md).
+# or 5 aborts, a declined 0, 6 or 6b only skips (docs/migration.md).
 
 new_backup_directory() {
     local timestamp
@@ -453,6 +487,87 @@ step_5_rebase() {
     DEPLOYMENT_QUEUED=1
 }
 
+# write_rewritten_fstab <rewritten> <backup>: refuses a table that adds a
+# findmnt --verify error to the current one (nothing written then), installs
+# it otherwise, reloads systemd and prints the verdict, pre-existing errors
+# counted, not fatal. A `daemon-reload` that fails after the write leaves the
+# table installed, the ERROR naming the reload to run by hand. The comparison
+# (host.sh) is trusted only once findmnt has answered on both tables: an
+# empty error set is not a clean one.
+write_rewritten_fstab() {
+    local rewritten=$1
+    local backup=$2
+    local added kept
+
+    # The rewritten table has the current one's rows with errors=remount-ro
+    # added, so the current table's diagnostic names the row to fix.
+    if ! fstab_verify_answers /etc/fstab || ! fstab_verify_answers "$rewritten"; then
+        rm -f "$rewritten"
+        fstab_verify_output /etc/fstab
+        exit_with_error "findmnt --verify gave no verdict: the rewrite cannot be judged," \
+            "fstab not written; $(describe_what_the_run_changed)"
+    fi
+
+    added=$(new_verify_errors /etc/fstab "$rewritten")
+
+    if [ -n "$added" ]; then
+        echo "$added"
+        rm -f "$rewritten"
+        exit_with_error "the rewritten fstab adds findmnt --verify error(s), fstab not written;" \
+            "$(describe_what_the_run_changed)"
+    fi
+
+    # Written beside and renamed, so a write cut short by a full disk leaves
+    # /etc/fstab as it was.
+    if ! install -m 0644 -o root -g root "$rewritten" /etc/fstab.new 2> /dev/null \
+        || ! mv -f /etc/fstab.new /etc/fstab 2> /dev/null; then
+        rm -f "$rewritten" /etc/fstab.new
+        exit_with_error "could not write /etc/fstab, left as it was;" \
+            "$(describe_what_the_run_changed)"
+    fi
+
+    FSTAB_REWRITTEN=1
+
+    if ! systemctl daemon-reload; then
+        rm -f "$rewritten"
+        exit_with_error "systemctl daemon-reload failed after writing /etc/fstab" \
+            "(backup $backup/fstab): run it by hand; $(describe_what_the_run_changed)"
+    fi
+
+    kept=$(fstab_verify_errors /etc/fstab | grep -c '' || true)
+    echo "findmnt --verify: no error added by the rewrite, $kept pre-existing error(s) kept"
+}
+
+step_6_fstab_ntfs_errors() {
+    local backup=$1
+    local rewritten rows_left
+
+    if [ -z "$NTFS_ROWS" ]; then
+        return 0
+    fi
+
+    echo "step 6: ntfs rows of fstab without an errors= option:"
+    echo "$NTFS_ROWS"
+
+    rewritten=$(mktemp)
+    add_ntfs_errors_option /etc/fstab "$rewritten"
+    diff -u /etc/fstab "$rewritten" || true
+
+    rows_left=$(ntfs_rows "$rewritten" | grep -c '' || true)
+
+    if [ "$rows_left" -ne 0 ]; then
+        rm -f "$rewritten"
+        exit_with_error "rewrite left $rows_left ntfs row(s) without errors=, fstab not written;" \
+            "$(describe_what_the_run_changed)"
+    fi
+
+    if confirm "Write this fstab (errors=remount-ro added, backup in $backup)?"; then
+        write_rewritten_fstab "$rewritten" "$backup"
+    fi
+
+    rm -f "$rewritten"
+}
+
 step_6b_remove_residue() {
     local backup=$1
     local path karg
@@ -514,7 +629,7 @@ print_step_7_what_stays_with_the_user() {
 
 # True on a host every step of apply would skip: no local policy.json or
 # matrixdj96.yaml, nothing layered, the image's initramfs, the signed origin,
-# no residue.
+# every ntfs row with an errors= option, no residue.
 # plan and apply stop there instead of pinning and backing up for nothing.
 nothing_to_do() {
     if [ -n "$CONFIG_HITS$LAYERED$RESIDUE_FILES$RESIDUE_KARGS" ]; then
@@ -524,6 +639,8 @@ nothing_to_do() {
     if [ "$REGEN" = true ] || [ "$REF" != "$TARGET" ]; then
         return 1
     fi
+
+    [ -z "$NTFS_ROWS" ]
 }
 
 # Armed as the EXIT trap by cmd_apply before step 2; a no-op unless step 2
@@ -589,6 +706,7 @@ cmd_apply() {
     step_3_uninstall_layered
     step_4_disable_local_initramfs
     step_5_rebase
+    step_6_fstab_ntfs_errors "$BACKUP"
     step_6b_remove_residue "$BACKUP"
 
     print_step_7_what_stays_with_the_user
@@ -602,14 +720,133 @@ fail_self_test() {
     exit 1
 }
 
-# self_test_unmigrated_fixture <dir>: a host that already boots this
+# A fstab with four ntfs rows, one ending at its type (fstab(5): the last
+# fields are optional) and one starting with blanks, an ntfs3 row, an ntfs-3g
+# row, a bind and a comment naming ntfs.
+self_test_fstab() {
+    local fstab=$1
+
+    cat > "$fstab" << 'FSTAB'
+# comment with ntfs in it
+UUID=1111 /  btrfs subvol=root 0 0
+UUID=2222 /run/media/x/Windows ntfs defaults,nofail,uid=1000,gid=1000,umask=022 0 0
+UUID=3333 /mnt/games   ntfs   nofail,x-systemd.device-timeout=10 0 0
+/mnt/games/steam /home/x/steam none bind,nofail,x-systemd.requires-mounts-for=/mnt/games 0 0
+UUID=4444 /mnt/fuse ntfs-3g defaults,nofail 0 0
+UUID=7777 /mnt/done ntfs3 defaults,nofail 0 0
+UUID=5555 /mnt/bare ntfs
+   UUID=6666 /mnt/indented ntfs defaults,nofail 0 0
+FSTAB
+}
+
+# Every `ntfs` row without an errors= option gains errors=remount-ro, the type
+# possibly ending the row; the rest passes through: comments (a commented-out
+# ntfs row), other types, ntfs rows with an errors= value of their own, a `#`
+# inside a label (docs/gotchas.md § A `#` inside an fstab field is not a
+# comment).
+self_test_fstab_rewrite() {
+    local dir=$1
+
+    printf '%s\n' '#LABEL=Old /mnt/old ntfs defaults 0 0' \
+        'UUID=1111 /  btrfs subvol=root 0 0' \
+        'UUID=2222 /mnt/win ntfs defaults,nofail,uid=1000 0 0' \
+        'UUID=3333 /mnt/games   ntfs   nofail,x-systemd.device-timeout=10 0 0' \
+        'UUID=4444 /mnt/fuse ntfs-3g defaults,nofail 0 0' \
+        'UUID=7777 /mnt/done ntfs3 defaults,nofail 0 0' \
+        'UUID=5555 /mnt/bare ntfs' \
+        '   UUID=6666 /mnt/indented ntfs defaults,nofail 0 0' \
+        'UUID=8888 /mnt/hand ntfs nofail,errors=continue 0 0' \
+        'UUID=9999 /mnt/first ntfs errors=remount-ro,nofail 0 0' \
+        'LABEL=Disco#2 /mnt/Disco2 ntfs defaults 0 0' > "$dir/in"
+    printf '%s\n' '#LABEL=Old /mnt/old ntfs defaults 0 0' \
+        'UUID=1111 /  btrfs subvol=root 0 0' \
+        'UUID=2222 /mnt/win ntfs defaults,nofail,uid=1000,errors=remount-ro 0 0' \
+        'UUID=3333 /mnt/games   ntfs   nofail,x-systemd.device-timeout=10,errors=remount-ro 0 0' \
+        'UUID=4444 /mnt/fuse ntfs-3g defaults,nofail 0 0' \
+        'UUID=7777 /mnt/done ntfs3 defaults,nofail 0 0' \
+        'UUID=5555 /mnt/bare ntfs errors=remount-ro' \
+        '   UUID=6666 /mnt/indented ntfs defaults,nofail,errors=remount-ro 0 0' \
+        'UUID=8888 /mnt/hand ntfs nofail,errors=continue 0 0' \
+        'UUID=9999 /mnt/first ntfs errors=remount-ro,nofail 0 0' \
+        'LABEL=Disco#2 /mnt/Disco2 ntfs defaults,errors=remount-ro 0 0' > "$dir/expected"
+    add_ntfs_errors_option "$dir/in" "$dir/out"
+
+    if ! diff "$dir/expected" "$dir/out" > /dev/null; then
+        fail_self_test "the errors= rewrite gave another table:" \
+            "$(diff "$dir/expected" "$dir/out" | tr '\n' ' ')"
+    fi
+}
+
+# Known-bad 6: the verification compares error sets. A stale nofail row is an
+# error before and after the rewrite (docs/gotchas.md § `findmnt --verify`
+# reports an unplugged `nofail` volume as an error), so the rewrite adds
+# nothing; a row on a mount point that does not exist adds one and is refused;
+# a 40-row table keeps every error line on its mount point; a findmnt without
+# a verdict is refused.
+self_test_fstab_verify_compares_errors() {
+    local dir=$1
+    local added row
+
+    printf 'UUID=DEAD /mnt/unplugged ntfs defaults,nofail 0 0\n' > "$dir/stale"
+    add_ntfs_errors_option "$dir/stale" "$dir/stale-rewritten"
+
+    if [ "$(fstab_verify_errors "$dir/stale" | grep -c '')" -eq 0 ]; then
+        fail_self_test "findmnt --verify reports no error on a stale nofail row: the" \
+            "comparison would have nothing to compare"
+    fi
+
+    added=$(new_verify_errors "$dir/stale" "$dir/stale-rewritten")
+
+    if [ -n "$added" ]; then
+        fail_self_test "the errors= rewrite of a stale row counts as a new error: $added"
+    fi
+
+    printf 'UUID=BEEF /mnt/never/existed ntfs3 defaults,nofail 0 0\n' >> "$dir/stale-rewritten"
+    added=$(new_verify_errors "$dir/stale" "$dir/stale-rewritten")
+
+    if [ -z "$added" ]; then
+        fail_self_test "a row added with its own errors was not reported as new"
+    fi
+
+    # findmnt's findings and its summary come on two streams: past 4096
+    # bytes of findings a block-buffered stdout would be cut mid-line by the
+    # summary, and the fragment would pass for a mount point.
+    for row in $(seq 1 40); do
+        printf 'UUID=%08d /mnt/big-%02d ntfs defaults,nofail 0 0\n' "$row" "$row"
+    done > "$dir/big"
+
+    if [ "$(fstab_verify_errors "$dir/big" | grep -vc '^/mnt/big-')" -ne 0 ]; then
+        fail_self_test "an error line of a 40-row table is not prefixed by its mount point:" \
+            "$(fstab_verify_errors "$dir/big" | grep -v '^/mnt/big-')"
+    fi
+
+    # A findmnt that dies on a malformed row after its diagnostic (a stub
+    # here) is no verdict: the write path refuses it instead of reading an
+    # empty error set as clean.
+    mkdir -p "$dir/bin"
+    printf '#!/usr/bin/env bash\necho "findmnt: parse error at line 2 -- ignored" >&2\nexit 139\n' \
+        > "$dir/bin/findmnt"
+    chmod +x "$dir/bin/findmnt"
+
+    if PATH=$dir/bin:$PATH fstab_verify_answers "$dir/stale"; then
+        fail_self_test "a findmnt that dies after a diagnostic passed as a verdict"
+    fi
+
+    if ! fstab_verify_answers "$dir/stale"; then
+        fail_self_test "findmnt --verify answered on the stale row and was refused"
+    fi
+}
+
+# self_test_unmigrated_fixture <dir> <fstab>: a host that already boots this
 # image unsigned, with layered packages and a local initramfs, and a rollback
 # deployment behind the booted one.
 self_test_unmigrated_fixture() {
     local fixture=$1
+    local fstab=$2
 
     mkdir -p "$fixture/cmd" "$fixture/etc/containers" "$fixture/etc/modprobe.d" \
         "$fixture/etc/modules-load.d" "$fixture/usr/share/ublue-os"
+    cp "$fstab" "$fixture/etc/fstab"
     printf '{"image-name":"bazzite-mx"}\n' > "$fixture/usr/share/ublue-os/image-info.json"
     cat > "$fixture/etc/containers/policy.json" << 'POLICY'
 {"default": [{"type": "reject"}],
@@ -659,6 +896,7 @@ self_test_plan_lists_the_steps() {
     if ! grep -q '3. rpm-ostree uninstall --all  (1password teams-for-linux)' <<< "$out" \
         || ! grep -q '4. rpm-ostree initramfs --disable' <<< "$out" \
         || ! grep -qF "$rebase_step" <<< "$out" \
+        || ! grep -q '6. /etc/fstab: errors=remount-ro on 4 ntfs row(s)' <<< "$out" \
         || ! grep -q "plan: ready for 'ujust migrate apply 44.20260903'" <<< "$out"; then
         echo "self-test: the plan does not list the expected steps:"
         echo "$out"
@@ -733,7 +971,7 @@ POLICY
     fi
 }
 
-# Already migrated: steps 3 and 5 skipped, residue reported (an ntfsplus
+# Already migrated: steps 3, 5 and 6 skipped, residue reported (an ntfsplus
 # file, a karg, a modules-load file naming msi-ec).
 self_test_plan_on_migrated_host() {
     local good=$1
@@ -747,6 +985,7 @@ self_test_plan_on_migrated_host() {
     printf 'blacklist ntfsplus\n' > "$fixture/etc/modprobe.d/ntfsplus.conf"
     printf 'msi-ec\n' > "$fixture/etc/modules-load.d/msi-ec.conf"
     printf 'root=UUID=x rw module_blacklist=ntfsplus\n' > "$fixture/cmd/kargs"
+    add_ntfs_errors_option "$good/etc/fstab" "$fixture/etc/fstab"
     self_test_migrated_status "$fixture/cmd/rpm-ostree-status.json"
 
     if ! out=$(FIXTURE=$fixture TAG=stable cmd_plan); then
@@ -755,8 +994,41 @@ self_test_plan_on_migrated_host() {
 
     if ! grep -q '3. (nothing layered: skipped)' <<< "$out" \
         || ! grep -q '5. (origin already' <<< "$out" \
+        || ! grep -qF '6. (no ntfs row without errors= in fstab: skipped)' <<< "$out" \
         || ! grep -qF "$residue_step" <<< "$out"; then
         echo "self-test: the migrated plan does not skip or does not report the residue:"
+        echo "$out"
+        exit 1
+    fi
+}
+
+# A migrated MSI host with the file the NTFSPLUS opt-in wrote, in its text:
+# that file is residue, the setup-msi one is not.
+# Known-bad: a registries.d file of the host's own for another registry,
+# which shadows nothing and asks for no step 0.
+self_test_plan_on_ntfsplus_optin_file() {
+    local good=$1
+    local fixture=$2
+    local out
+
+    mkdir -p "$fixture"
+    cp -a "$good/." "$fixture/"
+    printf '%s\n' '# bazzite-mx: NTFSPLUS opt-in of this host. A file of this name in' \
+        '# /etc/modprobe.d masks /usr/lib/modprobe.d/bazzite-mx-ntfsplus.conf.' \
+        '# Written by ujust setup-ntfsplus enable, removed by disable.' \
+        > "$fixture/etc/modprobe.d/bazzite-mx-ntfsplus.conf"
+    printf 'msi-ec\nacpi_ec\n' > "$fixture/etc/modules-load.d/bazzite-mx-msi.conf"
+    printf 'A    containers/registries.d/quay.io-mine.yaml\n' >> "$fixture/cmd/config-diff"
+    add_ntfs_errors_option "$good/etc/fstab" "$fixture/etc/fstab"
+    self_test_migrated_status "$fixture/cmd/rpm-ostree-status.json"
+
+    if ! out=$(FIXTURE=$fixture TAG=stable cmd_plan); then
+        fail_self_test "plan failed on the opt-in file fixture: $out"
+    fi
+
+    if ! grep -qx '  6b. remove residue: /etc/modprobe.d/bazzite-mx-ntfsplus.conf' <<< "$out" \
+        || grep -q '^  0\.' <<< "$out"; then
+        echo "self-test: the opt-in file is not the only residue, or a step 0 came up:"
         echo "$out"
         exit 1
     fi
@@ -886,6 +1158,53 @@ self_test_apply_refuses_a_running_update() {
     fi
 }
 
+# Known-bad: the summary printed a point with a space as fstab writes it,
+# `\040`, while verify-host prints it as libmount reads it.
+self_test_plan_prints_points_unescaped() {
+    local good=$1
+    local fixture=$2
+    local out
+
+    mkdir -p "$fixture"
+    cp -a "$good/." "$fixture/"
+    printf 'UUID=9999 /mnt/sp\\040ace ntfs defaults,nofail 0 0\n' >> "$fixture/etc/fstab"
+
+    if ! out=$(FIXTURE=$fixture TAG=stable cmd_plan); then
+        fail_self_test "plan failed on the fixture with a spaced point: $(tail -n1 <<< "$out")"
+    fi
+
+    if ! grep -qE '^  ntfs rows without errors= +.* /mnt/sp ace$' <<< "$out"; then
+        fail_self_test "plan prints a spaced point escaped: $(grep 'ntfs rows without' <<< "$out")"
+    fi
+}
+
+# Known-bad: the write path took a rewritten table that adds a findmnt
+# --verify error, or one findmnt gives no verdict on. Each refusal exits
+# before /etc/fstab is touched; the substitution keeps the exit in a subshell.
+self_test_write_refuses() {
+    local dir=$1 out
+
+    mkdir -p "$dir/verify-stub"
+    printf '%s\n' '#!/usr/bin/env bash' \
+        'if [ "${*: -1}" != /etc/fstab ]; then printf "/mnt/new\n   [E] stub\n"; fi' \
+        'echo "0 parse errors, 1 error, 0 warnings" >&2' > "$dir/verify-stub/findmnt"
+    chmod +x "$dir/verify-stub/findmnt"
+    printf 'UUID=1 /mnt/new ntfs3 defaults 0 0\n' > "$dir/refused"
+
+    if out=$(PATH=$dir/verify-stub:$PATH write_rewritten_fstab "$dir/refused" "$dir" 2>&1) \
+        || ! grep -q '^ERROR: the rewritten fstab adds findmnt --verify error' <<< "$out"; then
+        fail_self_test "the write path passed a table that adds an error: $out"
+    fi
+
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/verify-stub/findmnt"
+    printf 'UUID=1 /mnt/new ntfs3 defaults 0 0\n' > "$dir/refused"
+
+    if out=$(PATH=$dir/verify-stub:$PATH write_rewritten_fstab "$dir/refused" "$dir" 2>&1) \
+        || ! grep -q '^ERROR: findmnt --verify gave no verdict' <<< "$out"; then
+        fail_self_test "the write path passed a table findmnt gave no verdict on: $out"
+    fi
+}
+
 # Known-bad: a step not confirmed ran anyway. Without a terminal nothing is
 # confirmed: step 0 skips and steps 3, 4 and 5 abort, none reaching cp or
 # rpm-ostree.
@@ -915,19 +1234,28 @@ self_test() {
     # shellcheck disable=SC2064  # expand now: the local is gone at EXIT
     trap "rm -rf '$dir'" EXIT
 
-    self_test_unmigrated_fixture "$dir/fx"
+    self_test_fstab "$dir/fstab"
+    self_test_fstab_rewrite "$dir"
+    self_test_fstab_verify_compares_errors "$dir"
+    self_test_write_refuses "$dir"
+
+    self_test_unmigrated_fixture "$dir/fx" "$dir/fstab"
     self_test_plan_lists_the_steps "$dir/fx"
     self_test_plan_refuses_pending "$dir/fx" "$dir/fx2"
     self_test_plan_refuses_missing_scope "$dir/fx" "$dir/fx3"
     self_test_plan_on_migrated_host "$dir/fx" "$dir/fx4"
+    self_test_plan_on_ntfsplus_optin_file "$dir/fx" "$dir/fx5"
+    self_test_plan_prints_points_unescaped "$dir/fx" "$dir/fx7"
     self_test_timer_restored_at_exit
     self_test_step_2_sets_the_flag_in_this_shell "$dir"
     self_test_backup_root_taken_back "$dir"
     self_test_apply_refuses_a_running_update
     self_test_unconfirmed_steps_change_nothing "$dir"
 
-    echo "self-test ok: plan lists the steps, pending / missing scope / local policy refused," \
-        "residue reported," \
+    echo "self-test ok: fstab rewrite exact and judged on the errors it adds, findmnt without" \
+        "a verdict refused, plan lists the steps, pending / missing scope / local policy refused," \
+        "residue reported, the NTFSPLUS opt-in file as residue with no step 0," \
+        "spaced points unescaped," \
         "timer flag at script scope, set by step 2 in this shell, restored at EXIT or reported," \
         "a planted backup root taken back, apply refused while an update runs," \
         "steps not confirmed change nothing"

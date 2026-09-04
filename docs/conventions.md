@@ -33,10 +33,11 @@ hold for every file the lint job covers: build scripts, libraries, tests, the km
 libexec helpers, the boot hooks, the CI scripts and the edit hook. They hold in the same spirit
 for every other file of the repo: a workflow, the Containerfile, a justfile, a Plasma update
 script, a `.repo` or `.conf` file gets the same blank lines between its steps, the same 100
-columns and comments that carry a reason, never a restatement. The shapes and the width are
-checked by `.github/scripts/check-form.sh`, which the edit hook runs on every shell file an
-edit touches and the `lint` job on the whole shell catalogue; a line that holds a banned shape
-as data ends in `# form: literal`. The rest is checked by hand at review, like § Prose.
+columns and comments that carry a reason, never a restatement. Each rule carries one
+before/after pair, the after from the repo. The shapes and the width are checked by
+`.github/scripts/check-form.sh`, which the edit hook runs on every shell file an edit touches
+and the `lint` job on the whole shell catalogue; a line that holds a banned shape as data ends
+in `# form: literal`. The rest is checked by hand at review, like § Prose.
 
 - **Control flow is written as `if … then … fi`.** `cmd || return 1`, `a && b || c`,
   `! cmd || die`, `cmd || { … }` and a subshell `( … ) ||` used as a guard are out: they hide
@@ -127,11 +128,38 @@ as data ends in `# form: literal`. The rest is checked by hand at review, like �
 - **One action per line.** No `a; b`, no `if …; then a; else b; fi` on one line, one command
   per line inside a branch, a `case` arm on its own lines.
 
+  ```bash
+  # before
+  if [ -n "$FIXTURE" ]; then awk -v t="$1" '$1 == t { print $2 }' "$FIXTURE/cmd/mounts"; else findmnt -n -o FSTYPE --mountpoint "$1" 2> /dev/null || true; fi
+  # after, host.sh
+  if [ -n "$FIXTURE" ]; then
+      MOUNT_TARGET="$mount_point" awk '{
+          …
+      }' "$FIXTURE/cmd/mounts" | tail -n 1
+      return 0
+  fi
+
+  findmnt -n -o FSTYPE --mountpoint "$mount_point" 2> /dev/null | tail -n 1 || true
+  ```
+
 - **Blank lines separate the steps.** One after the `local` line, one between the steps of a
   function (gather, check, act, report), one around each `if` block that is not the function's
   only statement. A file with more than a handful of functions groups them under banners,
   `# --- <group> ---` padded to 80 columns, in the order a reader needs them: helpers first,
   commands after, `main` last.
+
+  ```bash
+  # before: the steps of step_6_fstab_ntfs_errors run on as one block
+  # after, bazzite-mx-migrate
+      local backup=$1
+      local rewritten rows_left
+
+      if [ -z "$NTFS_ROWS" ]; then
+          return 0
+      fi
+
+      echo "step 6: ntfs rows of fstab without an errors= option:"
+  ```
 
 - **A line stops at 100 columns.** A long command breaks after `\` with one argument per line;
   a long pattern or message goes into a variable named for what it holds. The one exception is
@@ -149,12 +177,12 @@ as data ends in `# form: literal`. The rest is checked by hand at review, like �
   ```
 
 - **A name says what the function does or what the variable holds.** No private vocabulary:
-  `need_root` is `require_root`, `f` is `host_file`. `die` is named by its effect: `fail_build`
-  in `lib/log.sh` (prints `FAIL:`, the build stops), `exit_with_error` in the host helpers
-  (prints `ERROR:`, the command stops) and in the CI scripts (`.github/scripts/lib.sh`, prints
-  `<script>: …`, the script stops), where `print_error` prints the same line and returns 1 for
-  a function a caller runs under `if`. A function a caller runs under `if` is named as the
-  question its status answers: `module_loaded`, `has_recipe`.
+  `need_root` is `require_root`, `f` is `host_file`, `t` is `mount_point`. `die` is named by its
+  effect: `fail_build` in `lib/log.sh` (prints `FAIL:`, the build stops), `exit_with_error` in
+  the host helpers (prints `ERROR:`, the command stops) and in the CI scripts
+  (`.github/scripts/lib.sh`, prints `<script>: …`, the script stops), where `print_error` prints
+  the same line and returns 1 for a function a caller runs under `if`. A function a caller runs
+  under `if` is named as the question its status answers: `module_loaded`, `has_recipe`.
 
   ```bash
   # before
@@ -186,10 +214,35 @@ as data ends in `# form: literal`. The rest is checked by hand at review, like �
   measurements, the bug that forced it) lives in `docs/gotchas.md` and the comment points at
   its heading.
 
+  ```bash
+  # before (a measurement in the comment)
+  # … findmnt dies of SIGSEGV, status 139, on a row of fewer than three fields and
+  # prints no summary (measured 2026-09-07, util-linux 2.41.5) …
+  # after, host.sh
+  # fstab_verify_answers <fstab>: findmnt gave its verdict on that table, the
+  # summary line it ends with (…). A findmnt that never ran prints
+  # nothing, one that died on a malformed row prints its diagnostic and no
+  # summary (docs/gotchas.md § `findmnt --verify` reports an unplugged `nofail`
+  # volume as an error); a caller judging a rewrite refuses both instead of
+  # reading an empty error set as a clean one.
+  ```
+
 - **A function stays short**, about 25 statements as the guide (blank and comment lines do not
   count): a function that does two things is two functions, and a step sequence reads as a list
   of calls. A library is written to share functions between scripts, never to make one file
   shorter: a long script stays one file, grouped under banners.
+
+  ```bash
+  # before: one self_test holding every fixture and assertion inline
+  # after, bazzite-mx-migrate: self_test calls checks named for what they prove
+  self_test_fstab_rewrite "$dir"
+  self_test_fstab_verify_compares_errors "$dir"
+  self_test_write_refuses "$dir"
+  …
+  self_test_plan_lists_the_steps "$dir/fx"
+  …
+  self_test_unconfirmed_steps_change_nothing "$dir"
+  ```
 
 - **Output to the user is a complete sentence**: what happened, and for a failure what to do
   next. The prefixes a contract reads (`OK:`, `FAIL:`, `ERROR:`, `self-test ok`) stay.
@@ -253,8 +306,8 @@ known-bad still red after it. The rules above add to the earlier bullets of this
   with `-x`: the link dangles in the build.
 - An out-of-tree kernel module is a `build_files/kmods/<name>/source.env`, built by the
   kmod-builder stage against the base's own `kernel-devel`. It carries `URL`, the full
-  `COMMIT`, `KO_NAME`, `KO_BUILD_PATH` and `KO_VERSION`. The builder proves the checkout is the
-  pinned commit.
+  `COMMIT`, `KO_NAME`, `KO_BUILD_PATH`, `KO_VERSION`, and `KO_BUILD_ARGS` when kbuild needs a
+  config symbol forced on the make line. The builder proves the checkout is the pinned commit.
   Then `assert_module` requires a readable module stamped for the image's kernel and, when
   `KO_VERSION` is set, that `MODULE_VERSION`. The modules are unsigned: when modprobe refuses
   one, the helper's `ERROR:` line carries modprobe's own reason and names Secure Boot as the

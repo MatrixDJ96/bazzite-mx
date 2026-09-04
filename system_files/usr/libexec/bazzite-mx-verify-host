@@ -2,7 +2,8 @@
 # Is this host where the image expects it? The checks behind `ujust
 # verify-host`: the deployment bootc-compatible, the origin signed and on
 # `stable`, nothing layered, the image's signing policy in force, the MSI
-# modules on an MSI host, the flavour matching the GPU, no residue of an earlier
+# modules on an MSI host, the flavour matching the GPU, the NTFS rows of fstab
+# (ntfs with an errors= option, or ntfs3) and mounted, no residue of an earlier
 # setup, the Firefox Flatpak reported (the system scope and the invoking
 # user's), the .repo files the image adds to the base as it ships them.
 #
@@ -361,6 +362,67 @@ check_gpu_matches_flavour() {
 
 # --- 7. NTFS ------------------------------------------------------------------
 
+# check_fstab_row <source> <target> <type> <options>: the row on ntfs (with an
+# errors= option) or ntfs3, and the volume mounted with it. Not mounted is what
+# the row asks for when it carries noauto, and a row with x-systemd.automount
+# carries autofs at its target until the first access; a volume whose device is
+# absent (an external disk unplugged) is a failure only when the row lacks
+# nofail: with it the boot went on without the volume, as the row asks. Fields
+# are read as fstab(5) writes them (unescape_fstab_field, host.sh).
+check_fstab_row() {
+    local source=$1
+    local target
+    local type=$3
+    local options=,$4,
+    local mounted device=
+
+    target=$(unescape_fstab_field "$2")
+
+    if [ "$type" != ntfs ] && [ "$type" != ntfs3 ]; then
+        report_fail "fstab: $target uses type $type, not ntfs" \
+            "(edit the row: ntfs, or ntfs-3g for FUSE)"
+        return 0
+    fi
+
+    # Under errors=continue, NTFSPLUS's default, a dirty or hibernated volume
+    # mounts writable (docs/divergences.md § NTFSPLUS on every flavour).
+    if [ "$type" = ntfs ] && [[ $options != *,errors=* ]]; then
+        report_fail "fstab: $target is ntfs without errors=remount-ro" \
+            "(ujust migrate adds it)"
+        return 0
+    fi
+
+    mounted=$(mount_fstype "$target")
+
+    if [ -z "$mounted" ] && [[ $options != *,noauto,* ]]; then
+        device=$(src_block_device "$source")
+    fi
+
+    if [ "$mounted" = "$type" ]; then
+        report_ok "fstab: $target is $type and mounted with $type"
+    elif [ "$mounted" = autofs ] && [[ $options == *,x-systemd.automount,* ]]; then
+        report_ok "fstab: $target is $type, armed by systemd's automount"
+    elif [ -n "$mounted" ]; then
+        report_fail "fstab: $target is $type in fstab but mounted as $mounted" \
+            "(umount and mount it again, or reboot)"
+    elif [[ $options == *,noauto,* ]]; then
+        report_info "fstab: $target ($type, noauto): not mounted, as the row asks"
+    elif [ -n "$device" ] && [ "$type" = ntfs ]; then
+        # NTFSPLUS mounts a dirty volume, read-only under errors=remount-ro.
+        report_fail "fstab: $target is ntfs but not mounted" \
+            "(journalctl -b | grep ntfs names the option NTFSPLUS refused; an unknown" \
+            "filesystem type 'ntfs' is the module refused with Secure Boot on)"
+    elif [ -n "$device" ]; then
+        report_fail "fstab: $target is $type but not mounted" \
+            "(dirty volume? journalctl -b | grep $type)"
+    elif [[ $options == *,nofail,* ]]; then
+        report_info "fstab: $target ($type, nofail): device absent, not mounted"
+    else
+        report_fail "fstab: $target is $type but its device $source is absent" \
+            "(the row lacks nofail: the boot waits for it)"
+    fi
+}
+
 check_ntfs_residue() {
     local residue kargs
 
@@ -386,6 +448,40 @@ check_ntfs_residue() {
     else
         report_ok "no ntfsplus kernel argument"
     fi
+}
+
+# The NTFS rows of fstab on ntfs or ntfs3, each mounted as such; ntfs3 rows are
+# also reported as INFO, the host's choice, and ntfs-3g (FUSE) ones only so.
+check_ntfs() {
+    local fstab fuse_rows ntfs3_rows rows source target type options
+
+    fstab=$(host_file /etc/fstab)
+    ntfs3_rows=$(fstab_entries "$fstab" | awk '$3 == "ntfs3" { print $2 }' || true)
+
+    if [ -n "$ntfs3_rows" ]; then
+        report_info "fstab rows on ntfs3 (the host's choice over NTFSPLUS):" \
+            "$(unescaped_on_one_line <<< "$ntfs3_rows")"
+    fi
+
+    fuse_rows=$(fstab_entries "$fstab" | awk '$3 == "ntfs-3g" { print $2 }' || true)
+
+    if [ -n "$fuse_rows" ]; then
+        report_info "fstab rows on ntfs-3g (FUSE, the explicit route, left alone):" \
+            "$(unescaped_on_one_line <<< "$fuse_rows")"
+    fi
+
+    rows=$(fstab_entries "$fstab" \
+        | awk '$3 ~ /^ntfs/ { if ($3 != "ntfs-3g") print $1, $2, $3, $4 }' || true)
+
+    if [ -z "$rows" ]; then
+        report_skip "no NTFS entry in fstab"
+    else
+        while read -r source target type options; do
+            check_fstab_row "$source" "$target" "$type" "$options"
+        done <<< "$rows"
+    fi
+
+    check_ntfs_residue
 }
 
 # --- 8. Flatpaks --------------------------------------------------------------
@@ -452,7 +548,7 @@ main() {
     check_signing_policy
     check_msi_modules
     check_gpu_matches_flavour
-    check_ntfs_residue
+    check_ntfs
     check_flatpaks
     check_image_repos
 

@@ -31,6 +31,9 @@ not run this command as root". Every check passes when:
   and on a Micro-Star system with the `setup-msi` opt-in both modules are loaded;
 - an NVIDIA GPU on the bus means an NVIDIA flavour with the `nvidia` module loaded, and no
   NVIDIA GPU means `bazzite-mx`;
+- every `ntfs` row of `/etc/fstab` carries an `errors=` option, and every row on `ntfs` or
+  `ntfs3` is mounted with its type. Rows on `ntfs3` and `ntfs-3g` are the host's choice,
+  reported as `INFO:`, the `ntfs-3g` ones without further checks;
 - no ntfsplus residue is left under `/etc/modprobe.d` or `/etc/modules-load.d`, a file of the
   host's own or a leftover `bazzite-mx-ntfsplus.conf`, and no kernel argument mentions
   ntfsplus;
@@ -41,6 +44,10 @@ not run this command as root". Every check passes when:
   still installed next to the RPM is an `INFO:` line, not a failure.
 
 ## A Bazzite host that has never run this image
+
+The image requires Secure Boot off, which `bootctl status` shows: its NTFSPLUS module is
+unsigned, and with Secure Boot on the type `ntfs` loses NTFSPLUS
+([`divergences.md`](divergences.md) § NTFSPLUS on every flavour).
 
 ### The first rebase goes through the unsigned transport
 
@@ -58,6 +65,15 @@ systemctl reboot
 `<image>` is `bazzite-mx`, `bazzite-mx-nvidia-open` or `bazzite-mx-nvidia`. The rebase keeps
 whatever the host had layered and its initramfs setting; the next step removes them, on a
 deployment whose policy knows the scope.
+
+An `ntfs` row of `fstab` is ntfs-3g on Bazzite, through `mount.ntfs`, and NTFSPLUS on the image,
+which has no `mount.ntfs`. NTFSPLUS refuses every option it does not know, ntfs-3g's own among
+them (`big_writes`, `locale=`, `remove_hiberfile`, `permissions`; the accepted list is in
+[`divergences.md`](divergences.md) § NTFSPLUS on every flavour), so its first boot fails a row
+carrying one, and a row without `nofail` stops that boot in emergency mode. The previous
+deployment in the boot menu still boots: fix the rows there and run the rebase again, the failed
+deployment keeping its own `/etc` (`rpm-ostree(1)`, `rollback`). Before the rebase, take those
+options out of the rows, or switch the rows to `ntfs-3g` to stay on FUSE, or give them `nofail`.
 
 One transaction can fail here. A package installed from a file that the new image also ships is
 reinstalled verbatim on the new base, and rpm-ostree refuses the depsolve. The same package
@@ -109,6 +125,7 @@ it is the scope precondition.
 | 3    | `rpm-ostree uninstall --all`, the packages named in the step line                                                         | layered, local and inactive requests alike: bootc counts all of them                      |
 | 4    | `rpm-ostree initramfs --disable`                                                                                          | the image's initramfs boots; without this bootc stays incompatible                        |
 | 5    | `rpm-ostree rebase ostree-image-signed:docker://ghcr.io/matrixdj96/<image>:<tag>`                                         | same image, signed transport; rpm-ostree keeps every removal visible                      |
+| 6    | verifies the rewritten `fstab` against the current one, writes it, reloads: `ntfs` rows gain `errors=remount-ro`          | NTFSPLUS mounts a dirty or hibernated volume read-only only under it                      |
 | 6b   | moves ntfsplus files and modules-load files naming `msi_ec` or `acpi_ec` to the backup, deletes ntfsplus kernel arguments | a host file or kernel argument that names those modules                                   |
 | 7    | prints what stays with each user, then `rpm-ostree status`                                                                | nothing is uninstalled from Flatpak                                                       |
 
@@ -117,16 +134,28 @@ queued after a failure), since rpm-ostree would refuse its steps.
 
 Step 2 writes its backups under `/var/tmp/bazzite-mx-migrate/<timestamp>/` and restarts
 `uupd.timer` on every exit path, `ERROR: uupd.timer not started again` and exit 1 when the
-restart fails. Nothing puts those backups back: a file step 6b moved is under `<backup>/etc/…`
-at its original path. `systemd-tmpfiles` removes what sits under `/var/tmp` for 30 days
-(`/usr/lib/tmpfiles.d/tmp.conf`), so a backup wanted longer is copied elsewhere.
+restart fails. Nothing puts those backups back: `fstab` goes back with
+`sudo cp -a <backup>/fstab /etc/fstab && sudo systemctl daemon-reload`, and a file step 6b
+moved is under `<backup>/etc/…` at its original path. `systemd-tmpfiles` removes what sits
+under `/var/tmp` for 30 days (`/usr/lib/tmpfiles.d/tmp.conf`), so a backup wanted longer is
+copied elsewhere.
 
-Declining step 3, 4 or 5 aborts the run, an error in steps 3 to 6b stops it, and the line that
-ends the run names what it changed, which stands: the backups of step 2 and the pinned booted
-deployment, the restore of step 0 when it was confirmed, the pending deployment when step 3, 4,
-5 or 6b had queued one. With a pending deployment the next `apply` needs a reboot into it or
-`rpm-ostree cleanup -p`; without one `apply` can run again at once. Declining step 6b only
-skips it.
+Step 6 adds `errors=remount-ro` to every `ntfs` row without an `errors=` option, keeps the other
+options, shows the diff and checks that no such row is left. It then compares `findmnt --verify`
+on the current table and on the rewritten one: an error the rewrite adds stops the run before
+`fstab` is written, an error both tables carry (a `nofail` row whose volume is unplugged, which
+findmnt(8) reports as an error all the same) is counted and kept. The table is installed,
+`systemctl daemon-reload` runs, and the count of pre-existing errors is printed. Declining step
+3, 4 or 5 aborts the run, an error in steps 3 to 6b stops it, and the line that ends the run
+names what it changed, which stands: the backups of step 2 and the pinned booted deployment, the
+restore of step 0 when it was confirmed, the pending deployment when step 3, 4, 5 or 6b had
+queued one, the `fstab` rewrite of step 6 when it was written. With a pending deployment the
+next `apply` needs a reboot into it or `rpm-ostree cleanup -p`; without one `apply` can run
+again at once. Declining step 6 or 6b only skips it.
+
+Step 6 keeps an option NTFSPLUS does not know, which it refuses at the next boot (§ The first
+rebase goes through the unsigned transport), and `findmnt --verify` lists mount options without
+judging them: take it out of `/etc/fstab` before `apply`.
 
 The rpm-ostree steps (3, 4, 5, and 6b's kernel arguments) land in one pending deployment. What
 step 7 prints:
@@ -180,6 +209,11 @@ reason when a check could not run; this is the map from the line to the recipe.
 | `NVIDIA GPU present but the image is ...`                                     | wrong flavour, or a GPU no NVIDIA flavour drives: older than Maxwell, or passed to a guest   | a signed rebase, shown below; in the second case none: stay on `bazzite-mx`      |
 | `no NVIDIA GPU on the bus but the image is ...`                               | wrong flavour for the hardware                                                               | a signed rebase, shown below, to `bazzite-mx`                                    |
 | `nvidia module not loaded`                                                    | the driver did not come up, or the flavour's driver does not cover the GPU's generation      | `nvidia-smi`, `journalctl -k -b`; for that GPU, the signed rebase to its flavour |
+| `fstab: <target> is ntfs without errors=remount-ro`                           | a dirty or hibernated volume would mount writable                                            | `ujust migrate` adds the option                                                  |
+| `fstab: <target> uses type <type>, not ntfs`                                  | an NTFS row on neither kernel driver                                                         | edit the row: `ntfs`, or `ntfs-3g` for FUSE                                      |
+| `fstab: <target> is <type> but not mounted`                                   | on `ntfs3` usually a dirty volume, on `ntfs` a refused option or the module (Secure Boot on) | `journalctl -b \| grep ntfs`; dirty: full Windows shutdown or `ntfsfix -d <dev>` |
+| `fstab: <target> is <type> but its device <source> is absent`                 | the volume is unplugged and its row lacks `nofail`, so the boot waits for it                 | plug it in, or add `nofail` to the row                                           |
+| `fstab: <target> is <type> in fstab but mounted as <other>`                   | something else mounted it first                                                              | unmount and mount it again, or reboot                                            |
 | `ntfsplus residue: <files>` / `kernel arguments mention ntfsplus: ...`        | a host file or kernel argument that names ntfsplus                                           | `ujust migrate` offers the removal                                               |
 | `/etc/yum.repos.d/<file> differs from the image's copy`                       | a host edit of a repository file the image ships, kept over every later copy by the merge    | `sudo cp -a /usr/etc/yum.repos.d/<file> /etc/yum.repos.d/`                       |
 | `cannot read the PCI bus: <reason>`                                           | `lspci` did not answer, so the flavour was never compared with the hardware                  | the reason is the tool's own; the check is not evidence either way               |
@@ -195,9 +229,17 @@ Maxwell, Pascal and Volta, and `bazzite-mx` for an older one
 sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/matrixdj96/<image>:stable
 ```
 
-One line is not a failure. `INFO: the Firefox Flatpak is still installed next to the RPM` asks
-for the profile copy above. Two more lines are skips: `not an MSI host` and
-`MSI host without the setup-msi opt-in`.
+The `<dev>` of `ntfsfix`, run as root, is the row's source as a device path, which
+`findfs UUID=<uuid>` prints for a `UUID=` source.
+
+Five lines are not failures. `INFO: the Firefox Flatpak is still installed next to the RPM`
+asks for the profile copy above. `INFO: fstab rows on ntfs3` reports volumes the host keeps off
+NTFSPLUS. `INFO: fstab rows on ntfs-3g` reports volumes deliberately left on FUSE.
+`INFO: fstab: <target> (<type>, nofail): device absent, not mounted` is an external volume that
+is not plugged in, which its `nofail` row allows for, and
+`INFO: fstab: <target> (<type>, noauto): not mounted, as the row asks` a volume mounted by
+hand. Three more lines are skips: `not an MSI host`, `MSI host without the setup-msi opt-in`
+and `no NTFS entry in fstab`.
 
 ## Notes per class of host
 
@@ -206,3 +248,7 @@ for the profile copy above. Two more lines are skips: `not an MSI host` and
 | AMD or Intel desktop | `bazzite-mx`                                                           | nothing beyond the recipe; the MSI check skips and no NVIDIA module is expected                       |
 | NVIDIA desktop       | `bazzite-mx-nvidia-open` from Turing, and `bazzite-mx-nvidia` to Volta | `verify-host` requires the `nvidia` module loaded; a GPU older than Maxwell stays on `bazzite-mx`     |
 | MSI laptop           | the flavour the GPU needs                                              | after the reboot, `ujust setup-msi enable`; the modules are unsigned, so check `bootctl status` first |
+
+A host with NTFS volumes is the one case worth planning: read its `fstab` rows before the first
+rebase (§ The first rebase goes through the unsigned transport), then run `ujust migrate` in
+its read-only form.

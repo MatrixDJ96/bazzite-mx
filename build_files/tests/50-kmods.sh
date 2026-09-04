@@ -23,8 +23,9 @@ source "$CTX/build_files/lib/kmod.sh"
 
 DEP_SNAPSHOT=$BUILD_STATE/modules.base.dep.gz
 # The recorded lines of the base's in-tree modules our updates/ builds displace
-# on purpose: msi-ec.
-DISPLACED_ON_PURPOSE='kernel/drivers/platform/x86/msi-ec.ko:'
+# on purpose: msi-ec, and ntfs where the kernel builds fs/ntfs.
+DISPLACED_ON_PURPOSE='kernel/drivers/platform/x86/msi-ec.ko:
+kernel/fs/ntfs/ntfs.ko:'
 HELPER=/usr/libexec/bazzite-mx-msi-setup
 TARBALL_TOP=MControlCenter-9.9-bin
 
