@@ -155,6 +155,50 @@ Checked and set with `gh`, each command run with the owner's OK. State MEASURED 
 | workflow states | GitHub disables the cron of a public repository after 60 days without a commit; scheduled runs do not count | `refresh-pins.sh --check`, class `workflow` | `gh api -X PUT repos/MatrixDJ96/bazzite-mx/actions/workflows/<id>/enable` |
 | Pages source | the landing page (decision 1.5e), arrives with `deploy-pages.yml` | `gh api repos/MatrixDJ96/bazzite-mx/pages` | with that commit |
 
+## A self-hosted runner for the build jobs
+
+The three build jobs of `reusable-build.yml` run on the runner the repository variable
+`BUILD_RUNNER` names, on `ubuntu-26.04` when it is unset; every other job stays on GitHub. The
+variable is the whole switch: `gh variable set BUILD_RUNNER --body <label>` moves the builds,
+`gh variable delete BUILD_RUNNER` moves them back, no commit either way. A runner that is
+offline while the variable names it holds the jobs in the queue for 24 hours, then GitHub
+fails them.
+
+A host needs rootless podman, skopeo, git, jq, curl, the runner's .NET libraries (libicu,
+krb5-libs, openssl-libs, zlib) and disk: 35 GB per instance at peak plus 13 GB of base image
+per storage. Instances build in parallel only when each has its own container storage and its
+own `TMPDIR`, both set in the runner's `.env`: the compose step prunes every unused image in
+the storage it sees, and buildah keeps cache mounts under `$TMPDIR/buildah-cache-<uid>`, so
+two instances sharing either delete or corrupt each other's work (measured 2026-09-04:
+`podman image prune -af` removed a sibling's tagged image; two dnf caches written at once
+failed the signature check). Measured the same day on a 28-thread desktop, main profile: three
+instances build the three flavours in 15 minutes wall (12.9, 13.8, 14.7 min; 100 GB over the
+idle disk at peak) against 26 minutes on `ubuntu-26.04`; one instance alone builds a flavour
+in 8 to 11 minutes. The torn writeback of [`gotchas.md`](gotchas.md) is a property of the
+runner's kernel: the post-compose probe of every main-profile run is the check a new kernel
+gets.
+
+Register as the user that owns the podman storage; the token comes from
+`gh api -X POST repos/MatrixDJ96/bazzite-mx/actions/runners/registration-token --jq .token`
+and lives one hour:
+
+```bash
+v=2.337.0
+curl -fsSLO "https://github.com/actions/runner/releases/download/v$v/actions-runner-linux-x64-$v.tar.gz"
+sha256sum -c <<< "70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613  actions-runner-linux-x64-$v.tar.gz"
+d=~/actions-runner-1 && mkdir -p "$d/tmp" && tar -xzf "actions-runner-linux-x64-$v.tar.gz" -C "$d"
+printf '[storage]\ndriver = "overlay"\ngraphroot = "%s"\nrunroot = "/run/user/%s/containers-runner-1"\n' ~/.local/share/containers/storage-runner-1 "$(id -u)" > "$d/storage.conf"
+printf 'CONTAINERS_STORAGE_CONF=%s/storage.conf\nTMPDIR=%s/tmp\n' "$d" "$d" > "$d/.env"
+"$d/config.sh" --unattended --url https://github.com/MatrixDJ96/bazzite-mx --token "$TOKEN" --name "$(hostname)-1" --labels <label> --replace
+```
+
+Each instance runs as a user service (`ExecStart=%h/actions-runner-%i/run.sh`,
+`Restart=always`, lingering on), not through its `svc.sh`: a system service that executes a
+script under the user's home dies at EXEC on SELinux, and rootless podman wants the user's
+session. A job cancelled mid-build leaves buildah working containers behind: `buildah rm
+--all` against that instance's storage once it is idle. Removal is `config.sh remove --token
+<token from .../runners/remove-token>`, then the directory, the storage and the unit go.
+
 ## Keeping the pins fresh
 
 Every `uses:` is pinned to a commit SHA with the version in a trailing comment, and the

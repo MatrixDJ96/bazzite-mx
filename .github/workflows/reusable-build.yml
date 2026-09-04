@@ -28,7 +28,9 @@ permissions: {}
 jobs:
   build:
     name: Build ${{ matrix.flavour }}
-    runs-on: ubuntu-26.04
+    # The variable names a self-hosted runner's label; unset, the build runs on
+    # GitHub (docs/workflow.md § A self-hosted runner for the build jobs).
+    runs-on: ${{ vars.BUILD_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 90
     # A job's permissions cannot depend on an input, so every caller grants the
     # publishing set and `if: inputs.publish` is what keeps a sandbox off GHCR.
