@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Kernel modules for the MSI laptop: msi-ec and acpi_ec under updates/ for the
-# image's one kernel, stamped for it, resolved by modprobe ahead of the
-# in-tree msi-ec, listed by depmod, not loaded at boot by the image; the
-# MControlCenter installer behind `ujust setup-msi` proven on a fixture with
-# a synthetic tarball, positive and known-bad; the recipe defined and runnable.
-# Loading the modules and MControlCenter's D-Bus helper are proven on the MSI
-# host in phase 4 (no hardware, no system bus in a build).
+# Smoke test of 50-kmods.sh: the staged modules under updates/, stamped for
+# the image's one kernel and preferred by modprobe, then the MControlCenter
+# installer exercised on a fixture root against synthetic tarballs. A build
+# has no MSI hardware and no system bus, so loading the modules is a host
+# proof.
+#
+# Usage: run by tests/run.sh inside the image (offline, on the cleaned tree).
+# Output: one `OK: <what>` or `FAIL: <what>` line per check, on stdout.
+# Exit status: 0 on any outcome; the runner judges the FAIL lines. The test
+# itself stops when kernel_version finds two kernels or none.
 set -euo pipefail
 
 # shellcheck source=lib.sh

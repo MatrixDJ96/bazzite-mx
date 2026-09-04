@@ -1,0 +1,588 @@
+#!/usr/bin/env bash
+# Switch one host between the ntfs3 driver and the NTFSPLUS driver the image
+# ships as the filesystem type "ntfs", blacklisted until the host opts in.
+# The root half of `ujust setup-ntfsplus`.
+#
+# Usage: bazzite-mx-ntfsplus-setup [status | enable | disable | --self-test]
+#   status       module, opt-in, driver, fstab rows by type, mounted volumes
+#                (the default; no root needed)
+#   enable       write the opt-in, prove the driver on a loop image, rewrite
+#                the ntfs3 rows of fstab to ntfs and remount them (root)
+#   disable      rewrite the ntfs rows back to ntfs3 and remount them, remove
+#                the opt-in and the backup, unload the driver (root)
+#   --self-test  the fstab rewrites, the status output and the alias probe on
+#                fixtures; stops at the first failed check
+#
+# Exit status: 0 done; 1 refused or failed, the reason on stderr as `ERROR: …`
+# (a failed self-test prints `self-test: …` on stdout instead).
+# Writes: the opt-in /etc/modprobe.d/bazzite-mx-ntfsplus.conf, /etc/fstab and
+# its backup /etc/fstab.bazzite-mx-ntfsplus.bak (taken before the first
+# rewrite), a probe image and mount point under /var/tmp removed before exit.
+# The last line of a green self-test starts with `self-test ok`, which
+# tests/55-ntfsplus.sh reads. FIXTURE=<dir> (host.sh) redirects the files
+# `status` reads under <dir>.
+set -euo pipefail
+
+# shellcheck source=../lib/bazzite-mx/host.sh
+source /usr/lib/bazzite-mx/host.sh
+
+MODULE=ntfs
+BACKUP=/etc/fstab.bazzite-mx-ntfsplus.bak
+PROBE_MB=64
+
+# --- fstab --------------------------------------------------------------------
+
+# The type column of every entry whose type is exactly <from> becomes <to>;
+# comments, blank lines and every other byte pass through unchanged.
+replace_fstab_type() {
+    local from=$1 to=$2 input=$3 output=$4
+    local device_and_mount_point='^([^#[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+)'
+
+    sed -E "s/${device_and_mount_point}${from}([[:space:]])/\\1${to}\\2/" "$input" > "$output"
+}
+
+fstab_rows_of_type() {
+    local fstab=$1 type=$2
+
+    fstab_entries "$fstab" | awk -v type="$type" '$3 == type'
+}
+
+mount_points_of_type() {
+    local fstab=$1 type=$2
+
+    fstab_rows_of_type "$fstab" "$type" | awk '{ print $2 }'
+}
+
+count_rows_of_type() {
+    local fstab=$1 type=$2
+
+    fstab_rows_of_type "$fstab" "$type" | grep -c ''
+}
+
+# --- the host -----------------------------------------------------------------
+
+# Empty when the image carries no ntfs module for the running kernel.
+module_path() {
+    modinfo -n "$MODULE" 2> /dev/null || true
+}
+
+# The type mounted at <mount point>, empty when nothing is. A fixture lists
+# "<mount point> <type>" lines under cmd/mounts.
+filesystem_mounted_at() {
+    local mount_point=$1
+
+    if [ -n "$FIXTURE" ]; then
+        awk -v target="$mount_point" '$1 == target { print $2 }' "$FIXTURE/cmd/mounts"
+        return 0
+    fi
+
+    findmnt -n -o FSTYPE --mountpoint "$mount_point" 2> /dev/null || true
+}
+
+# Status 0 when the kernel's own route, request_module("fs-ntfs"), would load
+# the driver, loaded now or not. The config is captured before the grep and
+# the dry run is --show-depends: docs/gotchas.md § `modprobe -n -v` is silent
+# for a loaded module.
+ntfs_alias_resolves() {
+    local config dry_run
+
+    if ! config=$(modprobe -c); then
+        return 1
+    fi
+    if grep -qx "blacklist $MODULE" <<< "$config"; then
+        return 1
+    fi
+
+    if ! dry_run=$(modprobe -n --show-depends "fs-$MODULE" 2> /dev/null); then
+        return 1
+    fi
+    grep -q '^insmod ' <<< "$dry_run"
+}
+
+# --- status -------------------------------------------------------------------
+
+show_status() {
+    local fstab type mount_points
+
+    if [ -n "$FIXTURE" ]; then
+        echo "module: fixture"
+    elif [ -n "$(module_path)" ]; then
+        echo "module: $(module_path) (kernel $(uname -r))"
+    else
+        echo "module: none for kernel $(uname -r): this image carries no ntfsplus"
+    fi
+
+    if ntfsplus_optin; then
+        echo "opt-in: active ($NTFSPLUS_OPTIN masks the image's blacklist)"
+    else
+        echo "opt-in: not active (the kernel never loads the driver on its own)"
+    fi
+
+    if ntfs_registered; then
+        echo "driver ntfs: registered (/proc/filesystems)"
+    else
+        echo "driver ntfs: not registered"
+    fi
+
+    fstab=$(host_file /etc/fstab)
+    for type in ntfs ntfs3 ntfs-3g; do
+        mount_points=$(mount_points_of_type "$fstab" "$type" | tr '\n' ' ' \
+            | sed 's/ $//;s/^$/none/')
+        echo "fstab $type: $mount_points"
+    done
+
+    if [ -z "$FIXTURE" ]; then
+        echo "mounted:"
+        findmnt -t ntfs,ntfs3,fuseblk -o TARGET,FSTYPE,SOURCE -n 2> /dev/null \
+            | sed 's/^/  /' || true
+    fi
+}
+
+# --- the runtime probe --------------------------------------------------------
+#
+# A module built against the wrong kernel API passes vermagic and modinfo and
+# dies at its first mount; at boot that mount fires before the journal is on
+# disk (docs/gotchas.md § A kernel module can pass vermagic and modinfo). So
+# a loop image is formatted, mounted by the kernel driver, written, remounted
+# and checksummed before a single fstab row changes. Every step returns a
+# status after printing its reason, and the caller removes the files.
+
+remove_probe_files() {
+    local mount_point=$1 image=$2
+
+    umount "$mount_point" 2> /dev/null || true
+    rmdir "$mount_point" 2> /dev/null || true
+    rm -f "$image"
+}
+
+format_and_mount_probe() {
+    local image=$1 mount_point=$2 mounted_as
+
+    truncate -s "${PROBE_MB}M" "$image"
+    if ! mkntfs -F -Q "$image" > /dev/null 2>&1; then
+        print_error "mkntfs failed on the $PROBE_MB MB probe image"
+        return 1
+    fi
+
+    if ! mount -t ntfs -o loop "$image" "$mount_point"; then
+        print_error "mount -t ntfs of the probe image failed (dmesg -T | tail)"
+        return 1
+    fi
+
+    mounted_as=$(findmnt -n -o FSTYPE --mountpoint "$mount_point")
+    if [ "$mounted_as" != ntfs ]; then
+        print_error "the probe mounted as $mounted_as, not with the kernel driver"
+        return 1
+    fi
+}
+
+write_probe_content() {
+    local mount_point=$1 i
+
+    if ! dd if=/dev/urandom of="$mount_point/blob" bs=1M count=8 status=none; then
+        print_error "write to the probe image failed"
+        return 1
+    fi
+
+    for i in $(seq 1 20); do
+        if ! mkdir "$mount_point/d$i" || ! : > "$mount_point/d$i/f"; then
+            print_error "directory entry $i on the probe image failed"
+            return 1
+        fi
+    done
+}
+
+probe_survives_remount() {
+    local image=$1 mount_point=$2 checksum_before=$3 checksum_after directories
+
+    if ! umount "$mount_point"; then
+        print_error "umount of the probe image failed"
+        return 1
+    fi
+    if ! mount -t ntfs -o loop "$image" "$mount_point"; then
+        print_error "second mount of the probe image failed"
+        return 1
+    fi
+
+    checksum_after=$(sha256sum "$mount_point/blob" | cut -d' ' -f1)
+    if [ "$checksum_after" != "$checksum_before" ]; then
+        print_error "the probe file changed across a remount"
+        return 1
+    fi
+
+    directories=$(find "$mount_point" -mindepth 1 -maxdepth 1 -type d | wc -l)
+    if [ "$directories" -ne 20 ]; then
+        print_error "directory entries lost across a remount"
+        return 1
+    fi
+
+    if ! umount "$mount_point"; then
+        print_error "final umount of the probe image failed"
+        return 1
+    fi
+}
+
+run_runtime_probe() {
+    local image mount_point checksum
+
+    image=$(mktemp /var/tmp/bazzite-mx-ntfsplus-probe.XXXXXX)
+    mount_point=$(mktemp -d /var/tmp/bazzite-mx-ntfsplus-mnt.XXXXXX)
+
+    if ! format_and_mount_probe "$image" "$mount_point" \
+        || ! write_probe_content "$mount_point"; then
+        remove_probe_files "$mount_point" "$image"
+        return 1
+    fi
+
+    checksum=$(sha256sum "$mount_point/blob" | cut -d' ' -f1)
+    if ! probe_survives_remount "$image" "$mount_point" "$checksum"; then
+        remove_probe_files "$mount_point" "$image"
+        return 1
+    fi
+
+    remove_probe_files "$mount_point" "$image"
+    echo "runtime probe: $PROBE_MB MB loop image formatted, mounted as ntfs," \
+        "8 MB + 20 entries written, checksum stable across a remount"
+}
+
+# --- switching the fstab rows -------------------------------------------------
+
+install_fstab() {
+    local file=$1 from=$2 verify_output
+
+    if [ "$(count_rows_of_type "$file" "$from")" -ne 0 ]; then
+        exit_with_error "rewrite left $from rows in fstab"
+    fi
+
+    if [ ! -e "$BACKUP" ]; then
+        cp -p /etc/fstab "$BACKUP"
+    fi
+    install -m 0644 -o root -g root "$file" /etc/fstab
+    systemctl daemon-reload
+
+    # A driver/on-disk mismatch is only a warning here, with exit 0: a
+    # non-zero exit is a real error in the file just written.
+    if ! verify_output=$(findmnt --verify --fstab 2>&1); then
+        echo "$verify_output"
+        exit_with_error "findmnt --verify --fstab failed: restore $BACKUP over /etc/fstab," \
+            "or run ujust setup-ntfsplus disable"
+    fi
+}
+
+# A busy volume keeps its driver until the next boot; nothing is forced. A
+# volume the new driver refuses is fatal, because its row is already <to> and
+# a reboot would fail the same way.
+remount_switched_rows() {
+    local mount_points=$1 to=$2 mount_point revert
+
+    if [ "$to" = ntfs ]; then
+        revert=disable
+    else
+        revert=enable
+    fi
+
+    while read -r mount_point; do
+        if [ -z "$(filesystem_mounted_at "$mount_point")" ]; then
+            continue
+        fi
+
+        if ! umount "$mount_point" 2> /dev/null; then
+            echo "$mount_point is busy: it stays on $(filesystem_mounted_at "$mount_point")" \
+                "until the next boot"
+            continue
+        fi
+
+        if ! mount "$mount_point"; then
+            exit_with_error "$mount_point unmounted but the $to driver refused it" \
+                "(dmesg -T | tail; a volume left dirty by Windows fast startup is the usual" \
+                "cause): ujust setup-ntfsplus $revert puts the row back"
+        fi
+        echo "remounted $mount_point as $(filesystem_mounted_at "$mount_point")"
+    done <<< "$mount_points"
+}
+
+switch_fstab_rows() {
+    local from=$1 to=$2 mount_points rewritten
+
+    mount_points=$(mount_points_of_type /etc/fstab "$from")
+    if [ -z "$mount_points" ]; then
+        echo "fstab: no $from row to rewrite"
+        return 0
+    fi
+
+    rewritten=$(mktemp)
+    replace_fstab_type "$from" "$to" /etc/fstab "$rewritten"
+    install_fstab "$rewritten" "$from"
+    rm -f "$rewritten"
+    echo "fstab: $(wc -l <<< "$mount_points") row(s) $from -> $to, backup $BACKUP"
+
+    remount_switched_rows "$mount_points" "$to"
+}
+
+# --- enable -------------------------------------------------------------------
+
+# Only an opt-in this run wrote is removed: a host that opted in earlier has
+# ntfs rows in fstab already, and removing the mask would leave them
+# unmountable.
+roll_back_enable() {
+    local reason=$1
+
+    if [ "$opt_in_written_by_this_run" -eq 1 ]; then
+        rm -f "$NTFSPLUS_OPTIN"
+        modprobe -r "$MODULE" 2> /dev/null || true
+        exit_with_error "$reason: opt-in withdrawn, driver unloaded, fstab untouched"
+    fi
+
+    exit_with_error "$reason: the opt-in predates this run and fstab may carry ntfs rows:" \
+        "ujust setup-ntfsplus disable, or fix the driver and run enable again"
+}
+
+write_opt_in() {
+    if ntfsplus_optin; then
+        echo "opt-in already active"
+        return 0
+    fi
+
+    ntfsplus_optin_text > "$NTFSPLUS_OPTIN.new"
+    mv -f "$NTFSPLUS_OPTIN.new" "$NTFSPLUS_OPTIN"
+    opt_in_written_by_this_run=1
+    echo "opt-in written: $NTFSPLUS_OPTIN"
+}
+
+enable_ntfsplus() {
+    local reason
+
+    require_root enable setup-ntfsplus
+    if [ -z "$(module_path)" ]; then
+        exit_with_error "this image carries no ntfsplus module for kernel $(uname -r)"
+    fi
+
+    opt_in_written_by_this_run=0
+    write_opt_in
+
+    # The mask must work through the kernel's own route before anything else:
+    # at boot the fstab units mount by type and the kernel asks for fs-ntfs.
+    if ! ntfs_alias_resolves; then
+        reason="$NTFSPLUS_OPTIN does not mask the image's blacklist (modprobe -c | grep ntfs)"
+        roll_back_enable "$reason"
+    fi
+    echo "mask verified: the alias fs-ntfs resolves to $(module_path)"
+
+    if ! modprobe "$MODULE" || ! ntfs_registered; then
+        roll_back_enable "modprobe $MODULE did not register the ntfs type (dmesg -T | tail)"
+    fi
+    echo "driver loaded: ntfs registered"
+
+    if ! run_runtime_probe; then
+        roll_back_enable "the runtime probe failed"
+    fi
+
+    switch_fstab_rows ntfs3 ntfs
+    echo "NTFSPLUS enabled: type ntfs in fstab is the kernel driver from now on" \
+        "(ujust setup-ntfsplus disable reverts)"
+}
+
+# --- disable ------------------------------------------------------------------
+
+disable_ntfsplus() {
+    require_root disable setup-ntfsplus
+    if ! ntfsplus_optin && [ -z "$(fstab_rows_of_type /etc/fstab ntfs)" ]; then
+        echo "nothing to do: no opt-in and no ntfs row in fstab"
+        return 0
+    fi
+
+    switch_fstab_rows ntfs ntfs3
+    rm -f "$NTFSPLUS_OPTIN" "$BACKUP"
+
+    if ntfs_registered; then
+        if modprobe -r "$MODULE" 2> /dev/null; then
+            echo "driver unloaded"
+        else
+            echo "driver still in use (a volume still mounted as ntfs): unloaded at the next boot"
+        fi
+    fi
+    echo "NTFSPLUS disabled: opt-in removed, fstab on ntfs3"
+}
+
+# --- self-test ----------------------------------------------------------------
+#
+# Called by tests/55-ntfsplus.sh in the build. Everything runs on files under
+# a temporary directory: an fstab with every row type, a status fixture, and a
+# stub modprobe. Every known-bad case is one the real code once got wrong.
+
+self_test_failed() {
+    local message=$1
+    shift
+
+    echo "self-test: $message"
+    if [ $# -gt 0 ]; then
+        printf '%s\n' "$@"
+    fi
+    exit 1
+}
+
+write_self_test_fstab() {
+    cat > "$1" << 'EOF'
+# comment with ntfs3 in it
+UUID=1111 / btrfs subvol=root,compress=zstd:1 0 0
+UUID=2222 /run/media/x/Windows ntfs3 defaults,nofail,uid=1000,gid=1000,umask=000 0 0
+UUID=3333 /mnt/games   ntfs3   nofail,x-systemd.device-timeout=10 0 0
+UUID=4444 /mnt/fuse ntfs-3g defaults,nofail 0 0
+UUID=5555 /mnt/plus ntfs defaults,nofail 0 0
+EOF
+}
+
+self_test_fstab_rewrites() {
+    local dir=$1
+
+    write_self_test_fstab "$dir/fstab"
+
+    # ntfs3 -> ntfs touches the type column of ntfs3 rows and nothing else.
+    replace_fstab_type ntfs3 ntfs "$dir/fstab" "$dir/plus"
+    if ! diff <(sed '/^#/!s/ ntfs3 / ntfs /' "$dir/fstab") "$dir/plus" > /dev/null; then
+        self_test_failed "ntfs3 -> ntfs changed more than the type column of ntfs3 rows:" \
+            "$(diff "$dir/fstab" "$dir/plus" || true)"
+    fi
+    if [ "$(count_rows_of_type "$dir/plus" ntfs)" -ne 3 ] \
+        || [ "$(count_rows_of_type "$dir/plus" ntfs3)" -ne 0 ]; then
+        self_test_failed "after ntfs3 -> ntfs expected 3 ntfs rows and 0 ntfs3"
+    fi
+
+    # ntfs -> ntfs3 reverses it; the ntfs-3g row, the comment and the root
+    # row are not rows of either type.
+    replace_fstab_type ntfs ntfs3 "$dir/plus" "$dir/back"
+    if [ "$(count_rows_of_type "$dir/back" ntfs3)" -ne 3 ] \
+        || [ "$(count_rows_of_type "$dir/back" ntfs)" -ne 0 ]; then
+        self_test_failed "after ntfs -> ntfs3 expected 3 ntfs3 rows and 0 ntfs"
+    fi
+    if ! grep -q '^UUID=4444 /mnt/fuse ntfs-3g ' "$dir/back" \
+        || ! grep -q '^# comment with ntfs3 in it$' "$dir/back" \
+        || ! grep -q '^UUID=1111 / btrfs ' "$dir/back"; then
+        self_test_failed "an ntfs-3g row, a comment or the root row was touched"
+    fi
+
+    # The round trip from an all-ntfs3 file is the identity.
+    replace_fstab_type ntfs ntfs3 "$dir/fstab" "$dir/norm"
+    replace_fstab_type ntfs3 ntfs "$dir/norm" "$dir/plus2"
+    replace_fstab_type ntfs ntfs3 "$dir/plus2" "$dir/back2"
+    if ! cmp -s "$dir/norm" "$dir/back2"; then
+        self_test_failed "ntfs3 -> ntfs -> ntfs3 is not the identity"
+    fi
+
+    if [ "$(count_rows_of_type "$dir/fstab" ntfs3)" -ne 2 ] \
+        || [ "$(count_rows_of_type "$dir/fstab" ntfs-3g)" -ne 1 ]; then
+        self_test_failed "fstab_rows_of_type miscounts"
+    fi
+}
+
+self_test_status_on_fixture() {
+    local dir=$1 fixture=$1/fx output
+
+    mkdir -p "$fixture/etc/modprobe.d" "$fixture/proc" "$fixture/cmd"
+    cp "$dir/fstab" "$fixture/etc/fstab"
+    printf 'nodev\tbtrfs\n\tntfs3\n' > "$fixture/proc/filesystems"
+    : > "$fixture/cmd/mounts"
+
+    output=$(FIXTURE=$fixture show_status)
+    if ! grep -q '^opt-in: not active' <<< "$output" \
+        || ! grep -q '^driver ntfs: not registered' <<< "$output" \
+        || ! grep -q '^fstab ntfs3: /run/media/x/Windows /mnt/games$' <<< "$output" \
+        || ! grep -q '^fstab ntfs: /mnt/plus$' <<< "$output"; then
+        self_test_failed "status on the fixture:" "$output"
+    fi
+
+    ntfsplus_optin_text > "$fixture/etc/modprobe.d/bazzite-mx-ntfsplus.conf"
+    printf 'nodev\tbtrfs\n\tntfs3\n\tntfs\n' > "$fixture/proc/filesystems"
+
+    output=$(FIXTURE=$fixture show_status)
+    if ! grep -q '^opt-in: active' <<< "$output" \
+        || ! grep -q '^driver ntfs: registered' <<< "$output"; then
+        self_test_failed "status on the opted-in fixture:" "$output"
+    fi
+}
+
+# A modprobe whose config is 50 000 alias lines, `blacklist ntfs` first under
+# STUB_BLACKLIST (the size is the point: docs/gotchas.md § `command | grep
+# -q` under `pipefail`). Its dry run prints insmod under STUB_INSMOD; under
+# STUB_LOADED only for --show-depends, as for a loaded module.
+write_modprobe_stub() {
+    cat > "$1" << 'STUB'
+#!/usr/bin/env bash
+case " $* " in
+    *" -c "*)
+        if [ -n "${STUB_BLACKLIST:-}" ]; then
+            echo "blacklist ntfs"
+        fi
+        yes "alias pci:v00001234d00005678sv*sd*bc*sc*i* stub" | head -n 50000
+        ;;
+    *" fs-ntfs "*)
+        if [ -n "${STUB_LOADED:-}" ]; then
+            case " $* " in
+                *" --show-depends "*)
+                    echo "insmod /lib/modules/x/updates/ntfs.ko "
+                    ;;
+            esac
+        elif [ -n "${STUB_INSMOD:-}" ]; then
+            echo "insmod /lib/modules/x/updates/ntfs.ko "
+        fi
+        ;;
+esac
+STUB
+    chmod +x "$1"
+}
+
+self_test_alias_resolves() {
+    local dir=$1
+
+    mkdir -p "$dir/bin"
+    write_modprobe_stub "$dir/bin/modprobe"
+
+    if PATH=$dir/bin:$PATH STUB_BLACKLIST=1 STUB_INSMOD=1 ntfs_alias_resolves; then
+        self_test_failed "ntfs_alias_resolves reads a blacklisted module as resolving"
+    fi
+    if ! PATH=$dir/bin:$PATH STUB_INSMOD=1 ntfs_alias_resolves; then
+        self_test_failed "ntfs_alias_resolves refuses a free alias whose dry run prints insmod"
+    fi
+    if PATH=$dir/bin:$PATH ntfs_alias_resolves; then
+        self_test_failed "ntfs_alias_resolves reads an empty dry run as resolving"
+    fi
+    if ! PATH=$dir/bin:$PATH STUB_LOADED=1 ntfs_alias_resolves; then
+        self_test_failed "ntfs_alias_resolves refuses a free alias whose module is already loaded"
+    fi
+}
+
+self_test() {
+    local dir
+
+    dir=$(mktemp -d)
+    # shellcheck disable=SC2064  # expand now: the local is gone at EXIT
+    trap "rm -rf '$dir'" EXIT
+
+    self_test_fstab_rewrites "$dir"
+    self_test_status_on_fixture "$dir"
+    self_test_alias_resolves "$dir"
+
+    echo "self-test ok: fstab rewrites exact both ways, ntfs-3g row and comment untouched," \
+        "round trip identity, status from fixtures, alias probe right on 4 modprobe stubs"
+}
+
+# --- main ---------------------------------------------------------------------
+
+case "${1:-status}" in
+    status)
+        show_status
+        ;;
+    enable)
+        enable_ntfsplus
+        ;;
+    disable)
+        disable_ntfsplus
+        ;;
+    --self-test)
+        self_test
+        ;;
+    *)
+        echo "usage: bazzite-mx-ntfsplus-setup status | enable | disable | --self-test" >&2
+        exit 1
+        ;;
+esac

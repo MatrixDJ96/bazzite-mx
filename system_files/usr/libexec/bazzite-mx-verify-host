@@ -1,238 +1,448 @@
 #!/usr/bin/env bash
 # Is this host where the image expects it? The checks behind `ujust
-# verify-host`, one OK:/FAIL:/SKIP:/INFO: line each, exit 1 on any FAIL.
-# Modelled on Bazzite's verify-image (92-bazzite-verify.just), which only
-# checks the transport; this one covers the definition of done of the v2
-# migration (design 2.0 § 5 and § 7, refutation items 2.11 and 4.2):
+# verify-host`: the deployment bootc-compatible, the origin signed and on
+# `stable`, nothing layered, the image's signing policy in force, the MSI
+# modules on an MSI host, the flavour matching the GPU, the NTFS driver the
+# host chose in fstab and mounted, no residue of an earlier setup, the
+# Firefox Flatpak reported.
 #
-#   1. bootc status: the booted deployment is not `incompatible` (no
-#      rpm-ostree group in the origin: no layered packages, no local
-#      initramfs; bootc crates/lib/src/utils.rs:23-32);
-#   2. the origin is ostree-image-signed:docker://ghcr.io/matrixdj96/<image>
-#      for the flavour the image says it is, on the tag `stable` (an origin
-#      left on a dated tag never sees an update: "No changes" forever);
-#   3. no layered packages, local packages, base removals or modules, and
-#      no local initramfs regeneration (rpm-ostree status --json);
-#   4. the signing policy the image ships is the one in force: the
-#      ghcr.io/matrixdj96 scope in /etc/containers/policy.json with the
-#      key file present, the registries.d stanza, default `reject`;
-#   5. an MSI host (DMI vendor Micro-Star) has msi_ec and acpi_ec loaded;
-#   6. an NVIDIA GPU (PCI vendor 10de) means the nvidia-open flavour and the
-#      nvidia module loaded, and no GPU means the other flavour;
-#   7. every fstab entry for an NTFS volume uses the in-kernel `ntfs3` and
-#      is mounted with it (decision 1.5a); no ntfsplus residue in
-#      modprobe.d, modules-load.d or the kernel arguments;
-#   8. a Firefox Flatpak left installed is reported (the RPM is in the
-#      image; the profile copy is the user's step, docs/migration.md).
-#
-# Root is needed for bootc status; the recipe runs this through sudo.
-# Fixture mode for the smoke test (host.sh): FIXTURE=<dir> reads files from
-# <dir> (/etc, image-info.json, /sys/class/dmi/id/sys_vendor, /proc/modules)
-# and command outputs from <dir>/cmd/ (rpm-ostree-status.json,
-# bootc-status.json, lspci-nvidia, mounts, kargs, flatpaks).
+# Usage: bazzite-mx-verify-host        (root: bootc status needs it; the recipe
+#                                       runs it through sudo)
+#   FIXTURE=<dir>: files read under <dir>, command outputs under <dir>/cmd/
+#   (the smoke test; host.sh routes the shared ones); no root needed.
+# Output: one `OK:`, `FAIL:`, `SKIP:` or `INFO:` line per check, then
+#   `verify-host: every check passed` or `verify-host: FAIL lines above`.
+#   docs/migration.md and site/install.html map the FAIL lines to their fix:
+#   a line either cites stays as it is.
+# Exit status: 0 every check passed; 1 at least one FAIL; 2 the host could not
+#   be read (not root, not a bazzite-mx image, no booted deployment), the
+#   reason on stderr as `ERROR: …`.
 set -euo pipefail
 
 # shellcheck source=../lib/bazzite-mx/host.sh
 source /usr/lib/bazzite-mx/host.sh
 
 REGISTRIES=/etc/containers/registries.d/matrixdj96.yaml
-failed=0
+NVIDIA_VENDOR_ID=10de
 
-ok() { echo "OK: $*"; }
-fail() {
+# Set by read_host, read by every check; NTFS_TYPE_WANTED by read_ntfs_opt_in.
+IMAGE_NAME=
+BOOTED=
+NTFS_TYPE_WANTED=
+
+# Set by the first FAIL line, read at the end.
+ANY_CHECK_FAILED=0
+
+# --- the report lines ---------------------------------------------------------
+
+report_ok() {
+    echo "OK: $*"
+}
+
+report_fail() {
     echo "FAIL: $*"
-    failed=1
+    ANY_CHECK_FAILED=1
 }
-skip() { echo "SKIP: $*"; }
-info() { echo "INFO: $*"; }
 
-# Command sources of this helper alone (the shared ones: host.sh).
+report_skip() {
+    echo "SKIP: $*"
+}
+
+report_info() {
+    echo "INFO: $*"
+}
+
+# --- command sources of this helper alone (the shared ones: host.sh) ----------
+
 src_bootc_status() {
-    if [ -n "$FIXTURE" ]; then cat "$FIXTURE/cmd/bootc-status.json"; else bootc status --format=json; fi
+    if [ -n "$FIXTURE" ]; then
+        cat "$FIXTURE/cmd/bootc-status.json"
+    else
+        bootc status --format=json
+    fi
 }
+
 src_lspci_nvidia() {
-    if [ -n "$FIXTURE" ]; then cat "$FIXTURE/cmd/lspci-nvidia"; else lspci -d 10de: -n; fi
+    if [ -n "$FIXTURE" ]; then
+        cat "$FIXTURE/cmd/lspci-nvidia"
+    else
+        lspci -d "$NVIDIA_VENDOR_ID:" -n
+    fi
 }
+
+src_flatpaks() {
+    if [ -n "$FIXTURE" ]; then
+        cat "$FIXTURE/cmd/flatpaks"
+    else
+        flatpak list --app --columns=application 2> /dev/null || true
+    fi
+}
+
 # mount_fstype <target>: empty when nothing is mounted there (fixture:
 # "<target> <fstype>" lines).
 mount_fstype() {
-    if [ -n "$FIXTURE" ]; then awk -v t="$1" '$1 == t { print $2 }' "$FIXTURE/cmd/mounts"; else findmnt -n -o FSTYPE --mountpoint "$1" 2> /dev/null || true; fi
+    local mount_point=$1
+
+    if [ -n "$FIXTURE" ]; then
+        awk -v target="$mount_point" '$1 == target { print $2 }' "$FIXTURE/cmd/mounts"
+        return 0
+    fi
+
+    findmnt -n -o FSTYPE --mountpoint "$mount_point" 2> /dev/null || true
 }
-src_flatpaks() {
-    if [ -n "$FIXTURE" ]; then cat "$FIXTURE/cmd/flatpaks"; else flatpak list --app --columns=application 2> /dev/null || true; fi
-}
+
 module_loaded() {
-    awk '{ print $1 }' "$(f /proc/modules)" | grep -qx "$1"
+    local module=$1
+    local loaded
+
+    loaded=$(awk '{ print $1 }' "$(host_file /proc/modules)")
+
+    grep -qx "$module" <<< "$loaded"
 }
 
-if [ -z "$FIXTURE" ] && [ "$(id -u)" -ne 0 ]; then
-    echo "ERROR: run as root (ujust verify-host does it through sudo): bootc status needs it" >&2
-    exit 2
-fi
-image_name=$(image_name)
-[ -n "$image_name" ] || {
-    echo "ERROR: $(f $IMAGE_INFO) missing: not a bazzite-mx image?" >&2
-    exit 2
-}
-booted=$(booted_deployment "$(src_rpm_ostree_status)")
-[ -n "$booted" ] || {
-    echo "ERROR: rpm-ostree status lists no booted deployment" >&2
-    exit 2
+# --- reading the host ---------------------------------------------------------
+
+# Exit 2 when the host cannot be read: the checks would all fail for one
+# reason, and that reason is the message.
+read_host() {
+    if [ -z "$FIXTURE" ] && [ "$(id -u)" -ne 0 ]; then
+        echo "ERROR: run as root (ujust verify-host does it through sudo):" \
+            "bootc status needs it" >&2
+        exit 2
+    fi
+
+    IMAGE_NAME=$(image_name)
+    if [ -z "$IMAGE_NAME" ]; then
+        echo "ERROR: $(host_file $IMAGE_INFO) missing: not a bazzite-mx image?" >&2
+        exit 2
+    fi
+
+    BOOTED=$(booted_deployment "$(src_rpm_ostree_status)")
+    if [ -z "$BOOTED" ]; then
+        echo "ERROR: rpm-ostree status lists no booted deployment" >&2
+        exit 2
+    fi
 }
 
-# 1. bootc compatibility: an rpm-ostree group in the origin makes the
-# deployment incompatible (bootc's utils.rs).
-bootc=$(src_bootc_status)
-incompatible=$(jq -r '.status.booted.incompatible' <<< "$bootc")
-if [ "$incompatible" = false ]; then
-    ok "bootc status: the booted deployment is bootc-compatible (image $(jq -r '.status.booted.image.image.image // "?"' <<< "$bootc"))"
-else
-    fail "bootc status reports the booted deployment incompatible (rpm-ostree groups in the origin: ujust migrate)"
-fi
+# --- 1. bootc -----------------------------------------------------------------
 
-# 2. Origin: signed transport, our repository, the flavour's image, tag
-# stable (an origin left on a dated tag never sees an update).
-ref=$(jq -r '."container-image-reference" // ""' <<< "$booted")
-signed_prefix="ostree-image-signed:docker://$VENDOR_SCOPE/"
-if [[ $ref == "$signed_prefix"* ]]; then
-    ok "origin uses the signed transport ($ref)"
+# An rpm-ostree group in the origin makes the deployment incompatible
+# (bootc's utils.rs).
+check_bootc_compatibility() {
+    local bootc incompatible image
+
+    bootc=$(src_bootc_status)
+    incompatible=$(jq -r '.status.booted.incompatible' <<< "$bootc")
+    image=$(jq -r '.status.booted.image.image.image // "?"' <<< "$bootc")
+
+    if [ "$incompatible" = false ]; then
+        report_ok "bootc status: the booted deployment is bootc-compatible (image $image)"
+    else
+        report_fail "bootc status reports the booted deployment incompatible" \
+            "(rpm-ostree groups in the origin: ujust migrate)"
+    fi
+}
+
+# --- 2. the origin ------------------------------------------------------------
+
+# Signed transport, our repository, the flavour's image, tag stable (an
+# origin left on a dated tag never sees an update).
+check_origin() {
+    local ref signed_prefix rest origin_image origin_tag
+
+    ref=$(jq -r '."container-image-reference" // ""' <<< "$BOOTED")
+    signed_prefix="ostree-image-signed:docker://$VENDOR_SCOPE/"
+
+    if [[ $ref != "$signed_prefix"* ]]; then
+        report_fail "origin is not $signed_prefix<image>:<tag> (got '$ref'): ujust migrate"
+        return 0
+    fi
+    report_ok "origin uses the signed transport ($ref)"
+
     rest=${ref#"$signed_prefix"}
     origin_image=${rest%%:*}
     origin_tag=${rest#*:}
-    [ "$origin_tag" != "$rest" ] || origin_tag=latest
-    if [ "$origin_image" = "$image_name" ]; then
-        ok "origin image $origin_image matches the booted image's name"
-    else
-        fail "origin image $origin_image but the booted image calls itself $image_name"
+    if [ "$origin_tag" = "$rest" ]; then
+        origin_tag=latest
     fi
+
+    if [ "$origin_image" = "$IMAGE_NAME" ]; then
+        report_ok "origin image $origin_image matches the booted image's name"
+    else
+        report_fail "origin image $origin_image but the booted image calls itself $IMAGE_NAME"
+    fi
+
     if [ "$origin_tag" = stable ]; then
-        ok "origin tag is stable (updates follow the moving alias)"
+        report_ok "origin tag is stable (updates follow the moving alias)"
     else
-        fail "origin tag is $origin_tag, not stable: after the promotion run ujust migrate apply stable (a dated tag never updates)"
+        report_fail "origin tag is $origin_tag, not stable: after the promotion run" \
+            "ujust migrate apply stable (a dated tag never updates)"
     fi
-else
-    fail "origin is not $signed_prefix<image>:<tag> (got '$ref'): ujust migrate"
-fi
+}
 
-# 3. Nothing layered, no local initramfs (every request list: host.sh).
-layered=$(layered_requests "$booted")
-if [ -z "$layered" ]; then
-    ok "no layered, local or removed packages and no modules requested"
-else
-    fail "rpm-ostree mutations in the origin: $layered (ujust migrate removes them)"
-fi
-if [ "$(jq -r '."regenerate-initramfs" // false' <<< "$booted")" = false ]; then
-    ok "initramfs is the image's (no local regeneration)"
-else
-    fail "initramfs is regenerated locally ($(jq -r '(."initramfs-args" // []) | join(" ")' <<< "$booted")): rpm-ostree initramfs --disable, ujust migrate does it"
-fi
+# --- 3. nothing layered -------------------------------------------------------
 
-# 4. The signing policy the image ships is the one in force.
-policy=$(f /etc/containers/policy.json)
-if [ "$(policy_scope_type)" = sigstoreSigned ]; then
+# Every request list of the origin (host.sh), and no local initramfs.
+check_no_mutations() {
+    local layered regenerate initramfs_args
+
+    layered=$(layered_requests "$BOOTED")
+    if [ -z "$layered" ]; then
+        report_ok "no layered, local or removed packages and no modules requested"
+    else
+        report_fail "rpm-ostree mutations in the origin: $layered (ujust migrate removes them)"
+    fi
+
+    regenerate=$(jq -r '."regenerate-initramfs" // false' <<< "$BOOTED")
+    if [ "$regenerate" = false ]; then
+        report_ok "initramfs is the image's (no local regeneration)"
+    else
+        initramfs_args=$(jq -r '(."initramfs-args" // []) | join(" ")' <<< "$BOOTED")
+        report_fail "initramfs is regenerated locally ($initramfs_args):" \
+            "rpm-ostree initramfs --disable, ujust migrate does it"
+    fi
+}
+
+# --- 4. the signing policy ----------------------------------------------------
+
+check_policy_scope_and_key() {
+    local policy=$1
+    local keypath default_type default_json
+
     keypath=$(jq -r --arg s "$VENDOR_SCOPE" '.transports.docker[$s][0].keyPath // ""' "$policy")
-    if [ -n "$keypath" ] && [ -s "$(f "$keypath")" ]; then
-        ok "policy.json: $VENDOR_SCOPE is sigstoreSigned with key $keypath present"
+    if [ -n "$keypath" ] && [ -s "$(host_file "$keypath")" ]; then
+        report_ok "policy.json: $VENDOR_SCOPE is sigstoreSigned with key $keypath present"
     else
-        fail "policy.json: $VENDOR_SCOPE scope names key '$keypath', which is missing"
+        report_fail "policy.json: $VENDOR_SCOPE scope names key '$keypath', which is missing"
     fi
-    if [ "$(jq -r '.default[0].type // ""' "$policy")" = reject ]; then
-        ok "policy.json: default is reject"
-    else
-        fail "policy.json: default is $(jq -c '.default' "$policy"), the image ships reject (a local edit? ostree admin config-diff)"
-    fi
-else
-    fail "policy.json has no sigstoreSigned scope for $VENDOR_SCOPE: the booted image predates the policy, or /etc/containers/policy.json is a local copy (ostree admin config-diff)"
-fi
-if [ -s "$(f $REGISTRIES)" ] && grep -q 'use-sigstore-attachments: true' "$(f $REGISTRIES)"; then
-    ok "registries.d: sigstore attachments enabled for $VENDOR_SCOPE"
-else
-    fail "$REGISTRIES missing or without use-sigstore-attachments"
-fi
 
-# 5. MSI modules on an MSI host.
-vendor=$(cat "$(f /sys/class/dmi/id/sys_vendor)" 2> /dev/null || echo unknown)
-if grep -qi 'micro-star' <<< "$vendor"; then
-    for m in msi_ec acpi_ec; do
-        if module_loaded "$m"; then
-            ok "MSI host: $m loaded"
+    default_type=$(jq -r '.default[0].type // ""' "$policy")
+    if [ "$default_type" = reject ]; then
+        report_ok "policy.json: default is reject"
+    else
+        default_json=$(jq -c '.default' "$policy")
+        report_fail "policy.json: default is $default_json, the image ships reject" \
+            "(a local edit? ostree admin config-diff)"
+    fi
+}
+
+# The policy the image ships is the one in force, and registries.d asks for
+# the sigstore attachments.
+check_signing_policy() {
+    local policy registries
+
+    policy=$(host_file /etc/containers/policy.json)
+    if [ "$(policy_scope_type)" = sigstoreSigned ]; then
+        check_policy_scope_and_key "$policy"
+    else
+        report_fail "policy.json has no sigstoreSigned scope for $VENDOR_SCOPE: the booted image" \
+            "predates the policy, or /etc/containers/policy.json is a local copy" \
+            "(ostree admin config-diff)"
+    fi
+
+    registries=$(host_file $REGISTRIES)
+    if [ -s "$registries" ] && grep -q 'use-sigstore-attachments: true' "$registries"; then
+        report_ok "registries.d: sigstore attachments enabled for $VENDOR_SCOPE"
+    else
+        report_fail "$REGISTRIES missing or without use-sigstore-attachments"
+    fi
+}
+
+# --- 5. MSI -------------------------------------------------------------------
+
+# The modules on an MSI host, and no modules-load file of the host's own.
+check_msi_modules() {
+    local vendor module residue
+
+    vendor=$(cat "$(host_file /sys/class/dmi/id/sys_vendor)" 2> /dev/null || echo unknown)
+    if grep -qi 'micro-star' <<< "$vendor"; then
+        for module in msi_ec acpi_ec; do
+            if module_loaded "$module"; then
+                report_ok "MSI host: $module loaded"
+            else
+                report_fail "MSI host: $module not loaded (ujust setup-msi enable)"
+            fi
+        done
+    else
+        report_skip "not an MSI host ($vendor): msi-ec and acpi_ec not expected"
+    fi
+
+    residue=$(msi_files)
+    if [ -z "$residue" ]; then
+        report_ok "no modules-load file names msi-ec or acpi_ec besides $MSI_MODULES_LOAD"
+    else
+        report_fail "MSI residue: $(tr '\n' ' ' <<< "$residue")(a modules-load file of the" \
+            "host's own; ujust migrate offers the removal)"
+    fi
+}
+
+# --- 6. the GPU and the flavour -----------------------------------------------
+
+check_gpu_matches_flavour() {
+    local nvidia
+
+    nvidia=$(src_lspci_nvidia)
+
+    if [ -z "$nvidia" ]; then
+        if [[ $IMAGE_NAME == *nvidia* ]]; then
+            report_fail "no NVIDIA GPU on the bus but the image is $IMAGE_NAME:" \
+                "rebase to bazzite-mx"
         else
-            fail "MSI host: $m not loaded (ujust setup-msi enable)"
+            report_ok "no NVIDIA GPU and the image is $IMAGE_NAME"
         fi
-    done
-else
-    skip "not an MSI host ($vendor): msi-ec and acpi_ec not expected"
-fi
-residue=$(msi_files)
-if [ -z "$residue" ]; then
-    ok "no modules-load file names msi-ec or acpi_ec besides $MSI_MODULES_LOAD"
-else
-    fail "MSI residue: $(tr '\n' ' ' <<< "$residue")(a modules-load file of the host's own; ujust migrate offers the removal)"
-fi
-
-# 6. NVIDIA GPU and flavour agree.
-nvidia=$(src_lspci_nvidia)
-if [ -n "$nvidia" ]; then
-    if [[ $image_name == *nvidia* ]]; then
-        ok "NVIDIA GPU present ($(head -n1 <<< "$nvidia")) and the image is $image_name"
-    else
-        fail "NVIDIA GPU present but the image is $image_name: rebase to bazzite-mx-nvidia-open"
+        return 0
     fi
+
+    if [[ $IMAGE_NAME == *nvidia* ]]; then
+        report_ok "NVIDIA GPU present ($(head -n1 <<< "$nvidia")) and the image is $IMAGE_NAME"
+    else
+        report_fail "NVIDIA GPU present but the image is $IMAGE_NAME:" \
+            "rebase to bazzite-mx-nvidia-open (or bazzite-mx-nvidia)"
+    fi
+
     if module_loaded nvidia; then
-        ok "nvidia module loaded"
+        report_ok "nvidia module loaded"
     else
-        fail "nvidia module not loaded (nvidia-smi, dmesg)"
+        report_fail "nvidia module not loaded (nvidia-smi, dmesg)"
     fi
-else
-    if [[ $image_name == *nvidia* ]]; then
-        fail "no NVIDIA GPU on the bus but the image is $image_name: rebase to bazzite-mx"
+}
+
+# --- 7. NTFS ------------------------------------------------------------------
+
+# Sets NTFS_TYPE_WANTED, `ntfs` after the opt-in and `ntfs3` otherwise, and
+# reports the opt-in's own lines.
+read_ntfs_opt_in() {
+    NTFS_TYPE_WANTED=ntfs3
+    if ! ntfsplus_optin; then
+        return 0
+    fi
+
+    NTFS_TYPE_WANTED=ntfs
+    report_ok "ntfsplus opt-in active ($NTFSPLUS_OPTIN): fstab rows are expected on ntfs"
+    if ntfs_registered; then
+        report_ok "the ntfs driver is registered"
     else
-        ok "no NVIDIA GPU and the image is $image_name"
+        report_info "the ntfs driver is not registered yet" \
+            "(the kernel loads it at the first mount of type ntfs)"
     fi
-fi
+}
 
-# 7. NTFS: ntfs3 in fstab and mounted as such; no ntfsplus residue.
-rows=$(fstab_entries "$(f /etc/fstab)" | awk '$3 ~ /^ntfs/ { print $2, $3 }')
-if [ -z "$rows" ]; then
-    skip "no NTFS entry in fstab"
-else
-    while read -r target type; do
-        if [ "$type" != ntfs3 ]; then
-            fail "fstab: $target uses type $type, not ntfs3 (ujust migrate rewrites it)"
-            continue
-        fi
-        mounted=$(mount_fstype "$target")
-        if [ "$mounted" = ntfs3 ]; then
-            ok "fstab: $target is ntfs3 and mounted with ntfs3"
-        elif [ -z "$mounted" ]; then
-            fail "fstab: $target is ntfs3 but not mounted (dirty volume? journalctl -b | grep ntfs3)"
-        else
-            fail "fstab: $target is ntfs3 in fstab but mounted as $mounted"
-        fi
-    done <<< "$rows"
-fi
-residue=$(ntfsplus_files)
-if [ -z "$residue" ]; then
-    ok "no ntfsplus file under /etc/modprobe.d or /etc/modules-load.d"
-else
-    fail "ntfsplus residue: $(tr '\n' ' ' <<< "$residue")(ujust migrate offers the removal)"
-fi
-residue=$(ntfsplus_kargs)
-if [ -n "$residue" ]; then
-    fail "kernel arguments mention ntfsplus: $(tr '\n' ' ' <<< "$residue")"
-else
-    ok "no ntfsplus kernel argument"
-fi
+# check_fstab_row <target> <type> <expected type>: the row on the driver the
+# host chose, and the volume mounted with it.
+check_fstab_row() {
+    local target=$1
+    local type=$2
+    local want=$3
+    local mounted
 
-# 8. Flatpaks: nothing is required by the image; Firefox is reported.
-if src_flatpaks | grep -qx org.mozilla.firefox; then
-    info "the Firefox Flatpak is still installed next to the RPM: copy the profile before the first RPM start, then remove it (docs/migration.md)"
-else
-    ok "no Firefox Flatpak (the RPM is the image's browser)"
-fi
+    if [ "$type" != "$want" ]; then
+        case "$want:$type" in
+            ntfs3:ntfs)
+                report_fail "fstab: $target uses type ntfs without the ntfsplus opt-in" \
+                    "(ujust setup-ntfsplus enable, or ujust migrate for ntfs3)"
+                ;;
+            ntfs:ntfs3)
+                report_fail "fstab: $target uses type ntfs3 while the ntfsplus opt-in is active" \
+                    "(ujust setup-ntfsplus enable rewrites it)"
+                ;;
+            *)
+                report_fail "fstab: $target uses type $type, not $want (ujust migrate rewrites it)"
+                ;;
+        esac
+        return 0
+    fi
 
-if [ "$failed" -ne 0 ]; then
-    echo "verify-host: FAIL lines above"
-    exit 1
-fi
-echo "verify-host: every check passed"
+    mounted=$(mount_fstype "$target")
+    if [ "$mounted" = "$want" ]; then
+        report_ok "fstab: $target is $want and mounted with $want"
+    elif [ -z "$mounted" ]; then
+        report_fail "fstab: $target is $want but not mounted" \
+            "(dirty volume? journalctl -b | grep $want)"
+    else
+        report_fail "fstab: $target is $want in fstab but mounted as $mounted"
+    fi
+}
+
+check_ntfs_residue() {
+    local residue
+
+    residue=$(ntfsplus_files)
+    if [ -z "$residue" ]; then
+        report_ok "no ntfsplus file under /etc/modprobe.d or /etc/modules-load.d"
+    else
+        report_fail "ntfsplus residue: $(tr '\n' ' ' <<< "$residue")(ujust migrate offers" \
+            "the removal)"
+    fi
+
+    residue=$(ntfsplus_kargs)
+    if [ -n "$residue" ]; then
+        report_fail "kernel arguments mention ntfsplus: $(tr '\n' ' ' <<< "$residue")"
+    else
+        report_ok "no ntfsplus kernel argument"
+    fi
+}
+
+# The driver the host chose (ntfs3, or ntfs after the opt-in) in fstab and
+# mounted as such; FUSE rows are the explicit route and are reported only.
+check_ntfs() {
+    local fstab fuse_rows rows target type
+
+    read_ntfs_opt_in
+    fstab=$(host_file /etc/fstab)
+
+    fuse_rows=$(fstab_entries "$fstab" | awk '$3 == "ntfs-3g" { print $2 }')
+    if [ -n "$fuse_rows" ]; then
+        report_info "fstab rows on ntfs-3g (FUSE, the explicit route, left alone):" \
+            "$(tr '\n' ' ' <<< "$fuse_rows")"
+    fi
+
+    rows=$(fstab_entries "$fstab" | awk '$3 ~ /^ntfs/ && $3 != "ntfs-3g" { print $2, $3 }')
+    if [ -z "$rows" ]; then
+        report_skip "no NTFS entry in fstab"
+    else
+        while read -r target type; do
+            check_fstab_row "$target" "$type" "$NTFS_TYPE_WANTED"
+        done <<< "$rows"
+    fi
+
+    check_ntfs_residue
+}
+
+# --- 8. Flatpaks --------------------------------------------------------------
+
+# Nothing is required by the image; Firefox is reported.
+check_flatpaks() {
+    local flatpaks
+
+    flatpaks=$(src_flatpaks)
+
+    if grep -qx org.mozilla.firefox <<< "$flatpaks"; then
+        report_info "the Firefox Flatpak is still installed next to the RPM: copy the profile" \
+            "before the first RPM start, then remove it (docs/migration.md)"
+    else
+        report_ok "no Firefox Flatpak (the RPM is the image's browser)"
+    fi
+}
+
+# --- main ---------------------------------------------------------------------
+
+main() {
+    read_host
+
+    check_bootc_compatibility
+    check_origin
+    check_no_mutations
+    check_signing_policy
+    check_msi_modules
+    check_gpu_matches_flavour
+    check_ntfs
+    check_flatpaks
+
+    if [ "$ANY_CHECK_FAILED" -ne 0 ]; then
+        echo "verify-host: FAIL lines above"
+        exit 1
+    fi
+    echo "verify-host: every check passed"
+}
+
+main "$@"
