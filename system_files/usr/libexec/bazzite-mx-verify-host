@@ -2,8 +2,8 @@
 # Is this host where the image expects it? The checks behind `ujust
 # verify-host`: the deployment bootc-compatible, the origin signed and on
 # `stable`, nothing layered, the image's signing policy in force, the MSI
-# modules on an MSI host, the flavour matching the GPU, ntfs3 in fstab and
-# mounted, no residue of an earlier setup, the
+# modules on an MSI host, the flavour matching the GPU, the NTFS driver the
+# host chose in fstab and mounted, no residue of an earlier setup, the
 # Firefox Flatpak reported (the system scope and the invoking user's), the
 # .repo files the image adds to the base as it ships them.
 #
@@ -28,10 +28,11 @@ REGISTRIES=/etc/containers/registries.d/matrixdj96.yaml
 NVIDIA_VENDOR_ID=10de
 REPOS_BASE_SNAPSHOT=/usr/lib/bazzite-mx/build-state/repos.base.sha256
 
-# Set by read_host and read by the checks.
+# Set by read_host and read by the checks; NTFS_TYPE_WANTED by read_ntfs_opt_in.
 IMAGE_NAME=
 BOOTED=
 BOOTC=
+NTFS_TYPE_WANTED=
 
 # Set by the first FAIL line, read at the end.
 ANY_CHECK_FAILED=0
@@ -294,7 +295,7 @@ check_signing_policy() {
 # --- 5. MSI -------------------------------------------------------------------
 
 # The modules on an MSI host that opted in, and no modules-load file of the
-# host's own. setup-msi is a per-host opt-in: a host that ran
+# host's own. setup-msi is a per-host opt-in like ntfsplus: a host that ran
 # `setup-msi disable` is a host that chose to go without the modules, and a
 # FAIL there would advise undoing that choice at every run.
 check_msi_modules() {
@@ -369,8 +370,28 @@ check_gpu_matches_flavour() {
 
 # --- 7. NTFS ------------------------------------------------------------------
 
+# Sets NTFS_TYPE_WANTED, `ntfs` after the opt-in and `ntfs3` otherwise, and
+# reports the opt-in's own lines.
+read_ntfs_opt_in() {
+    NTFS_TYPE_WANTED=ntfs3
+
+    if ! ntfsplus_optin; then
+        return 0
+    fi
+
+    NTFS_TYPE_WANTED=ntfs
+    report_ok "ntfsplus opt-in active ($NTFSPLUS_OPTIN): fstab rows are expected on ntfs"
+
+    if ntfs_registered; then
+        report_ok "the ntfs driver is registered"
+    else
+        report_info "the ntfs driver is not registered yet" \
+            "(the kernel loads it at the first mount of type ntfs)"
+    fi
+}
+
 # check_fstab_row <source> <target> <type> <options> <expected type>: the row
-# on the expected driver, and the volume mounted with it. Not mounted
+# on the driver the host chose, and the volume mounted with it. Not mounted
 # is what the row asks for when it carries noauto, and a row with
 # x-systemd.automount carries autofs at its target until the first access;
 # a volume whose device is absent (an external disk unplugged) is a failure
@@ -388,8 +409,29 @@ check_fstab_row() {
     target=$(unescape_fstab_field "$2")
 
     if [ "$type" != "$want" ]; then
-        report_fail "fstab: $target uses type $type, not $want (ujust migrate rewrites it)"
+        case "$want:$type" in
+            ntfs3:ntfs)
+                report_fail "fstab: $target uses type ntfs without the ntfsplus opt-in" \
+                    "(ujust migrate for ntfs3, or ujust setup-ntfsplus enable;" \
+                    "it mounts at the next boot or with sudo mount $(printf '%q' "$target"))"
+                ;;
+            ntfs:ntfs3)
+                report_fail "fstab: $target uses type ntfs3 while the ntfsplus opt-in is active" \
+                    "(ujust setup-ntfsplus enable rewrites it)"
+                ;;
+            *)
+                report_fail "fstab: $target uses type $type, not $want (ujust migrate rewrites it)"
+                ;;
+        esac
 
+        return 0
+    fi
+
+    # Under errors=continue, NTFSPLUS's default, a dirty or hibernated volume
+    # mounts writable (docs/divergences.md § NTFSPLUS as a per-host opt-in).
+    if [ "$want" = ntfs ] && [[ $options != *,errors=* ]]; then
+        report_fail "fstab: $target is ntfs without errors=remount-ro" \
+            "(ujust setup-ntfsplus enable adds it)"
         return 0
     fi
 
@@ -408,6 +450,12 @@ check_fstab_row() {
             "(umount and mount it again, or reboot)"
     elif [[ $options == *,noauto,* ]]; then
         report_info "fstab: $target ($want, noauto): not mounted, as the row asks"
+    elif [ -n "$device" ] && [ "$want" = ntfs ]; then
+        # NTFSPLUS mounts a dirty volume, read-only under errors=remount-ro.
+        report_fail "fstab: $target is ntfs but not mounted" \
+            "(journalctl -b | grep ntfs names the option NTFSPLUS refused; an unknown" \
+            "filesystem type 'ntfs' is the driver missing, or refused with Secure Boot on:" \
+            "ujust setup-ntfsplus enable says why)"
     elif [ -n "$device" ]; then
         report_fail "fstab: $target is $want but not mounted" \
             "(dirty volume? journalctl -b | grep $want)"
@@ -446,11 +494,12 @@ check_ntfs_residue() {
     fi
 }
 
-# The ntfs3 driver in fstab and
+# The driver the host chose (ntfs3, or ntfs after the opt-in) in fstab and
 # mounted as such; FUSE rows are the explicit route and are reported only.
 check_ntfs() {
     local fstab fuse_rows rows source target type options
 
+    read_ntfs_opt_in
     fstab=$(host_file /etc/fstab)
 
     fuse_rows=$(fstab_entries "$fstab" | awk '$3 == "ntfs-3g" { print $2 }' || true)
@@ -467,7 +516,7 @@ check_ntfs() {
         report_skip "no NTFS entry in fstab"
     else
         while read -r source target type options; do
-            check_fstab_row "$source" "$target" "$type" "$options" ntfs3
+            check_fstab_row "$source" "$target" "$type" "$options" "$NTFS_TYPE_WANTED"
         done <<< "$rows"
     fi
 

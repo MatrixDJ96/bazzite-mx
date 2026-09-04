@@ -6,16 +6,20 @@ rules themselves live in [`conventions.md`](conventions.md).
 
 Contents, in the order of the entries: torn writeback on 6.17-azure · just duplicate recipe ·
 ujust.sh readonly names · kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set ·
-command | grep -q · modinfo /lib/modules path · stub-resolv.conf left in the image ·
-remove-unwanted-software v9 · force-push without a push run · inactive package request ·
-1Password BrowserSupport gid · local RPM blocks the rebase · EXIT trap and local · private
-install marker · mise dotnet SDK · pre-flight without the changed script · skel and existing
-accounts · KXmlGui write-back · flags in a command substitution · findmnt --verify on nofail ·
-fstab row with leading whitespace · verify-host and unplugged nofail · automount over autofs ·
-root's flatpak list · image-info.json vs OCI label day · FAIL branch before its verdict ·
-sunshine --version home · Docker FORWARD policy and libvirt · # inside an fstab field · recipe
-description line · vendor build-log warnings · no BTF from kernel-devel · arithmetic error
-escapes set -e · scriptlet rewrote a .pyc.
+command | grep -q · modinfo /lib/modules path · modprobe -n -v on a loaded module ·
+stub-resolv.conf left in the image · remove-unwanted-software v9 · force-push without a push
+run · inactive package request · 1Password BrowserSupport gid · local RPM blocks the rebase ·
+EXIT trap and local · private install marker · mise dotnet SDK · kbuild fragment compiles
+nothing · mount -t ntfs helper · module panics at first use · NTFS drivers' modes and case ·
+udisks defaults outside allow · pre-flight without the changed script · NTFSPLUS EINVAL · skel
+and existing accounts · KXmlGui write-back · flags in a command substitution · findmnt --verify
+on nofail · fstab row ending at its type · fstab row with leading whitespace · mount point with
+a space · status empty list · verify-host and unplugged nofail · findmnt -t exit status ·
+automount over autofs · root's flatpak list · image-info.json vs OCI label day · FAIL branch
+before its verdict · sunshine --version home · Docker FORWARD policy and libvirt · # inside an
+fstab field · 2> /dev/null on a failed redirection · recipe description line · vendor build-log
+warnings · no BTF from kernel-devel · arithmetic error escapes set -e · scriptlet rewrote a
+.pyc.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -102,8 +106,29 @@ shape.
 
 The module tools print the legacy path even when the file lives under `/usr/lib/modules`
 (`/lib` being a symlink to `usr/lib`), so a literal string comparison against the staged path
-fails (measured 2026-09-02). `50-kmods.sh` compares `realpath` of the resolved module against
-`realpath` of the file it installed.
+fails (measured 2026-09-02). `50-kmods.sh` and `55-ntfsplus.sh` compare `realpath` of the
+resolved module against `realpath` of the file they installed.
+
+## `modprobe -n -v` is silent for a loaded module; `--show-depends` is not
+
+The two dry runs answer different questions. Measured 2026-09-06 on the hub, kmod 34.2 on
+`7.2.1-ogc4.1.fc44`, the blacklist masked with `-C /nonexistent`:
+
+| `ntfs` module | blacklisted, `-n -v` / `--show-depends` | free, `-n -v` / `--show-depends` |
+| ------------- | --------------------------------------- | -------------------------------- |
+| not loaded    | nothing / nothing                       | `insmod` / `insmod`              |
+| loaded        | nothing / nothing                       | nothing / `insmod`               |
+
+`-n -v` says whether modprobe would do anything now, so a loaded module reads like a
+blacklisted one; `--show-depends` says whether the alias resolves, and honours the blacklist
+too. `ntfs_alias_resolves` in `bazzite-mx-ntfsplus-setup` (then `alias_resolves`) used `-n -v`
+and read a working opt-in as a failed mask on every host whose driver was already loaded: on
+the desktop, opt-in active and four volumes mounted, it returned 1 with an empty dry run
+(measured 2026-09-06). The function reads `--show-depends` after the captured configuration.
+The note of 2026-09-05 that `--show-depends` printed `insmod` through an active blacklist did
+not reproduce in any cell of the table. The same probe once read the blacklist through
+`! modprobe -c | grep -q`, the SIGPIPE shape of § `command | grep -q` under `pipefail` fails on
+a match above on a 2 MB config, so its negation was never false: the config is captured first.
 
 ## A networked RUN leaves `/run/systemd/resolve/stub-resolv.conf` in the image
 
@@ -205,6 +230,69 @@ target and leaves `~/.local/share/mise/installs/dotnet/<version>` as a symlink t
 10.0.400 and runtime 10.0.11 next to it and rewrote the `dotnet` muxer, with `MISE_DATA_DIR`
 pointed elsewhere. `ujust setup-dev help` says so; the other runtimes stay under `installs/`.
 
+## A kbuild fragment gated on a kernel config symbol compiles nothing and exits 0
+
+`make -C /usr/src/kernels/<kver> M=<clone> modules` on `namjaejeon/linux-ntfs` prints
+`MODPOST Module.symvers`, exits 0 and produces no `.ko`. Its fragment is
+`obj-$(CONFIG_NTFS_FS) += ntfs.o`, which expands to `obj- += ntfs.o` against a kernel that
+leaves the symbol unset, a variable kbuild never reads. The module's own top-level `Makefile`
+hides this with `export CONFIG_NTFS_FS := m`, which a direct `-C <kernel> M=` call bypasses.
+Measured 2026-09-04 on 7.2.1-ogc4.1 and 6.18.48-ogc1.1: nothing without the symbol, `ntfs.ko`
+with `CONFIG_NTFS_FS=m` on the make line. `source.env` carries the symbol as `KO_BUILD_ARGS`,
+`build-kmods.sh` refuses a build that produced no file, and `55-ntfsplus.sh` asserts the
+`fs-ntfs` alias. `msi-ec` and `acpi_ec` are immune, their fragments being unconditional
+`obj-m +=`.
+
+## `mount -t ntfs` reaches the kernel driver only when no `mount.ntfs` helper exists
+
+With the NTFSPLUS module loaded and `ntfs` in `/proc/filesystems`, `mount -t ntfs` still lands
+on ntfs-3g and `findmnt` reports `fuseblk`: `mount(8)` hands any type with a
+`/sbin/mount.<type>` helper to that helper before the kernel sees the type. The ntfs-3g package
+links `mount.ntfs` and `mount.ntfs-fuse` to `mount.ntfs-3g` in `/usr/bin`, also reached as
+`/usr/sbin`, a link to `bin` (measured 2026-09-04). fstab rows, `.mount` units and
+`mount -t auto` go the same way, libblkid reporting the type as `ntfs`. `mount -i` skips the
+helper and has no fstab equivalent, which is why `55-ntfsplus.sh` removes the two generic
+links; `mount.ntfs-3g` stays as the explicit FUSE route.
+
+## A kernel module can pass vermagic and modinfo and panic at its first use
+
+A build on a new kernel series shipped an NTFSPLUS pin that predated an iomap fix the module
+needed under that series. The build and its vermagic guard were green, and every host with an
+NTFS row in fstab kernel-panicked seconds after `Switching root`, before
+`systemd-journal-flush`. The journal held nothing, pstore was empty, and the evidence lived on
+the console alone (three panics, 2026-08-28). A build-time guard cannot catch this class, the
+breakage being a runtime API mismatch and a real mount needing a booted target kernel. Every
+pin bump therefore takes the runtime proof on a booted host, and
+`bazzite-mx-ntfsplus-setup enable` runs that proof on a loop image before it rewrites a single
+fstab row.
+
+## The two NTFS kernel drivers agree on modes and case under a mask, with permissive exceptions
+
+On a volume mounted `umask=000` the mode bits come from the WSL metadata EAs `$LXMOD`, `$LXUID`
+and `$LXGID`, written by WSL and by both drivers, not from the mask: an object carrying
+`$LXMOD` reports exactly that mode. `ntfs3` lets `$LXUID`/`$LXGID` override the mount's
+`uid=`/`gid=`, where NTFSPLUS lets the mount option win. `ntfs3` also subtracts the write bits
+for the DOS read-only attribute, where NTFSPLUS reads none at inode load. Both differences are
+permissive-only, no object losing a bit, and the round trip is lossless. Both drivers mount
+case-sensitive by default and accept `nocase`. Measured 2026-07-30 on a volume shared with
+Windows, fresh mounts on both sides, a mount already up serving `$LXMOD` from the cached inode.
+Without `umask`, `fmask` or `dmask` they part: `ntfs3` masks with the umask of the mounting
+process (0022 under systemd), NTFSPLUS with none, so an object without `$LXMOD` is 0755 under
+`ntfs3` and 0777 under NTFSPLUS, writable by every account. Measured 2026-10-01 on a row
+`uid=1000,gid=1000`, the defaults read in each driver's `super.c`. This is why the NTFSPLUS
+opt-in can rewrite an fstab row that carries a mask without writing one
+([`divergences.md`](divergences.md)).
+
+## A udisks `_defaults` option its `_allow` set lacks fails every mount
+
+`/etc/udisks2/mount_options.conf` replaces each builtin set of udisks whole, key by key. A file
+with only `ntfs:ntfs_defaults` extended by `errors=remount-ro` made udisks refuse every
+NTFSPLUS mount with ``Mount option `errors=remount-ro' is not allowed``; with `ntfs:ntfs_allow`
+extended too, NTFSPLUS mounted the volume `errors=remount-ro`, and without the file
+`errors=continue`. Measured 2026-10-02 with udisks2 2.11.2 in a privileged container of the
+image, the host's udev shared, on a 64 MB loop image formatted by `mkntfs`. The image's file
+carries both keys ([`divergences.md`](divergences.md) § NTFSPLUS as a per-host opt-in).
+
 ## A local pre-flight can exit 0 without running a changed build script
 
 buildah keys a `RUN` layer on its command string and its parent layer; the content behind a
@@ -212,8 +300,21 @@ buildah keys a `RUN` layer on its command string and its parent layer; the conte
 `system_files/`, a pre-flight whose base layers are cached reports `Using cache` on the
 kmod-builder and build steps and exits 0 in about three minutes with an image built from the
 old scripts. Measured 2026-09-04: the closed flavour's pre-flight after a new feature printed
-ten `Using cache` lines, while `--no-cache` produced the real build. CI is not affected, a
-fresh runner having no layer cache.
+ten `Using cache` lines and no `kmod ntfsplus:` line, while `--no-cache` produced the real
+build. CI is not affected, a fresh runner having no layer cache.
+
+## NTFSPLUS can refuse a directory entry with a bare `EINVAL`, once
+
+On a volume under NTFSPLUS, `mkstemp` and `touch` in one directory failed with
+`Invalid argument` while the kernel log carried the chain
+`ntfs_attr_add(): Failed to add resident attribute`, `ntfs_ibm_add(): Failed to add AT_BITMAP`,
+`ntfs_ir_make_space(): Failed to modify INDEX_ROOT` (measured 2026-08-04, kernel
+`7.1.5-ogc5.1`, a Windows system volume with 504 GB free). Every tool reads the `EINVAL` as a
+bad name or an unwritable directory. The condition is transient: the same directories accepted
+the same names the next day on the same mount, the WSL metadata EAs made no difference, and the
+three files involved matched the source by checksum, so nothing was truncated. Before chasing
+permissions or names, read `journalctl -k -g 'ntfs: (device'` for the window; `rsync --inplace`
+skips the temporary file and goes through.
 
 ## A skel file reaches no account that already exists
 
@@ -251,30 +352,60 @@ A `nofail` row whose UUID is absent, the external disk that is not plugged in, g
 option notwithstanding (measured 2026-09-07, util-linux of Fedora 44, in a VM with such a row
 on the `ntfs` driver). `bazzite-mx-migrate apply` ran the verification after writing the
 rewritten table and treated the status as fatal: the run stopped at step 6 with the `ntfs3` row
-already written, step 6b and 7 never ran. The helper verifies the rewritten table before
-writing it, through `--tab-file`, and stops only on an error the current table does not already
-carry (`host.sh`); the messages are read under `LC_ALL=C`, findmnt localizing them. The verdict
-is the summary line findmnt ends with, never the presence of output: on a table with a row of
-fewer than three fields findmnt prints `parse error at line N -- ignored` and dies of SIGSEGV,
-status 139, with no summary (measured 2026-09-07, util-linux 2.41.5), and a probe keyed on
-"printed anything" read that as a clean table; a table without the summary is refused, nothing
-written. The two streams have to be merged, and findmnt block-buffers its findings on stdout
-into a pipe while the summary on stderr is not buffered: past 4096 bytes of findings the
-summary lands inside a cut line, whose tail starts at column 0 and passes for a mount point, so
-before and after the rewrite the sets differed and a legitimate rewrite of a 28-row table was
-refused (measured 2026-09-07 in the build image). The helper runs findmnt under `stdbuf -oL`,
-and the self-test of `bazzite-mx-migrate` carries a 40-row table.
+already written, step 6b and 7 never ran. `bazzite-mx-ntfsplus-setup enable` and `disable` had
+the same shape: the table written, then `findmnt --verify --fstab` fatal, the remount never
+reached, so a host with such a row was left with its rows switched and its volumes on the old
+driver. Both helpers verify the rewritten table before writing it, through `--tab-file`, and
+stop only on an error the current table does not already carry (`host.sh`, shared); the
+messages are read under `LC_ALL=C`, findmnt localizing them. The verdict is the summary line
+findmnt ends with, never the presence of output: on a table with a row of fewer than three
+fields findmnt prints `parse error at line N -- ignored` and dies of SIGSEGV, status 139, with
+no summary (measured 2026-09-07, util-linux 2.41.5), and a probe keyed on "printed anything"
+read that as a clean table; a table without the summary is refused, nothing written. The two
+streams have to be merged, and findmnt block-buffers its findings on stdout into a pipe while
+the summary on stderr is not buffered: past 4096 bytes of findings the summary lands inside a
+cut line, whose tail starts at column 0 and passes for a mount point, so before and after the
+rewrite the sets differed and a legitimate rewrite of a 28-row table was refused (measured
+2026-09-07 in the build image). The helpers run findmnt under `stdbuf -oL`, and the self-test
+of `bazzite-mx-migrate` carries a 40-row table.
+
+## A fstab row may end at its type
+
+fstab(5) makes the fourth, fifth and sixth fields optional, so `UUID=… /mnt/data ntfs` is a row
+`findmnt --verify` parses and the helpers count. Both rewriters required a blank after the type
+and left such a row alone, and the guard on rows left then refused the table for good:
+`ujust setup-ntfsplus disable`, the documented recovery, could not run on that host (measured
+2026-09-07 in the build image). The rewriters accept the end of the row after the type, and
+both self-test tables carry a row of that shape.
 
 ## A fstab row may start with whitespace
 
 libmount skips the blanks before the first field, so `   UUID=… /mnt/data ntfs3 …` is a row
-`findmnt --tab-file` lists and the helpers' awk counts, but the rewriter anchored its pattern
-at a non-blank byte and left it alone; the guard on rows left then refused the table for good,
-step 6 of `migrate` included (measured 2026-09-08 in the build image). The pattern allows
-leading blanks, kept as they are, and the self-test table carries an indented row. A CRLF table
-is the sibling case: the rewriter treats `\r` as the blank after the type and switches the
-column, but awk's default splitting does not, so a row ending at its type read as type
-`ntfs\r`; `fstab_entries` drops a trailing `\r` (measured 2026-09-08 on a scratch table).
+`findmnt --tab-file` lists and the helpers' awk counts, but the two rewriters anchored their
+pattern at a non-blank byte and left it alone; the guard on rows left then refused the table
+for good, `disable` and step 6 of `migrate` included (measured 2026-09-08 in the build image).
+The pattern allows leading blanks, kept as they are, and both self-test tables carry an
+indented row. A CRLF table is the sibling case: the rewriters treat `\r` as the blank after the
+type and switch the column, but awk's default splitting does not, so a row ending at its type
+read as type `ntfs\r` and never reached the remount; `fstab_entries` drops a trailing `\r`
+(measured 2026-09-08 on a scratch table).
+
+## A mount point with a space was never remounted
+
+`setup-ntfsplus` handed the mount points of the rewritten rows to `umount`, `mount` and
+`findmnt --mountpoint` as fstab writes them, so `/mnt/games\040disk` matched nothing, the
+`continue` for an unmounted volume fired and the volume stayed on the old driver with no line
+printed; `verify-host`, which unescapes, then failed the row as mounted with the other type
+(measured 2026-09-08 with a bind mount on a path with a space). The loop unescapes each point
+first (`unescape_fstab_field`, `host.sh`), and the self-test stubs `umount` and `mount` to read
+the paths they receive.
+
+## `status` printed an empty list for a type with no row
+
+`setup-ntfsplus status` printed `fstab ntfs3: ` for a type with no row: the `none` substitution
+was a `sed` on the list, which runs on zero lines and prints nothing (measured 2026-09-07). It
+is a parameter default, and the self-test checks the three lines on a table without NTFS rows;
+`mounted:` gets the same `none` when `findmnt` lists nothing.
 
 ## `verify-host` read an unplugged `nofail` volume as a mount failure
 
@@ -295,6 +426,16 @@ octal digits and nothing else: bash's `printf '%b'` also reads `\0401` as one by
 "unable to resolve" is the only answer read as absent, any other failure stopping the helper
 with exit 1, its `ERROR:` line naming the source, an unreadable probe being no proof of
 absence.
+
+## `findmnt -t` exits 1 on any error and 0 with nothing on no match
+
+`src_ntfs_mounts` of `bazzite-mx-ntfsplus-setup` read a non-zero
+`findmnt -t ntfs,ntfs3,fuseblk` as "no volume mounted", so a table findmnt could not read
+passed as an unmounted host (`mounted: none`, exit 0). Measured 2026-09-10 in the image
+(util-linux 2.41.5): with no matching row findmnt exits 0 and prints nothing, and it exits 1 on
+every error, a bad option, an absent or unreadable table, an unknown column. A non-zero status
+is an error, ended with `ERROR:`; the self-test feeds a stub that exits 1 (refused) and one
+that exits 0 with nothing (the empty list).
 
 ## A triggered automount stacks the volume's type over `autofs`
 
@@ -383,13 +524,24 @@ bazzite, bazzite-dx, aurora and amyos).
 Only a `#` that is the first non-blank character of a line opens a comment for libmount, so
 `LABEL=Disco#2 /mnt/Disco2 ntfs defaults 0 0` is a row `findmnt --verify --tab-file` parses
 with no parse error and `findmnt --tab-file -o SOURCE,TARGET,FSTYPE` lists (measured 2026-09-12
-on a scratch table, util-linux 2.41.5). The rewriter anchored its source field at
+on a scratch table, util-linux 2.41.5). Both rewriters anchored their source field at
 `[^#[:space:]]+`, which matches no field carrying a `#`, so such a row kept its type, the guard
 on rows left refused the table, and `migrate apply` stopped in step 6, after the pin and the
 `uupd.timer` stop, with no reason the user could act on. The pattern excludes `#` only as the
-first character of the field, `[^#[:space:]][^[:space:]]*`, and the self-test carries a row
+first character of the field, `[^#[:space:]][^[:space:]]*`, and both self-tests carry a row
 whose label holds a `#` next to a commented-out row that would otherwise match. Windows volumes
 reach the state: a `#` is legal in an NTFS label.
+
+## A trailing `2> /dev/null` does not silence a failed redirection
+
+Redirections are applied left to right and a `>` that fails ends the command there, so bash
+reports the error before a `2> /dev/null` further right has been applied. `write_opt_in` of
+`bazzite-mx-ntfsplus-setup` carried `ntfsplus_optin_text > "$NTFSPLUS_OPTIN.new" 2> /dev/null`
+and leaked for that reason: as `nobody` under `LC_ALL=it_IT.UTF-8` it printed
+`bash: riga 11: /etc/modprobe.d/bazzite-mx-ntfsplus.conf.new: Permesso negato` above its own
+`ERROR:` line (measured 2026-09-12 in the pre-flight image). `2> /dev/null > file` is the order
+that silences it, and on the same run the `ERROR:` line stood alone. Both sites read that way:
+`write_opt_in` and `write_modules_load_file` of `bazzite-mx-msi-setup`.
 
 ## A recipe's description is the LAST comment line above it
 

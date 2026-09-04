@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Kernel-module helpers shared by the kmod-builder stage and 50-kmods.sh,
-# and the tests of both: all must agree on the image's one
+# Kernel-module helpers shared by the kmod-builder stage, 50-kmods.sh and
+# 55-ntfsplus.sh, and the tests of both: all must agree on the image's one
 # kernel and on what a good module looks like. Needs lib/log.sh for fail_build.
 
 # The one kernel under <modules-dir>; two or none is a build error, because a
@@ -21,7 +21,8 @@ kernel_version() {
 
 # Status 0 for a readable module stamped for <kver> and, when <version> is
 # given, carrying it. A vermagic mismatch means the kernel-devel tree and the
-# installed kernel disagree.
+# installed kernel disagree: docs/gotchas.md § A kernel module can pass
+# vermagic and modinfo and panic at its first use.
 assert_module() {
     local ko=$1 kver=$2 version=${3:-} vermagic found
 

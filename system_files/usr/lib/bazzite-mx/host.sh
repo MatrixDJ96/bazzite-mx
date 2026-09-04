@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
-# What the verify-host, migrate and msi-setup helpers read about the host,
-# the fstab type rewrite and the verification migrate judges it on, and the
-# error helpers all three call, the privilege one migrate and msi-setup.
-# Sourced by those three and by tests/helpers/verify-host.sh, never run;
-# the sourcing script sets its own `set` options.
+# What the verify-host, migrate, ntfsplus-setup and msi-setup helpers read
+# about the host, the fstab type rewrite and the verification migrate and
+# ntfsplus-setup judge it on, and the error helpers all four call, the
+# privilege one migrate, ntfsplus-setup and msi-setup. Sourced by those four
+# and by tests/helpers/verify-host.sh, never run; the sourcing script sets
+# its own `set` options.
 #
 # FIXTURE=<dir>: every file is read under <dir> and every command's output
 # under <dir>/cmd/, so a helper runs on a synthetic host in the smoke tests;
 # ntfs3_available (the running kernel) and fstab_verify_output (findmnt
 # --verify on the running root) read the host whatever the fixture: their
-# callers (migrate apply) run under sudo, which drops FIXTURE.
+# callers (migrate apply, ntfsplus-setup enable and disable) run under sudo,
+# which drops FIXTURE.
 # Output contract: `ERROR: <reason>` on stderr is what the recipes and the
 # tests read.
 
 FIXTURE=${FIXTURE:-}
 VENDOR_SCOPE=ghcr.io/matrixdj96
 IMAGE_INFO=/usr/share/ublue-os/image-info.json
+
+# Written by bazzite-mx-ntfsplus-setup enable: a comments-only file masking
+# the image's blacklist of the same name.
+NTFSPLUS_OPTIN=/etc/modprobe.d/bazzite-mx-ntfsplus.conf
 
 # Written by bazzite-mx-msi-setup enable.
 MSI_MODULES_LOAD=/etc/modules-load.d/bazzite-mx-msi.conf
@@ -37,7 +43,8 @@ reason_on_one_line() {
     echo "${reason:-no output}"
 }
 
-# A function a caller runs under `if` returns a status.
+# A function a caller runs under `if` returns a status; the two exceptions
+# are named where they happen (switch_fstab_rows).
 exit_with_error() {
     print_error "$@"
     exit 1
@@ -232,18 +239,46 @@ fstab_entries() {
 
 # replace_fstab_type <from> <to> <in> <out>: the type column of every entry
 # whose type is exactly <from> becomes <to>; comments, blank lines and every
-# other byte pass through unchanged. The type may end
+# other byte but errors=remount-ro pass through unchanged. The type may end
 # the row: fstab(5) makes the last three fields optional. A row may start with
 # blanks, which libmount skips (docs/gotchas.md § A fstab row may start with
 # whitespace). Only the first non-blank character of a line opens a comment,
 # so a source field may carry a `#` (docs/gotchas.md § A `#` inside an fstab
-# field is not a comment). migrate rewrites ntfs -> ntfs3.
+# field is not a comment). ntfsplus-setup rewrites both ways, migrate only
+# ntfs -> ntfs3.
+# Towards ntfs every ntfs row without an errors= option, switched or already
+# ntfs, gains `errors=remount-ro`, which NTFSPLUS needs to mount a dirty or
+# hibernated volume read-only; a row turning ntfs3 loses it, ntfs3 refusing
+# the option (docs/divergences.md § NTFSPLUS as a per-host opt-in); a row
+# whose only option it is, followed by dump and pass, keeps it and ntfs3
+# refuses the row.
 replace_fstab_type() {
     local from=$1 to=$2 input=$3 output=$4
     local fields='[[:space:]]*[^#[:space:]][^[:space:]]*[[:space:]]+[^[:space:]]+[[:space:]]+'
-    local row="^(${fields})${from}([[:space:]]|\$)"
+    local row="^(${fields})${from}([[:space:]]|\$)" typed="^(${fields}${to})"
+    local option=errors=remount-ro edits=()
 
-    sed -E "s/${row}/\\1${to}\\2/" "$input" > "$output"
+    case $to in
+        ntfs)
+            edits=(
+                -e "s/${row}/\\1${to}\\2/"
+                -e "/${typed}[[:space:]]+([^[:space:]]*,)?errors=/b"
+                -e "s/${typed}([[:space:]]+[^[:space:]]+)/\\1\\2,${option}/"
+                -e "s/${typed}([[:space:]]*)\$/\\1 ${option}\\2/"
+            )
+            ;;
+        ntfs3)
+            edits=(
+                -e "/${row}/!b"
+                -e "s/${row}/\\1${to}\\2/"
+                -e "s/${typed}([[:space:]]+[^[:space:]]*),${option}(,|[[:space:]]|\$)/\\1\\2\\3/"
+                -e "s/${typed}([[:space:]]+)${option},/\\1\\2/"
+                -e "s/${typed}[[:space:]]+${option}([[:space:]]*)\$/\\1\\2/"
+            )
+            ;;
+    esac
+
+    sed -E "${edits[@]}" "$input" > "$output"
 }
 
 # fstab_verify_output <fstab>: everything findmnt --verify prints on that
@@ -299,8 +334,16 @@ new_verify_errors() {
     comm -13 <(fstab_verify_errors "$before") <(fstab_verify_errors "$after")
 }
 
-# Status 0 when the running kernel has ntfs3 registered or loadable. The
-# rewrite to ntfs3 asks it first: a host whose kernel has no ntfs3 would
+ntfsplus_optin() {
+    [ -e "$(host_file $NTFSPLUS_OPTIN)" ]
+}
+
+ntfs_registered() {
+    grep -qw ntfs "$(host_file /proc/filesystems)" 2> /dev/null
+}
+
+# Status 0 when the running kernel has ntfs3 registered or loadable. Both
+# rewrites back to ntfs3 ask it first: a host whose kernel has no ntfs3 would
 # come back from the reboot with the volumes unmounted.
 ntfs3_available() {
     if grep -qw ntfs3 /proc/filesystems; then
@@ -310,13 +353,24 @@ ntfs3_available() {
     modprobe -n ntfs3 2> /dev/null
 }
 
+# The text of the opt-in file. The fixtures write the same, so what keeps it
+# out of the residue is the exclusion by name in ntfsplus_files, not a text
+# the grep happens to miss.
+ntfsplus_optin_text() {
+    printf '# bazzite-mx: NTFSPLUS opt-in of this host. A file of this name in /etc/modprobe.d\n'
+    printf '# masks /usr/lib/modprobe.d/bazzite-mx-ntfsplus.conf (blacklist ntfs). Written by\n'
+    printf '# ujust setup-ntfsplus enable, removed by disable.\n'
+}
+
 # --- residue ------------------------------------------------------------------
 
-# Residue of a host that loaded ntfsplus on its own, one path per line.
+# Residue of a host that loaded ntfsplus on its own, one path per line. The
+# opt-in file carries the same name and is not residue.
 ntfsplus_files() {
     grep -rls ntfsplus "$(host_file /etc/modprobe.d)" "$(host_file /etc/modules-load.d)" \
         2> /dev/null \
-        | sed "s|^$FIXTURE||" || true
+        | sed "s|^$FIXTURE||" \
+        | grep -vx "$NTFSPLUS_OPTIN" || true
 }
 
 # ntfsplus_kargs <kernel arguments>: the ntfsplus arguments among them, one

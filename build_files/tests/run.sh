@@ -25,8 +25,8 @@ export PYTHONDONTWRITEBYTECODE=1
 # Pairing guard: a feature cannot land without its test and a test cannot
 # outlive its feature. Both directions for the numbered class; one direction
 # for the helpers, a test having to name an installed helper while a helper
-# may carry its cases in its own `--self-test` instead (bazzite-mx-migrate
-# does). One FAIL line per unpaired file.
+# may carry its cases in its own `--self-test` instead (bazzite-mx-migrate,
+# bazzite-mx-ntfsplus-setup do). One FAIL line per unpaired file.
 require_pairs() {
     local tests=$1
     local scripts=$2

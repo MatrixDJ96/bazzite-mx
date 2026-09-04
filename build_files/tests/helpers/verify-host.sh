@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test of /usr/libexec/bazzite-mx-verify-host, the helper behind ujust
 # verify-host, on host-shaped fixtures: a migrated host, one before the
-# migration, one on the signed transport with the wrong tag and key, an
-# MSI host that turned setup-msi off, the volume rows
+# migration, one on the signed transport with the wrong tag and key, the
+# ntfsplus opt-in, an MSI host that turned setup-msi off, the volume rows
 # fstab(5) allows with one unplugged, and a flavour that does not match the
 # GPU; then the block-device resolver of host.sh on findfs stubs. What needs
 # a booted host is proven there.
@@ -187,7 +187,7 @@ check_verify_host_on_unmigrated_fixture() {
         'policy.json has no sigstoreSigned scope'
         'MSI host: msi_ec not loaded'
         'MSI host: acpi_ec not loaded'
-        'fstab: /mnt/win uses type ntfs, not ntfs3'
+        'fstab: /mnt/win uses type ntfs without the ntfsplus opt-in'
         'ntfsplus residue: /etc/modprobe.d/ntfsplus.conf'
         'MSI residue: /etc/modules-load.d/msi-ec.conf'
         "/etc/yum.repos.d/1password.repo differs from the image's copy"
@@ -297,6 +297,92 @@ check_verify_host_on_signed_but_wrong_fixture() {
         echo "FAIL: verify-host on the signed-but-wrong fixture: exit $VERIFY_HOST_STATUS," \
             "defects not named: $(on_one_line none ',' <<< "$unreported");" \
             "$(grep -E '^(FAIL|ERROR)' <<< "$output" | on_one_line 'no matching line')"
+    fi
+}
+
+# Opted into NTFSPLUS: rows on ntfs, mounted as ntfs, driver registered; the
+# opt-in carries the text setup-ntfsplus writes, which names ntfsplus.
+# Known-bad: an ntfs row without errors=remount-ro, an ntfs row not mounted,
+# a row left on ntfs3, and the driver not registered.
+check_verify_host_on_optin_fixture() {
+    local good=$1
+    local fixture=$good/../optin
+    local optin output
+
+    cp -a "$good/." "$fixture/"
+
+    if ! optin=$(
+        source /usr/lib/bazzite-mx/host.sh 2> /dev/null
+        ntfsplus_optin_text 2> /dev/null
+    ); then
+        echo "FAIL: /usr/lib/bazzite-mx/host.sh does not print the ntfsplus opt-in text"
+        return 0
+    fi
+
+    printf '%s\n' "$optin" > "$fixture/etc/modprobe.d/bazzite-mx-ntfsplus.conf"
+    printf 'UUID=1 / btrfs subvol=root 0 0\n%s\n' \
+        'UUID=2 /mnt/win ntfs defaults,nofail,errors=remount-ro 0 0' > "$fixture/etc/fstab"
+    printf '/mnt/win ntfs\n' > "$fixture/cmd/mounts"
+    printf 'nodev\tbtrfs\n\tntfs3\n\tntfs\n' > "$fixture/proc/filesystems"
+
+    run_verify_host "$fixture"
+    output=$VERIFY_HOST_OUTPUT
+
+    if [ "$VERIFY_HOST_STATUS" -eq 0 ] && ! grep -q '^FAIL:' <<< "$output" \
+        && grep -q '^OK: ntfsplus opt-in active' <<< "$output" \
+        && grep -q '^OK: fstab: /mnt/win is ntfs and mounted with ntfs' <<< "$output"; then
+        echo "OK: verify-host passes on the ntfsplus opt-in fixture" \
+            "(ntfs rows expected, opt-in file not residue)"
+    else
+        echo "FAIL: verify-host on the opt-in fixture (exit $VERIFY_HOST_STATUS):" \
+            "$(grep -E '^(FAIL|ERROR)' <<< "$output" | on_one_line 'no matching line')"
+    fi
+
+    sed -i 's/,errors=remount-ro//' "$fixture/etc/fstab"
+
+    run_verify_host "$fixture"
+    output=$VERIFY_HOST_OUTPUT
+
+    if grep -qx 'FAIL: fstab: /mnt/win is ntfs without errors=remount-ro (ujust setup-ntfsplus.*' \
+        <<< "$output"; then
+        echo "OK: verify-host fails an ntfs row without errors=remount-ro"
+    else
+        echo "FAIL: verify-host on an ntfs row without errors=remount-ro:" \
+            "$(grep -E '^(FAIL|OK).*ntfs' <<< "$output" | on_one_line 'no matching line')"
+    fi
+
+    sed -i 's/nofail/nofail,errors=remount-ro/' "$fixture/etc/fstab"
+
+    # Known-bad: the message blamed a dirty volume, which NTFSPLUS mounts.
+    : > "$fixture/cmd/mounts"
+
+    run_verify_host "$fixture"
+    output=$VERIFY_HOST_OUTPUT
+
+    if grep -q '^FAIL: fstab: /mnt/win is ntfs but not mounted (journalctl -b | grep ntfs' \
+        <<< "$output" \
+        && ! grep -q 'dirty volume' <<< "$output"; then
+        echo "OK: verify-host names a refused option, not a dirty volume, for an ntfs row"
+    else
+        echo "FAIL: verify-host on an unmounted ntfs row:" \
+            "$(grep -E '^FAIL.*ntfs' <<< "$output" | on_one_line 'no matching line')"
+    fi
+
+    printf 'UUID=1 / btrfs subvol=root 0 0\nUUID=2 /mnt/win ntfs3 defaults,nofail 0 0\n' \
+        > "$fixture/etc/fstab"
+    printf 'nodev\tbtrfs\n\tntfs3\n' > "$fixture/proc/filesystems"
+
+    run_verify_host "$fixture"
+    output=$VERIFY_HOST_OUTPUT
+
+    if grep -q '^FAIL: fstab: /mnt/win uses type ntfs3 while the ntfsplus opt-in is active' \
+        <<< "$output" \
+        && grep -q '^INFO: the ntfs driver is not registered yet' <<< "$output"; then
+        echo "OK: verify-host names an ntfs3 row under the opt-in," \
+            "reports an unloaded driver as INFO"
+    else
+        echo "FAIL: verify-host under the opt-in with an ntfs3 row:" \
+            "$(grep -E '^(FAIL|OK).*ntfs' <<< "$output" | on_one_line 'no matching line')"
     fi
 }
 
@@ -485,6 +571,7 @@ fixture_migrated_host "$work/ok" "$image"
 check_verify_host_on_migrated_fixture "$work/ok"
 check_verify_host_on_unmigrated_fixture "$work/ok" "$image"
 check_verify_host_on_signed_but_wrong_fixture "$work/ok" "$image"
+check_verify_host_on_optin_fixture "$work/ok"
 check_verify_host_on_msi_without_optin_fixture "$work/ok"
 check_verify_host_on_unplugged_volume_fixture "$work/ok"
 check_verify_host_on_gpu_mismatch "$work/ok" "$image"

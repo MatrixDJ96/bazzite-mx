@@ -22,7 +22,7 @@ MASTER=/usr/share/ublue-os/justfile
 OURS=$JUST_DIR/95-bazzite-mx.just
 APPS=$JUST_DIR/82-bazzite-apps.just
 SNAPSHOT=$BUILD_STATE/just.base.summary
-OUR_RECIPES="install-jetbrains-toolbox migrate setup-dev setup-msi setup-panels"
+OUR_RECIPES="install-jetbrains-toolbox migrate setup-dev setup-msi setup-ntfsplus setup-panels"
 OUR_RECIPES+=" verify-host"
 REPLACING_RECIPES="setup-sunshine setup-virtualization"
 
@@ -157,7 +157,7 @@ check_help() {
 }
 
 # --- a failed call is the recipe's status -------------------------------------
-# setup-msi enable and setup-dev install print a
+# setup-msi enable, setup-ntfsplus enable and setup-dev install print a
 # `Done.` line after their call, setup-panels prints what plasmashell
 # answered, setup-sunshine enable and disable report the service and its
 # status reads the unit: the recipe runs as nobody (the recipes refuse root)
@@ -522,14 +522,14 @@ check_recipes_reject_an_unknown_option() {
     fi
 }
 
-# The four recipes with a Choose menu exit 0 and print no `Unknown option:`
+# The five recipes with a Choose menu exit 0 and print no `Unknown option:`
 # when the menu answers nothing, as on a cancel or without a terminal.
 # Known-bad: the empty answer fell to `*)`, `Unknown option:` and exit 1.
 check_menu_recipes_accept_an_empty_answer() {
     local dir=$1
     local recipe output failed=""
 
-    for recipe in setup-dev setup-msi setup-sunshine setup-virtualization; do
+    for recipe in setup-dev setup-msi setup-ntfsplus setup-sunshine setup-virtualization; do
         if ! output=$(STUB_FAILS=1 run_recipe_as_nobody "$dir" "$recipe" "") \
             || grep -q '^Unknown option:' <<< "$output"; then
             failed+=" $recipe"
@@ -557,6 +557,7 @@ check_self_test 70-justfile.sh bash "$CTX/build_files/70-justfile.sh"
 stubs=$(mktemp -d)
 fixture_recipe_stubs "$stubs"
 check_recipe_stops_on_a_failed_call "$stubs" setup-msi enable Done.
+check_recipe_stops_on_a_failed_call "$stubs" setup-ntfsplus enable Done.
 check_recipe_stops_on_a_failed_call "$stubs" setup-dev install Done.
 check_recipe_stops_on_a_failed_call "$stubs" setup-panels "" "stub applied the panels"
 check_recipe_stops_on_a_failed_call "$stubs" setup-sunshine enable "Sunshine enabled for"
