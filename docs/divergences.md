@@ -8,7 +8,7 @@ which files carry it; the guards themselves live in the build script and its tes
 
 Contents: three flavours · image identity · signing trust · hook framework · Docker CE ·
 virtualization · VS Code · git tools · command-line tools · mise · desktop applications ·
-Sunshine · KDE defaults · MSI laptop · ujust recipes · the cleaned stage · CI.
+Sunshine · KDE defaults · MSI laptop · NTFSPLUS · ujust recipes · the cleaned stage · CI.
 
 ## Three flavours, one recipe
 
@@ -526,12 +526,125 @@ Files: `build_files/50-kmods.sh` and its test, `build_files/kmods/build-kmods.sh
 `build_files/lib/kmod.sh`, `system_files/usr/libexec/bazzite-mx-msi-setup`, and the recipe
 `setup-msi` in `system_files/usr/share/ublue-os/just/95-bazzite-mx.just`.
 
+## NTFSPLUS as a per-host opt-in
+
+NTFSPLUS is the from-scratch read/write NTFS driver on iomap and folios that Linux 7.1 carries
+as `fs/ntfs`, written by Namjae Jeon, the author of exFAT and ksmbd. It and `ntfs3` coexist by
+design (`fs/ntfs3/Kconfig`: `depends on !NTFS_FS || m`). The 7.2 kernel of `bazzite` and
+`bazzite-nvidia-open` builds it as a module, the 6.18 kernel of `bazzite-nvidia` leaves it off
+(`CONFIG_NTFS_FS` in `/usr/lib/modules/<kver>/config`). The image builds the author's
+standalone packaging of the same code (`namjaejeon/linux-ntfs`) for all three alike, under
+`updates/`, which depmod searches before the in-tree `kernel/` (kmod's `tools/depmod.c`),
+pinned to a merge commit of `main`: `ntfs-next` is force-pushed and its tip may be mid-rework.
+The module is `ntfs.ko` and registers the filesystem type `ntfs`: "ntfsplus" is the project's
+name, never the module's nor the mount type's. Its kbuild fragment is gated on
+`CONFIG_NTFS_FS`, so `source.env` forces the symbol on the make line
+([`gotchas.md`](gotchas.md) § A kbuild fragment gated on a kernel config symbol compiles
+nothing and exits 0). Like the MSI modules, `ntfs.ko` is unsigned: the kernel refuses it when
+Secure Boot is on, so the opt-in needs Secure Boot off.
+
+The in-kernel `ntfs3` is the fleet's baseline and no fstab row changes NTFS driver without the
+host's own choice, so the image ships `blacklist ntfs` in `/usr/lib/modprobe.d/`. That stops
+the kernel from loading the driver by alias at the first `mount -t ntfs`, while an explicit
+`modprobe ntfs` still works. kmod reads `/etc/modprobe.d` first and skips a later file of the
+same name, so a comments-only file of that name under `/etc` masks the blacklist
+(modprobe.d(5)). That file is the opt-in: `ujust setup-ntfsplus enable` writes it, `disable`
+removes it, and `verify-host` and `migrate` read it. The build also removes the two generic
+`mount.ntfs` and `mount.ntfs-fuse` links ntfs-3g installs, under both spellings, `/usr/bin` and
+the `/usr/sbin -> bin` symlink ([`gotchas.md`](gotchas.md) § `mount -t ntfs` reaches the kernel
+driver only when no `mount.ntfs` helper exists). `mount.ntfs-3g` and `ntfsprogs` stay, so
+`mount -t ntfs-3g` remains the explicit FUSE route. Removing the links also moves the volumes
+udisks mounts, from the file manager or `udisksctl mount`: Fedora builds udisks2 with
+`ntfs_drivers=ntfs,ntfs3` so that its first try reaches ntfs-3g through `mount.ntfs`
+(`udisks2.spec`, rhbz#2182206). Without the link that try reaches the kernel: on a host that
+did not opt in the blacklist fails it as an unknown type and udisks moves on to `ntfs3`, and
+after the opt-in NTFSPLUS takes the volume.
+
+`ujust setup-ntfsplus enable` proves the driver before touching fstab: a loop image formatted
+with `mkntfs`, mounted with `-t ntfs` and checked to report `ntfs` as its type, written to,
+unmounted, remounted, checksum compared. Only then do the `ntfs3` rows of fstab become `ntfs`,
+every `ntfs` row without an `errors=` option gaining `errors=remount-ro` and no mask written,
+so a row without `umask`, `fmask` or `dmask` takes what Windows wrote from 0755 under `ntfs3`
+to 0777 under NTFSPLUS, writable by every account ([`gotchas.md`](gotchas.md) § The two NTFS
+kernel drivers agree on modes and case under a mask, with permissive exceptions). The rewritten
+table is verified with `findmnt --verify --tab-file` against the current one before it is
+written, an error the current table does not carry refusing it, an unplugged `nofail` volume
+counting on both sides ([`gotchas.md`](gotchas.md) § `findmnt --verify` reports an unplugged
+`nofail` volume as an error); a rewrite refused or not written on `enable` withdraws the opt-in
+this run wrote and unloads the driver, the way every failed step before it does, while an
+opt-in from an earlier run stays and the error names `disable`; a backup, `daemon-reload` and a
+remount of each rewritten volume follow, a busy volume keeping its mount until the next boot. A
+switched row loses the options only `ntfs3` reads (`force`, `prealloc`, `delalloc`), which
+NTFSPLUS refuses, and a row left with no option gets `defaults`. `disable` switches the rows
+back and takes `errors=remount-ro` out; the dropped options stay out. The probe exists because
+a module built for the wrong kernel API dies at its first mount with vermagic and modinfo
+green, and fstab mounts fire at boot before the journal is on disk ([`gotchas.md`](gotchas.md)
+§ A kernel module can pass vermagic and modinfo and panic at its first use). No mount is ever
+proven in the build, there being no kernel to load into, so a pin bump takes the runtime proof
+on a booted host. That proof is per kernel series, and no fleet host boots the closed flavour,
+whose base carries another series (its `ostree.linux` label): such a host proves it for itself
+at opt-in. The opt-in and the `ntfs` rows of fstab follow a rebase unproven, so a move to the
+closed flavour takes the order [`migration.md`](migration.md) gives: disable before the rebase,
+enable after the reboot. Recovery after a boot panic:
+`rpm-ostree rollback && systemctl reboot`, then `ujust setup-ntfsplus disable` on the
+deployment that comes up; choosing the previous entry in the boot menu instead repairs its own
+`/etc` and leaves the default entry on the broken one, each deployment carrying its own `/etc`
+(`rpm-ostree(1)`, `rollback`). The table before the first rewrite is kept at
+`/etc/fstab.bazzite-mx-ntfsplus.bak` until `disable` removes it, and
+`sudo cp -p /etc/fstab.bazzite-mx-ntfsplus.bak /etc/fstab && sudo systemctl daemon-reload` puts
+it back by hand.
+
+NTFSPLUS defaults to `errors=continue`, which disarms its checks at mount: a volume Windows
+left dirty, or hibernated with `hiberfil.sys` in its root, would mount read-write without a
+warning and a dirty one have its flag cleared at unmount, where `ntfs3` refuses a dirty volume
+(`super.c` of `namjaejeon/linux-ntfs` at the commit `source.env` pins, `fs/ntfs3/super.c`). The
+`errors=remount-ro` the rewrite adds mounts those two read-only (`Mounting read-only` in the
+kernel log); `ntfs3` refuses the option, so `ujust setup-ntfsplus disable` and `ujust migrate`
+take it out of a row they rewrite to `ntfs3`, except where a hand-written row carries it as its
+only option before dump and pass: that row keeps it and `ntfs3` refuses it. `enable` gives the
+option to an `ntfs` row already in fstab too, left by an earlier opt-in or by Bazzite, where
+`ntfs` meant ntfs-3g, and leaves an `errors=` value written by hand; under the opt-in
+`verify-host` fails an `ntfs` row without an `errors=` option and names `enable` as the remedy.
+NTFSPLUS never reads whether `$LogFile` is clean (no `ntfs_is_logfile_clean` at the pin), so
+the option does not cover a volume fast startup left with pending log records and no dirty
+flag, a data volume being the usual one: it mounts read-write and its `$LogFile` is emptied
+(`load_system_files`). Fast startup off in Windows covers it.
+
+A volume udisks mounts, from the file manager or `udisksctl mount`, takes udisks' options,
+whose builtin `ntfs:ntfs_defaults` is `uid`, `gid` and `windows_names` and whose
+`ntfs:ntfs_allow` has no `errors` (`strings /usr/libexec/udisks2/udisksd`). The image ships
+`/etc/udisks2/mount_options.conf` with both keys, each the builtin set plus
+`errors=remount-ro`: a key there replaces the builtin set whole, and the defaults must be a
+subset of the allowed options (udisks, «Configurable mount options»), which
+`tests/55-ntfsplus.sh` compares with the builtin sets. The keys name the `ntfs` driver, so a
+volume udisks mounts with `ntfs3` keeps udisks' own options. A volume mounted read-only by the
+option says so only in the kernel log; it is writable again after Windows shuts down fully,
+fast startup off, and a remount.
+
+Bazzite enables `ntfs-nag.service` for every user, and the image disables it with
+`systemctl --global disable`, the way `41-sunshine.sh` disables its own unit. The unit is
+`/usr/lib/systemd/user/ntfs-nag.service`, symlinked from
+`/etc/systemd/user/xdg-desktop-autostart.target.wants/` in the base. Its script
+`/usr/libexec/ntfs-exfat-monitor-script` counts the `ntfs` and `exfat` mounts that already
+exist, then reads `findmnt -n --poll -t exfat,ntfs,fuseblk`, which reports only events after
+that: the nag never fires for an fstab mount made at boot, and always fires for one that
+appears after the graphical session started. An NTFSPLUS volume is type `ntfs`, so on a host
+that ran `ujust setup-ntfsplus enable` the base would nag against the feature this image ships.
+What a host loses: the `notify-send -u critical` warning that running games from Windows drives
+will cause problems, and its link to Bazzite's unsupported-filesystems documentation.
+
+Files: `build_files/55-ntfsplus.sh` and its test, `build_files/kmods/ntfsplus/source.env`,
+`system_files/usr/lib/modprobe.d/bazzite-mx-ntfsplus.conf`,
+`system_files/etc/udisks2/mount_options.conf`,
+`system_files/usr/libexec/bazzite-mx-ntfsplus-setup`, and the recipe `setup-ntfsplus` in
+`system_files/usr/share/ublue-os/just/95-bazzite-mx.just`.
+
 ## ujust recipes
 
 Bazzite's `ujust` is `just` run on `/usr/share/ublue-os/justfile`, which imports every file
-under `/usr/share/ublue-os/just/` by name and sets `allow-duplicate-recipes`. Six recipes of
-ours join it: `setup-panels`, `setup-msi`, `setup-dev`, `install-jetbrains-toolbox`,
-`verify-host` and `migrate`.
+under `/usr/share/ublue-os/just/` by name and sets `allow-duplicate-recipes`. Seven recipes of
+ours join it: `setup-panels`, `setup-msi`, `setup-ntfsplus`, `setup-dev`,
+`install-jetbrains-toolbox`, `verify-host` and `migrate`.
 
 `95-bazzite-mx.just` is appended as one more `import` line, the way bazzite-dx adds its own
 file (`bazzite-dx/build_files/60-clean-base.sh`). With duplicate names across imports the
@@ -566,7 +679,8 @@ Files: `build_files/70-justfile.sh` and its test,
 `system_files/usr/share/ublue-os/just/95-bazzite-mx.just`, and the helpers
 `bazzite-mx-verify-host`, `bazzite-mx-migrate` and `bazzite-mx-jetbrains-toolbox` under
 `system_files/usr/libexec/`; the first two source `system_files/usr/lib/bazzite-mx/host.sh`,
-which the MSI helper shares, and the Toolbox helper runs as the user and sources nothing.
+which the ntfsplus and MSI helpers share, and the Toolbox helper runs as the user and sources
+nothing.
 
 ## The cleaned stage
 

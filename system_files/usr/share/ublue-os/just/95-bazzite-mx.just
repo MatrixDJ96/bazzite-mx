@@ -96,6 +96,67 @@ setup-msi ACTION="":
         ;;
     esac
 
+# Use the NTFSPLUS driver for this host's NTFS volumes. Options: status | enable | disable
+[group("hardware")]
+setup-ntfsplus ACTION="":
+    #!/usr/bin/bash
+    source /usr/lib/ujust/ujust.sh
+    OPTION="{{ ACTION }}"
+    HELPER=/usr/libexec/bazzite-mx-ntfsplus-setup
+
+    if [ "$OPTION" == "help" ]; then
+      echo "Usage: ujust setup-ntfsplus <option>"
+      echo "  status   Module, opt-in, driver, fstab rows by type, mounted volumes"
+      echo "  enable   Prove the driver on a loop image, switch fstab rows ntfs3 -> ntfs, remount"
+      echo "  disable  Switch every ntfs row to ntfs3, remount, drop the opt-in and the fstab"
+      echo "           backup, unload the driver"
+      echo "Without an option a menu asks, status first."
+      echo "The image ships the driver as the type ntfs, blacklisted until a host opts in;"
+      echo "ntfs3 stays the default and a busy volume keeps its mount until the next boot."
+      echo "Once a host opts in, volumes the file manager mounts (udisks) use the driver too."
+      echo "enable adds errors=remount-ro to every ntfs row without an errors= option, and"
+      echo "udisks mounts take it from the image: a dirty volume, or one Windows hibernated"
+      echo "on, mounts read-only. Fast startup can leave a volume with neither sign, which"
+      echo "mounts read-write: turn fast startup off in Windows."
+      echo "enable drops force, prealloc and delalloc from the rows it switches: NTFSPLUS"
+      echo "refuses those ntfs3 options, and disable does not put them back."
+      echo "The module is unsigned, so Secure Boot has to be off."
+      exit 0
+    fi
+
+    if [[ $(id -u) -eq 0 ]]; then
+      echo "Please do not run this command as root"
+      exit 1
+    fi
+
+    if [ "$OPTION" == "" ]; then
+      OPTION=$(Choose "Show status" "Enable NTFSPLUS" "Disable NTFSPLUS")
+    fi
+
+    case "${OPTION,,}" in
+      *status*)
+        "$HELPER" status
+        ;;
+      *enable*)
+        if ! sudo "$HELPER" enable; then
+          exit 1
+        fi
+
+        echo "${green}Done.${normal} ${bold}ujust setup-ntfsplus status${normal} shows the rows" \
+          "and the driver behind each mount."
+        ;;
+      *disable*)
+        sudo "$HELPER" disable
+        ;;
+      "")
+        exit 0
+        ;;
+      *)
+        echo "Unknown option: $OPTION (ujust setup-ntfsplus help)"
+        exit 1
+        ;;
+    esac
+
 # Check this host against what the image expects, one line per check.
 [group("system")]
 verify-host ACTION="":

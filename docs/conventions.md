@@ -23,7 +23,8 @@ CI · prose · commits.
 - A function a caller may run under `if` or `||` returns a status and never calls `exit`: under
   `if`, `exit` kills the whole script, and a `2>/dev/null` on the call hides why. The CI
   scripts follow it, and their `--self-test` exercises the failing paths as calls. An exit left
-  where nothing remains to unwind is named in the function's header.
+  where nothing remains to unwind is named in the function's header (`switch_fstab_rows` in the
+  ntfsplus helper).
 - A comment must not start with `# shellcheck` unless it is a directive: shellcheck parses the
   line as one and the file stops parsing.
 
@@ -34,10 +35,11 @@ hold for every file the lint job covers: build scripts, libraries, tests, the km
 libexec helpers, the boot hooks, the CI scripts and the edit hook. They hold in the same spirit
 for every other file of the repo: a workflow, the Containerfile, a justfile, a Plasma update
 script, a `.repo` or `.conf` file gets the same blank lines between its steps, the same 100
-columns and comments that carry a reason, never a restatement. The shapes and the width are
-checked by `.github/scripts/check-form.sh`, which the edit hook runs on every shell file an
-edit touches and the `lint` job on the whole shell catalogue; a line that holds a banned shape
-as data ends in `# form: literal`. The rest is checked by hand at review, like § Prose.
+columns and comments that carry a reason, never a restatement. Each rule carries one
+before/after pair from the repo. The shapes and the width are checked by
+`.github/scripts/check-form.sh`, which the edit hook runs on every shell file an edit touches
+and the `lint` job on the whole shell catalogue; a line that holds a banned shape as data ends
+in `# form: literal`. The rest is checked by hand at review, like § Prose.
 
 - **Control flow is written as `if … then … fi`.** `cmd || return 1`, `a && b || c`,
   `! cmd || die`, `cmd || { … }` and a subshell `( … ) ||` used as a guard are out: they hide
@@ -61,6 +63,11 @@ as data ends in `# form: literal`. The rest is checked by hand at review, like �
       fail_build "$package was pulled in (the image keeps binfmt out)"
   fi
   ```
+
+  A function that must clean up before it fails returns a status after its own cleanup, so the
+  caller needs no subshell: `(runtime_probe) || withdraw "…"` in the ntfsplus helper became
+  `if ! run_runtime_probe; then roll_back_enable "…"; fi`, the probe removing its files on both
+  paths.
 
 - **Output is captured before `grep -q`.** `cmd | grep -q` is refused by `check-form.sh`:
   `grep -q` exits at the first match and closes the pipe, the writer dies of SIGPIPE and
@@ -124,11 +131,36 @@ as data ends in `# form: literal`. The rest is checked by hand at review, like �
 - **One action per line.** No `a; b`, no `if …; then a; else b; fi` on one line, one command
   per line inside a branch, a `case` arm on its own lines.
 
+  ```bash
+  # before, bazzite-mx-ntfsplus-setup
+  if [ -n "$FIXTURE" ]; then awk -v t="$1" '$1 == t { print $2 }' "$FIXTURE/cmd/mounts"; else findmnt -n -o FSTYPE --mountpoint "$1" 2> /dev/null || true; fi
+  # after, host.sh
+  if [ -n "$FIXTURE" ]; then
+      MOUNT_TARGET="$mount_point" awk '{
+          …
+      }' "$FIXTURE/cmd/mounts" | tail -n 1
+      return 0
+  fi
+
+  findmnt -n -o FSTYPE --mountpoint "$mount_point" 2> /dev/null | tail -n 1 || true
+  ```
+
 - **Blank lines separate the steps.** One after the `local` line, one between the steps of a
   function (gather, check, act, report), one around each `if` block that is not the function's
   only statement. A file with more than a handful of functions groups them under banners,
   `# --- <group> ---` padded to 80 columns, in the order a reader needs them: helpers first,
   commands after, `main` last.
+
+  ```bash
+  # before, bazzite-mx-ntfsplus-setup: the checks of cmd_enable ran on as one block
+  # after
+      opt_in_written_by_this_run=0
+      write_opt_in
+
+      # The mask must work through the kernel's own route before anything else:
+      # at boot the fstab units mount by type and the kernel asks for fs-ntfs.
+      if ! ntfs_alias_resolves; then
+  ```
 
 - **A line stops at 100 columns.** A long command breaks after `\` with one argument per line;
   a long pattern or message goes into a variable named for what it holds. The one exception is
@@ -136,16 +168,53 @@ as data ends in `# form: literal`. The rest is checked by hand at review, like �
   single line ([`gotchas.md`](gotchas.md) § A recipe's description is the LAST comment line
   above it).
 
-- **A name says what the function does or what the variable holds.** No private vocabulary.
-  `die` is named by its effect: `fail_build` in `lib/log.sh` (prints `FAIL:`, the build stops),
-  `exit_with_error` in the host helpers (prints `ERROR:`, the command stops) and in the CI
-  scripts (`.github/scripts/lib.sh`, prints `<script>: …`, the script stops), where
-  `print_error` prints the same line and returns 1 for a function a caller runs under `if`. A
-  function a caller runs under `if` is named as the question its status answers: `has_recipe`.
+  ```bash
+  # before, bazzite-mx-ntfsplus-setup (109 columns)
+  sed -E 's/^([^#[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+)ntfs3([[:space:]])/\1ntfs\2/' "$1" > "$2"
+  # after, host.sh
+  local fields='[[:space:]]*[^#[:space:]][^[:space:]]*[[:space:]]+[^[:space:]]+[[:space:]]+'
+  local row="^(${fields})${from}([[:space:]]|\$)" typed="^(${fields}${to})"
+  …
+  sed -E "${edits[@]}" "$input" > "$output"
+  ```
+
+- **A name says what the function does or what the variable holds.** No private vocabulary:
+  `withdraw` is `roll_back_enable`, `need_root` is `require_root`, `f` is `host_file`, `t` and
+  `fn` are `mount_point` and `rewrite`. `die` is named by its effect: `fail_build` in
+  `lib/log.sh` (prints `FAIL:`, the build stops), `exit_with_error` in the host helpers (prints
+  `ERROR:`, the command stops) and in the CI scripts (`.github/scripts/lib.sh`, prints
+  `<script>: …`, the script stops), where `print_error` prints the same line and returns 1 for
+  a function a caller runs under `if`. A function a caller runs under `if` is named as the
+  question its status answers: `ntfs_alias_resolves`, `has_recipe`.
+
+  ```bash
+  # before, bazzite-mx-ntfsplus-setup
+  alias_resolves || withdraw "$NTFSPLUS_OPTIN does not mask the image's blacklist"
+  # after
+  if ! ntfs_alias_resolves; then
+      reason="$NTFSPLUS_OPTIN does not mask the image's blacklist (modprobe -c | grep ntfs)"
+      roll_back_enable "$reason"
+  fi
+  ```
 
 - **Every script opens with a header**: what it does in one or two sentences; `Usage:` with
   each argument and option on its own line; the exit status; what it writes, files and the
   output lines a test or a recipe reads. A library says who sources it and what it expects.
+
+  ```bash
+  # before, bazzite-mx-ntfsplus-setup
+  #   status | enable | disable | --self-test
+  # after
+  # Usage: bazzite-mx-ntfsplus-setup [status | enable | disable | --self-test]
+  #   status       module, opt-in, driver, fstab rows by type, mounted volumes
+  #                (the default; no root needed)
+  #   enable       write the opt-in, prove the driver on a loop image, rewrite
+  #                the ntfs3 rows of fstab to ntfs without force, prealloc and
+  #                delalloc, give every ntfs row without an errors= option
+  #                errors=remount-ro, remount them (root)
+  # …
+  # Exit status: 0 done; 1 refused or failed, the reason on stderr as `ERROR: …`
+  ```
 
 - **A comment says what the code cannot.** The contract of a function when its name does not
   carry it (empty when…, status 0 when…), or the reason for a choice the reader would otherwise
@@ -154,10 +223,33 @@ as data ends in `# form: literal`. The rest is checked by hand at review, like �
   measurements, the bug that forced it) lives in `docs/gotchas.md` and the comment points at
   its heading.
 
+  ```bash
+  # before, bazzite-mx-ntfsplus-setup (eight lines, two measurements, a kmod version)
+  # … `-n -v` prints nothing for a loaded module, so it read a working
+  # opt-in as a failed mask (measured 2026-09-06, kmod 34.2 on 7.2.1-ogc4.1, docs/gotchas.md).
+  # after
+  # Status 0 when the kernel's own route, request_module("fs-ntfs"), would load
+  # the driver, loaded now or not. The config is captured before the grep and
+  # the dry run is --show-depends: docs/gotchas.md § `modprobe -n -v` is silent
+  # for a loaded module; `--show-depends` is not.
+  ```
+
 - **A function stays short**, about 25 statements as the guide (blank and comment lines do not
   count): a function that does two things is two functions, and a step sequence reads as a list
   of calls. A library is written to share functions between scripts, never to make one file
   shorter: a long script stays one file, grouped under banners.
+
+  ```bash
+  # before, bazzite-mx-ntfsplus-setup: one self_test of 105 lines
+  # after: self_test calls seven checks named for what they prove
+  self_test_fstab_rewrites "$dir"
+  self_test_install_fstab_refuses "$dir"
+  self_test_remount_unescapes_mount_point "$dir"
+  self_test_remount_names_the_refused_option "$dir"
+  self_test_status_on_fixture "$dir"
+  self_test_status_refuses_an_unreadable_mount_table "$dir"
+  self_test_alias_resolves "$dir"
+  ```
 
 - **Output to the user is a complete sentence**: what happened, and for a failure what to do
   next. The prefixes a contract reads (`OK:`, `FAIL:`, `ERROR:`, `self-test ok`) stay.
@@ -221,8 +313,8 @@ known-bad still red after it. The rules above add to the earlier bullets of this
   with `-x`: the link dangles in the build.
 - An out-of-tree kernel module is a `build_files/kmods/<name>/source.env`, built by the
   kmod-builder stage against the base's own `kernel-devel`. It carries `URL`, the full
-  `COMMIT`, `KO_NAME`, `KO_BUILD_PATH` and `KO_VERSION`. The builder proves the checkout is the
-  pinned commit.
+  `COMMIT`, `KO_NAME`, `KO_BUILD_PATH`, `KO_VERSION`, and `KO_BUILD_ARGS` when kbuild needs a
+  config symbol forced on the make line. The builder proves the checkout is the pinned commit.
   Then `assert_module` requires a readable module stamped for the image's kernel and, when
   `KO_VERSION` is set, that `MODULE_VERSION`. The modules are unsigned: when modprobe refuses
   one, the helper's `ERROR:` line carries modprobe's own reason and names Secure Boot as the
@@ -342,7 +434,7 @@ Where each one runs:
 | `check-form.sh`                                           | `lint` job, `build.yml`, which then runs the check itself over the whole shell catalogue; `.claude/hooks/lint-edit.sh` runs it on every edited shell file |
 | `kmods/build-kmods.sh`                                    | kmod-builder stage, before the real build                                                                                                                 |
 | `70-justfile.sh`, `80-fix-opt.sh`, `90-validate-repos.sh` | the test RUN, called by their paired test                                                                                                                 |
-| `bazzite-mx-migrate`                                      | the test RUN, called by `tests/70-justfile.sh`; its cases live here, so it has no file under `tests/helpers/`                                             |
+| `bazzite-mx-ntfsplus-setup`, `bazzite-mx-migrate`         | the test RUN, called by `tests/55-ntfsplus.sh` and `tests/70-justfile.sh`; their cases live here, so neither has a file under `tests/helpers/`            |
 | `tests/run.sh`                                            | `lint` job, `build.yml`, after the CI scripts                                                                                                             |
 
 ## CI

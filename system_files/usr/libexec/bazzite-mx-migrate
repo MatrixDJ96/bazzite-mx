@@ -62,6 +62,7 @@ TARGET=
 SCOPE_OK=0
 CONFIG_HITS=
 NTFS_ROWS=
+OPTIN=0
 RESIDUE_FILES=
 RESIDUE_KARGS=
 
@@ -190,6 +191,12 @@ detect_fstab_and_residue() {
 
     NTFS_ROWS=$(ntfs_rows "$(host_file /etc/fstab)")
 
+    OPTIN=0
+
+    if ntfsplus_optin; then
+        OPTIN=1
+    fi
+
     RESIDUE_FILES=$({
         ntfsplus_files
         msi_files
@@ -218,6 +225,14 @@ scope_state() {
         echo present
     else
         echo MISSING
+    fi
+}
+
+optin_state() {
+    if [ "$OPTIN" -eq 1 ]; then
+        echo active
+    else
+        echo none
     fi
 }
 
@@ -258,6 +273,7 @@ print_host_summary() {
     printf '  %-31s %s\n' "policy scope $VENDOR_SCOPE" "$(scope_state)"
     printf '  %-31s %s\n' "local policy/registries.d" "$(config_hits_on_one_line)"
     printf '  %-31s %s\n' "fstab rows on type ntfs" "$(ntfs_mount_points)"
+    printf '  %-31s %s\n' "ntfsplus opt-in" "$(optin_state)"
     printf '  %-31s %s\n' "residue" "$(residue_on_one_line)"
     echo
 }
@@ -299,9 +315,12 @@ print_steps() {
         echo "  5. (origin already $TARGET: skipped)"
     fi
 
-    if [ -n "$NTFS_ROWS" ]; then
+    if [ "$OPTIN" -eq 1 ]; then
+        echo "  6. (ntfsplus opt-in active: fstab kept, ujust setup-ntfsplus manages its rows)"
+    elif [ -n "$NTFS_ROWS" ]; then
         echo "  6. /etc/fstab: type ntfs -> ntfs3 on $(wc -l <<< "$NTFS_ROWS") row(s)," \
-            "daemon-reload; findmnt --verify"
+            "errors=remount-ro dropped where present; daemon-reload;" \
+            "findmnt --verify"
     else
         echo "  6. (no ntfs row in fstab: skipped)"
     fi
@@ -498,7 +517,7 @@ write_rewritten_fstab() {
     local added kept
 
     # The rewritten table has the current one's rows with the type column
-    # switched, so the current table's
+    # switched and errors=remount-ro dropped, so the current table's
     # diagnostic names the row to fix.
     if ! fstab_verify_answers /etc/fstab || ! fstab_verify_answers "$rewritten"; then
         rm -f "$rewritten"
@@ -541,6 +560,11 @@ step_6_fstab_ntfs_to_ntfs3() {
     local backup=$1
     local rewritten rows_left
 
+    if [ "$OPTIN" -eq 1 ]; then
+        echo "step 6: ntfsplus opt-in active: fstab kept (ujust setup-ntfsplus manages its rows)"
+        return 0
+    fi
+
     if [ -z "$NTFS_ROWS" ]; then
         return 0
     fi
@@ -565,7 +589,7 @@ step_6_fstab_ntfs_to_ntfs3() {
             "$(describe_what_the_run_changed)"
     fi
 
-    if confirm "Write this fstab (type column, backup in $backup)?"; then
+    if confirm "Write this fstab (type column, errors=remount-ro dropped, backup in $backup)?"; then
         write_rewritten_fstab "$rewritten" "$backup"
     fi
 
@@ -633,7 +657,7 @@ print_step_7_what_stays_with_the_user() {
 
 # True on a host every step of apply would skip: no local policy.json or
 # matrixdj96.yaml, nothing layered, the image's initramfs, the signed origin,
-# fstab on ntfs3, no residue.
+# fstab on ntfs3 or under the opt-in, no residue.
 # plan and apply stop there instead of pinning and backing up for nothing.
 nothing_to_do() {
     if [ -n "$CONFIG_HITS$LAYERED$RESIDUE_FILES$RESIDUE_KARGS" ]; then
@@ -642,6 +666,10 @@ nothing_to_do() {
 
     if [ "$REGEN" = true ] || [ "$REF" != "$TARGET" ]; then
         return 1
+    fi
+
+    if [ "$OPTIN" -eq 1 ]; then
+        return 0
     fi
 
     [ -z "$NTFS_ROWS" ]
@@ -743,7 +771,8 @@ UUID=5555 /mnt/bare ntfs
 FSTAB
 }
 
-# Only the type column of the `ntfs` rows changes.
+# Only the type column of the `ntfs` rows changes (none carries errors=remount-ro,
+# whose removal ntfsplus-setup's self-test covers).
 self_test_fstab_rewrite() {
     local dir=$1
 
@@ -978,6 +1007,37 @@ self_test_plan_on_migrated_host() {
     fi
 }
 
+# A migrated MSI host opted into NTFSPLUS: fstab rows on ntfs are the host's
+# choice and neither file is residue, so the plan has nothing to do. The
+# opt-in carries the text setup-ntfsplus writes, which names ntfsplus.
+# Known-bad: a registries.d file of the host's own for another registry,
+# which shadows nothing and asks for no step 0.
+self_test_plan_keeps_fstab_on_optin() {
+    local good=$1
+    local fixture=$2
+    local out
+
+    mkdir -p "$fixture"
+    cp -a "$good/." "$fixture/"
+    ntfsplus_optin_text > "$fixture/etc/modprobe.d/bazzite-mx-ntfsplus.conf"
+    printf 'msi-ec\nacpi_ec\n' > "$fixture/etc/modules-load.d/bazzite-mx-msi.conf"
+    printf 'A    containers/registries.d/quay.io-mine.yaml\n' >> "$fixture/cmd/config-diff"
+    self_test_migrated_status "$fixture/cmd/rpm-ostree-status.json"
+
+    if ! out=$(FIXTURE=$fixture TAG=stable cmd_plan); then
+        fail_self_test "plan failed on the opted-in fixture: $out"
+    fi
+
+    if ! grep -q '^plan: nothing to do' <<< "$out" \
+        || ! grep -q 'ntfsplus opt-in *active' <<< "$out" \
+        || ! grep -q '^  residue *none$' <<< "$out"; then
+        echo "self-test: the opted-in migrated plan still has a step, or reports the opt-in" \
+            "or setup-msi file as residue:"
+        echo "$out"
+        exit 1
+    fi
+}
+
 # Known-bad 4: the EXIT trap runs after cmd_apply has returned, so the flag
 # it reads lives at script scope, set to 0, and restore_timer survives there.
 # A start that fails is an `ERROR:` line and exit 1 (known-bad: silent, exit 0).
@@ -1188,6 +1248,7 @@ self_test() {
     self_test_plan_refuses_pending "$dir/fx" "$dir/fx2"
     self_test_plan_refuses_missing_scope "$dir/fx" "$dir/fx3"
     self_test_plan_on_migrated_host "$dir/fx" "$dir/fx4"
+    self_test_plan_keeps_fstab_on_optin "$dir/fx" "$dir/fx5"
     self_test_plan_prints_points_unescaped "$dir/fx" "$dir/fx7"
     self_test_timer_restored_at_exit
     self_test_step_2_sets_the_flag_in_this_shell "$dir"
@@ -1197,7 +1258,8 @@ self_test() {
 
     echo "self-test ok: fstab rewrite exact and judged on the errors it adds, findmnt without" \
         "a verdict refused, plan lists the steps, pending / missing scope / local policy refused," \
-        "residue reported, spaced points unescaped," \
+        "residue reported, opted-in migrated host with its own registries.d file has nothing" \
+        "to do, spaced points unescaped," \
         "timer flag at script scope, set by step 2 in this shell, restored at EXIT or reported," \
         "a planted backup root taken back, apply refused while an update runs," \
         "steps not confirmed change nothing"
