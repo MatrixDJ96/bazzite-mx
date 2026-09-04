@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# Kernel modules for the MSI laptop: msi-ec and acpi_ec under updates/ for the
-# image's one kernel, stamped for it, resolved by modprobe ahead of the
-# in-tree msi-ec, listed by depmod, not loaded at boot by the image; the
-# MControlCenter installer behind `ujust setup-msi` proven on a fixture with
-# a synthetic tarball, positive and known-bad; the recipe defined and runnable.
-# Loading the modules and MControlCenter's D-Bus helper are proven on the MSI
-# host in phase 4 (no hardware, no system bus in a build).
+# The staged modules under updates/, stamped for the image's one kernel and
+# preferred by modprobe, plus the MControlCenter installer on a fixture. A
+# build has no MSI hardware and no system bus, so loading them is a host proof.
 set -euo pipefail
 
 # shellcheck source=lib.sh

@@ -12,7 +12,7 @@ JUST_DIR=/usr/share/ublue-os/just
 MASTER=/usr/share/ublue-os/justfile
 OURS=$JUST_DIR/95-bazzite-mx.just
 SNAPSHOT=$BUILD_STATE/just.base.summary
-OUR_RECIPES="install-jetbrains-toolbox migrate setup-dev setup-msi setup-panels verify-host"
+OUR_RECIPES="install-jetbrains-toolbox migrate setup-dev setup-msi setup-ntfsplus setup-panels verify-host"
 
 if cmp -s "$CTX/system_files$OURS" "$OURS"; then
     echo "OK: $OURS is the vendored copy"
@@ -87,8 +87,8 @@ for r in $OUR_RECIPES; do
     check_recipe_help "$MASTER" "$r"
 done
 
-# The helpers: executable, parse, self-tests.
-for h in bazzite-mx-verify-host bazzite-mx-migrate bazzite-mx-jetbrains-toolbox; do
+# The helpers behind the recipes.
+for h in bazzite-mx-verify-host bazzite-mx-migrate bazzite-mx-jetbrains-toolbox bazzite-mx-ntfsplus-setup; do
     if [ -x "/usr/libexec/$h" ] && [ "$(stat -c %a "/usr/libexec/$h")" = 755 ] && bash -n "/usr/libexec/$h"; then
         echo "OK: /usr/libexec/$h executable (755), parses"
     else
@@ -120,8 +120,10 @@ cp /etc/containers/registries.d/matrixdj96.yaml "$fx/etc/containers/registries.d
 cp /etc/pki/containers/matrixdj96.pub "$fx/etc/pki/containers/"
 printf 'Micro-Star International Co., Ltd.\n' > "$fx/sys/class/dmi/id/sys_vendor"
 printf 'msi_ec 16384 0 - Live 0x0\nacpi_ec 12288 0 - Live 0x0\nnvidia 1000 0 - Live 0x0\n' > "$fx/proc/modules"
+printf 'msi-ec\nacpi_ec\n' > "$fx/etc/modules-load.d/bazzite-mx-msi.conf"
 printf 'UUID=1 / btrfs subvol=root 0 0\nUUID=2 /mnt/win ntfs3 defaults,nofail 0 0\n' > "$fx/etc/fstab"
 printf '/mnt/win ntfs3\n' > "$fx/cmd/mounts"
+printf 'nodev\tbtrfs\n\tntfs3\n' > "$fx/proc/filesystems"
 printf 'root=UUID=1 rw\n' > "$fx/cmd/kargs"
 printf 'org.kde.okular\n' > "$fx/cmd/flatpaks"
 if [[ $image == *nvidia* ]]; then
@@ -147,16 +149,40 @@ jq 'del(.transports.docker["ghcr.io/matrixdj96"])' "$fx/etc/containers/policy.js
 printf 'UUID=2 /mnt/win ntfs defaults,nofail 0 0\n' > "$bad/etc/fstab"
 printf 'nvidia 1000 0 - Live 0x0\n' > "$bad/proc/modules"
 printf 'blacklist ntfsplus\n' > "$bad/etc/modprobe.d/ntfsplus.conf"
+printf 'msi-ec\n' > "$bad/etc/modules-load.d/msi-ec.conf"
 printf 'org.mozilla.firefox\n' > "$bad/cmd/flatpaks"
 out=$(FIXTURE=$bad /usr/libexec/bazzite-mx-verify-host 2>&1) && rc=0 || rc=$?
-expected_fails='bootc status reports|origin is not ostree-image-signed|rpm-ostree mutations in the origin: 1password teams-for-linux|initramfs is regenerated locally|policy.json has no sigstoreSigned scope|MSI host: msi_ec not loaded|MSI host: acpi_ec not loaded|fstab: /mnt/win uses type ntfs, not ntfs3|ntfsplus residue: /etc/modprobe.d/ntfsplus.conf'
+expected_fails='bootc status reports|origin is not ostree-image-signed|rpm-ostree mutations in the origin: 1password teams-for-linux|initramfs is regenerated locally|policy.json has no sigstoreSigned scope|MSI host: msi_ec not loaded|MSI host: acpi_ec not loaded|fstab: /mnt/win uses type ntfs without the ntfsplus opt-in|ntfsplus residue: /etc/modprobe.d/ntfsplus.conf|MSI residue: /etc/modules-load.d/msi-ec.conf'
 n=$(grep -E '^FAIL:' <<< "$out" | grep -cE "$expected_fails" || true)
-if [ "$rc" -eq 1 ] && [ "$n" -eq 9 ] && grep -q '^INFO: the Firefox Flatpak is still installed' <<< "$out"; then
-    echo "OK: verify-host names every defect of the v1-state fixture (9 FAIL lines, exit 1, Firefox Flatpak reported)"
+if [ "$rc" -eq 1 ] && [ "$n" -eq 10 ] && grep -q '^INFO: the Firefox Flatpak is still installed' <<< "$out"; then
+    echo "OK: verify-host names every defect of the unmigrated fixture (10 FAIL lines, exit 1, Firefox Flatpak reported)"
 else
-    echo "FAIL: verify-host on the v1-state fixture: exit $rc, $n of 9 expected FAIL lines: $(grep -E '^(FAIL|INFO|ERROR)' <<< "$out" | tr '\n' ' ')"
+    echo "FAIL: verify-host on the unmigrated fixture: exit $rc, $n of 10 expected FAIL lines: $(grep -E '^(FAIL|INFO|ERROR)' <<< "$out" | tr '\n' ' ')"
 fi
-# A wrong flavour for the GPU is a defect in both directions.
+# Opted into NTFSPLUS: rows on ntfs, mounted as ntfs, driver registered.
+# Known-bad: a row left on ntfs3, and the driver not registered.
+optin=$work/optin
+cp -a "$fx/." "$optin/"
+printf '# opt-in\n' > "$optin/etc/modprobe.d/bazzite-mx-ntfsplus.conf"
+printf 'UUID=1 / btrfs subvol=root 0 0\nUUID=2 /mnt/win ntfs defaults,nofail 0 0\n' > "$optin/etc/fstab"
+printf '/mnt/win ntfs\n' > "$optin/cmd/mounts"
+printf 'nodev\tbtrfs\n\tntfs3\n\tntfs\n' > "$optin/proc/filesystems"
+out=$(FIXTURE=$optin /usr/libexec/bazzite-mx-verify-host 2>&1) && rc=0 || rc=$?
+if [ "$rc" -eq 0 ] && ! grep -q '^FAIL:' <<< "$out" && grep -q '^OK: ntfsplus opt-in active' <<< "$out" && grep -q '^OK: fstab: /mnt/win is ntfs and mounted with ntfs' <<< "$out"; then
+    echo "OK: verify-host passes on the ntfsplus opt-in fixture (ntfs rows expected, opt-in file not residue)"
+else
+    echo "FAIL: verify-host on the opt-in fixture (exit $rc): $(grep -E '^(FAIL|ERROR)' <<< "$out" | tr '\n' ' ')"
+fi
+printf 'UUID=1 / btrfs subvol=root 0 0\nUUID=2 /mnt/win ntfs3 defaults,nofail 0 0\n' > "$optin/etc/fstab"
+printf 'nodev\tbtrfs\n\tntfs3\n' > "$optin/proc/filesystems"
+out=$(FIXTURE=$optin /usr/libexec/bazzite-mx-verify-host 2>&1 || true)
+if grep -q '^FAIL: fstab: /mnt/win uses type ntfs3 while the ntfsplus opt-in is active' <<< "$out" && grep -q '^INFO: the ntfs driver is not registered yet' <<< "$out"; then
+    echo "OK: verify-host names an ntfs3 row under the opt-in, reports an unloaded driver as INFO"
+else
+    echo "FAIL: verify-host under the opt-in with an ntfs3 row: $(grep -E '^(FAIL|OK).*ntfs' <<< "$out" | tr '\n' ' ')"
+fi
+
+# A flavour that does not match the GPU is a defect in both directions.
 mkdir -p "$work/gpu" && cp -a "$fx/." "$work/gpu/"
 if [[ $image == *nvidia* ]]; then
     : > "$work/gpu/cmd/lspci-nvidia"

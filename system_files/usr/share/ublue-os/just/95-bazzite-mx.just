@@ -68,7 +68,47 @@ setup-msi ACTION="":
         ;;
     esac
 
-# Check this host against what the image expects: bootc compatible, signed origin on :stable, nothing layered, policy, hardware, NTFS
+# Use the NTFSPLUS driver for this host's NTFS volumes. Options: status | enable | disable
+[group("hardware")]
+setup-ntfsplus ACTION="":
+    #!/usr/bin/bash
+    source /usr/lib/ujust/ujust.sh
+    OPTION="{{ ACTION }}"
+    HELPER=/usr/libexec/bazzite-mx-ntfsplus-setup
+    if [ "$OPTION" == "help" ]; then
+      echo "Usage: ujust setup-ntfsplus <option>"
+      echo "  status   Module, opt-in, driver, fstab rows by type, mounted volumes (default)"
+      echo "  enable   Prove the driver on a loop image, switch fstab rows ntfs3 -> ntfs, remount"
+      echo "  disable  Switch the rows back to ntfs3, remount, remove the opt-in, unload the driver"
+      echo "The image ships the driver as the type ntfs, blacklisted until a host opts in;"
+      echo "ntfs3 stays the default and a busy volume keeps its driver until the next boot."
+      exit 0
+    fi
+    if [[ $(id -u) -eq 0 ]]; then
+      echo "Please do not run this command as root"
+      exit 1
+    fi
+    if [ "$OPTION" == "" ]; then
+      OPTION=$(Choose "Show status" "Enable NTFSPLUS" "Disable NTFSPLUS")
+    fi
+    case "${OPTION,,}" in
+      *status*)
+        "$HELPER" status
+        ;;
+      *enable*)
+        sudo "$HELPER" enable
+        echo "${green}Done.${normal} ${bold}ujust setup-ntfsplus status${normal} shows the rows and the driver behind each mount."
+        ;;
+      *disable*)
+        sudo "$HELPER" disable
+        ;;
+      *)
+        echo "Unknown option: $OPTION (ujust setup-ntfsplus help)"
+        exit 1
+        ;;
+    esac
+
+# Check this host against what the image expects, one line per check.
 [group("system")]
 verify-host ACTION="":
     #!/usr/bin/bash
@@ -77,10 +117,9 @@ verify-host ACTION="":
     HELPER=/usr/libexec/bazzite-mx-verify-host
     if [ "$OPTION" == "help" ]; then
       echo "Usage: ujust verify-host"
-      echo "Prints one OK/FAIL/SKIP line per check and exits 1 on any FAIL:"
-      echo "  bootc status compatible, origin ostree-image-signed:docker://ghcr.io/matrixdj96/<image>:stable,"
-      echo "  no layered packages and no local initramfs, signing policy in force, MSI modules on an MSI"
-      echo "  host, NVIDIA GPU and flavour agreeing, NTFS volumes on ntfs3, no ntfsplus residue."
+      echo "Prints one OK/FAIL/SKIP/INFO line per check, exit 1 on any FAIL: bootc status,"
+      echo "signed origin on :stable, nothing layered, signing policy, MSI modules, GPU and"
+      echo "flavour, NTFS driver, ntfsplus residue."
       echo "Runs the checks as root (bootc status needs it). Fixes: ujust migrate."
       exit 0
     fi

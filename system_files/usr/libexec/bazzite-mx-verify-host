@@ -1,35 +1,10 @@
 #!/usr/bin/env bash
 # Is this host where the image expects it? The checks behind `ujust
 # verify-host`, one OK:/FAIL:/SKIP:/INFO: line each, exit 1 on any FAIL.
-# Modelled on Bazzite's verify-image (92-bazzite-verify.just), which only
-# checks the transport; this one covers the definition of done of the v2
-# migration (design 2.0 § 5 and § 7, refutation items 2.11 and 4.2):
-#
-#   1. bootc status: the booted deployment is not `incompatible` (no
-#      rpm-ostree group in the origin: no layered packages, no local
-#      initramfs; bootc crates/lib/src/utils.rs:23-32);
-#   2. the origin is ostree-image-signed:docker://ghcr.io/matrixdj96/<image>
-#      for the flavour the image says it is, on the tag `stable` (an origin
-#      left on a dated tag never sees an update: "No changes" forever);
-#   3. no layered packages, local packages, base removals or modules, and
-#      no local initramfs regeneration (rpm-ostree status --json);
-#   4. the signing policy the image ships is the one in force: the
-#      ghcr.io/matrixdj96 scope in /etc/containers/policy.json with the
-#      key file present, the registries.d stanza, default `reject`;
-#   5. an MSI host (DMI vendor Micro-Star) has msi_ec and acpi_ec loaded;
-#   6. an NVIDIA GPU (PCI vendor 10de) means the nvidia-open flavour and the
-#      nvidia module loaded, and no GPU means the other flavour;
-#   7. every fstab entry for an NTFS volume uses the in-kernel `ntfs3` and
-#      is mounted with it (decision 1.5a); no ntfsplus residue in
-#      modprobe.d, modules-load.d or the kernel arguments;
-#   8. a Firefox Flatpak left installed is reported (the RPM is in the
-#      image; the profile copy is the user's step, docs/migration.md).
-#
 # Root is needed for bootc status; the recipe runs this through sudo.
-# Fixture mode for the smoke test (host.sh): FIXTURE=<dir> reads files from
-# <dir> (/etc, image-info.json, /sys/class/dmi/id/sys_vendor, /proc/modules)
-# and command outputs from <dir>/cmd/ (rpm-ostree-status.json,
-# bootc-status.json, lspci-nvidia, mounts, kargs, flatpaks).
+#
+# FIXTURE=<dir>: files read under <dir>, command outputs under <dir>/cmd/
+# (the smoke test; host.sh routes the shared ones).
 set -euo pipefail
 
 # shellcheck source=../lib/bazzite-mx/host.sh
@@ -176,7 +151,7 @@ if [ -n "$nvidia" ]; then
     if [[ $image_name == *nvidia* ]]; then
         ok "NVIDIA GPU present ($(head -n1 <<< "$nvidia")) and the image is $image_name"
     else
-        fail "NVIDIA GPU present but the image is $image_name: rebase to bazzite-mx-nvidia-open"
+        fail "NVIDIA GPU present but the image is $image_name: rebase to bazzite-mx-nvidia-open (or bazzite-mx-nvidia)"
     fi
     if module_loaded nvidia; then
         ok "nvidia module loaded"
@@ -191,23 +166,41 @@ else
     fi
 fi
 
-# 7. NTFS: ntfs3 in fstab and mounted as such; no ntfsplus residue.
-rows=$(fstab_entries "$(f /etc/fstab)" | awk '$3 ~ /^ntfs/ { print $2, $3 }')
+# 7. NTFS: the driver the host chose (ntfs3, or ntfs after the opt-in) in
+# fstab and mounted as such; no residue of an earlier setup.
+if ntfsplus_optin; then
+    want=ntfs
+    ok "ntfsplus opt-in active ($NTFSPLUS_OPTIN): fstab rows are expected on ntfs"
+    if ntfs_registered; then
+        ok "the ntfs driver is registered"
+    else
+        info "the ntfs driver is not registered yet (the kernel loads it at the first mount of type ntfs)"
+    fi
+else
+    want=ntfs3
+fi
+fuse_rows=$(fstab_entries "$(f /etc/fstab)" | awk '$3 == "ntfs-3g" { print $2 }')
+[ -z "$fuse_rows" ] || info "fstab rows on ntfs-3g (FUSE, the explicit route, left alone): $(tr '\n' ' ' <<< "$fuse_rows")"
+rows=$(fstab_entries "$(f /etc/fstab)" | awk '$3 ~ /^ntfs/ && $3 != "ntfs-3g" { print $2, $3 }')
 if [ -z "$rows" ]; then
     skip "no NTFS entry in fstab"
 else
     while read -r target type; do
-        if [ "$type" != ntfs3 ]; then
-            fail "fstab: $target uses type $type, not ntfs3 (ujust migrate rewrites it)"
+        if [ "$type" != "$want" ]; then
+            case "$want:$type" in
+                ntfs3:ntfs) fail "fstab: $target uses type ntfs without the ntfsplus opt-in (ujust setup-ntfsplus enable, or ujust migrate for ntfs3)" ;;
+                ntfs:ntfs3) fail "fstab: $target uses type ntfs3 while the ntfsplus opt-in is active (ujust setup-ntfsplus enable rewrites it)" ;;
+                *) fail "fstab: $target uses type $type, not $want (ujust migrate rewrites it)" ;;
+            esac
             continue
         fi
         mounted=$(mount_fstype "$target")
-        if [ "$mounted" = ntfs3 ]; then
-            ok "fstab: $target is ntfs3 and mounted with ntfs3"
+        if [ "$mounted" = "$want" ]; then
+            ok "fstab: $target is $want and mounted with $want"
         elif [ -z "$mounted" ]; then
-            fail "fstab: $target is ntfs3 but not mounted (dirty volume? journalctl -b | grep ntfs3)"
+            fail "fstab: $target is $want but not mounted (dirty volume? journalctl -b | grep $want)"
         else
-            fail "fstab: $target is ntfs3 in fstab but mounted as $mounted"
+            fail "fstab: $target is $want in fstab but mounted as $mounted"
         fi
     done <<< "$rows"
 fi

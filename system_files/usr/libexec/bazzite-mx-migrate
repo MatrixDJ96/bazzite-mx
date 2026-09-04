@@ -1,50 +1,18 @@
 #!/usr/bin/env bash
-# Move a host from a v1-style deployment (unsigned transport, layered
+# Move a host from a Bazzite-style deployment (unsigned transport, layered
 # packages, local initramfs, NTFS volumes on the `ntfs` driver) to the state
-# the v2 image expects, in one pending deployment, with a confirmation per
-# mutating step and the reboot left to the user. The root half of
-# `ujust migrate`; design 2.0 § 7 and 2.4, refutation items 3d, 3e, 4.2,
-# 4.3, 5.1, 5.4.
+# this image expects, in one pending deployment, one confirmation per
+# mutating step, the reboot left to the user. The root half of `ujust migrate`.
 #
-#   bazzite-mx-migrate plan [TAG]          read-only: print what apply would do
-#   bazzite-mx-migrate apply [TAG]         do it, asking before every change
+#   bazzite-mx-migrate plan [TAG]            read-only: what apply would do
+#   bazzite-mx-migrate apply [TAG]           do it, asking before every change
 #   bazzite-mx-migrate fstab-rewrite IN OUT  the fstab function alone (tests)
-#   bazzite-mx-migrate --self-test         prove plan refuses the bad states
+#   bazzite-mx-migrate --self-test           prove plan refuses the bad states
 #
-# TAG (default stable) is the tag of the signed origin. The pilot rebases to
-# the dated release tag first and, once :stable is promoted, runs apply again
-# with the default: an origin left on a dated tag never sees an update
-# (refutation 4.2).
-#
-# Steps, in order (each skipped when already done):
-#   0. detect: origin, layered packages, initramfs, fstab, ntfsplus residue,
-#      pending deployment (ABORT: rpm-ostree would queue on it and the plan
-#      would not describe what gets deployed; refutation 3e), local copies
-#      of policy.json / registries.d in /etc (the image's never arrive
-#      through the three-way merge; refutation 3d: offer the restore);
-#   1. ABORT unless the booted image ships the ghcr.io/matrixdj96 scope: the
-#      signed pull is checked against the running deployment's policy, so
-#      the first v2 image is reached once through the unsigned transport;
-#   2. back up status and fstab under /var/tmp/bazzite-mx-migrate/, pin the
-#      booted deployment (ostree admin pin booted), stop uupd.timer until
-#      the end (restored on every exit path);
-#   3. rpm-ostree uninstall --all (layered, local and inactive requests alike);
-#   4. rpm-ostree initramfs --disable (bootc stays incompatible otherwise:
-#      bootc utils.rs:23-32);
-#   5. rpm-ostree rebase ostree-image-signed:docker://ghcr.io/matrixdj96/<image>:TAG
-#      (rpm-ostree, not bootc switch: visible, dry-run, keeps nothing silent);
-#   6. fstab: ntfs3 proven loadable first, the type column alone rewritten
-#      ntfs -> ntfs3 (options untouched), zero `ntfs` rows after, daemon
-#      reload, findmnt --verify; ntfsplus files and kernel arguments removed
-#      on confirmation;
-#   7. nothing is uninstalled from Flatpak (the Firefox profile lives in
-#      ~/.var/app and the RPM does not read it: refutation 5.1); the
-#      per-user commands, the reboot, the rollback and the unpin are printed.
-#
-# Fixture mode for the smoke test (plan only; host.sh): FIXTURE=<dir> reads
-# /etc, /proc/filesystems, image-info.json from <dir> and command outputs
-# from <dir>/cmd/ (rpm-ostree-status.json, config-diff, kargs). apply
-# refuses a fixture.
+# TAG defaults to stable; a dated release tag pins the host to that release.
+# FIXTURE=<dir> (plan only): files read under <dir>, command outputs under
+# <dir>/cmd/. The steps and their order are print_plan's, and cmd_apply runs
+# them in the same order.
 set -euo pipefail
 
 # shellcheck source=../lib/bazzite-mx/host.sh
@@ -111,10 +79,16 @@ detect() {
     TARGET="$SIGNED/$IMAGE:$TAG"
     SCOPE_OK=0
     [ "$(policy_scope_type)" = sigstoreSigned ] && SCOPE_OK=1
-    # `M` modified, `A` added (a local file the image does not have).
+    # `M` modified, `A` added: a local copy in /etc shadows the image's file,
+    # which the three-way merge never replaces.
     CONFIG_HITS=$(src_config_diff | grep -E '^[MA][[:space:]]+containers/(policy\.json|registries\.d/)' || true)
     NTFS_ROWS=$(ntfs_rows "$(f /etc/fstab)")
-    RESIDUE_FILES=$(ntfsplus_files)
+    OPTIN=0
+    ntfsplus_optin && OPTIN=1
+    RESIDUE_FILES=$({
+        ntfsplus_files
+        msi_files
+    } | sort -u)
     RESIDUE_KARGS=$(ntfsplus_kargs)
 }
 
@@ -129,8 +103,10 @@ print_plan() {
     printf '  %-28s %s\n' "policy scope $VENDOR_SCOPE" "$([ "$SCOPE_OK" -eq 1 ] && echo present || echo MISSING)"
     printf '  %-28s %s\n' "local policy/registries.d" "${CONFIG_HITS:-none}"
     printf '  %-28s %s\n' "fstab ntfs rows" "$([ -n "$NTFS_ROWS" ] && awk '{ print $2 }' <<< "$NTFS_ROWS" | tr '\n' ' ' || echo none)"
-    printf '  %-28s %s\n' "ntfsplus residue" "$(printf '%s %s' "$(tr '\n' ' ' <<< "$RESIDUE_FILES")" "$(tr '\n' ' ' <<< "$RESIDUE_KARGS")" | sed 's/^ *//;s/ *$//')"
+    printf '  %-28s %s\n' "ntfsplus opt-in" "$([ "$OPTIN" -eq 1 ] && echo active || echo none)"
+    printf '  %-28s %s\n' "residue" "$(printf '%s %s' "$(tr '\n' ' ' <<< "$RESIDUE_FILES")" "$(tr '\n' ' ' <<< "$RESIDUE_KARGS")" | sed 's/^ *//;s/ *$//')"
     echo
+    # No step 1: it is the scope precondition, checked between 0 and 2 (docs/migration.md).
     echo "steps apply would run:"
     if [ -n "$CONFIG_HITS" ]; then
         echo "  0. restore /etc/containers/policy.json and registries.d from the image (/usr/etc), backup under $BACKUP_ROOT"
@@ -151,7 +127,9 @@ print_plan() {
     else
         echo "  5. (origin already $TARGET: skipped)"
     fi
-    if [ -n "$NTFS_ROWS" ]; then
+    if [ "$OPTIN" -eq 1 ]; then
+        echo "  6. (ntfsplus opt-in active: fstab kept, ujust setup-ntfsplus manages its rows)"
+    elif [ -n "$NTFS_ROWS" ]; then
         echo "  6. /etc/fstab: type ntfs -> ntfs3 on $(wc -l <<< "$NTFS_ROWS") row(s), options untouched; daemon-reload; findmnt --verify"
     else
         echo "  6. (no ntfs row in fstab: skipped)"
@@ -250,7 +228,9 @@ cmd_apply() {
         rpm-ostree rebase "$TARGET"
     fi
 
-    if [ -n "$NTFS_ROWS" ]; then
+    if [ "$OPTIN" -eq 1 ]; then
+        echo "step 6: ntfsplus opt-in active: fstab kept (ujust setup-ntfsplus manages its rows)"
+    elif [ -n "$NTFS_ROWS" ]; then
         echo "step 6: fstab rows on the ntfs driver:"
         echo "$NTFS_ROWS"
         ntfs3_available || abort "ntfs3 is not loadable on the running kernel: the fstab change would leave the volumes unmounted after the reboot"
@@ -404,14 +384,29 @@ EOF
         exit 1
     }
     grep -q '3. (nothing layered: skipped)' <<< "$out" && grep -q '5. (origin already' <<< "$out" \
-        && grep -q '6b. remove ntfsplus residue: /etc/modprobe.d/ntfsplus.conf module_blacklist=ntfsplus' <<< "$out" || {
+        && grep -q '6b. remove residue: /etc/modprobe.d/ntfsplus.conf /etc/modules-load.d/msi-ec.conf module_blacklist=ntfsplus' <<< "$out" || {
         echo "self-test: the migrated plan does not skip or does not report the residue:"
         echo "$out"
         exit 1
     }
-    # Known-bad 4: the EXIT trap of apply runs after cmd_apply has returned. It
-    # must read script-level state: a local of cmd_apply is unbound there under
-    # set -u, the trap dies and uupd.timer stays stopped (the hub, 2026-09-03).
+    # Opted into NTFSPLUS on an MSI host: fstab rows on ntfs are the host's
+    # choice, so step 6 is skipped and neither file is residue.
+    mkdir -p "$d/fx5" && cp -a "$d/fx/." "$d/fx5/"
+    printf '# opt-in\n' > "$d/fx5/etc/modprobe.d/bazzite-mx-ntfsplus.conf"
+    printf 'msi-ec\nacpi_ec\n' > "$d/fx5/etc/modules-load.d/bazzite-mx-msi.conf"
+    cp "$d/fx4/cmd/rpm-ostree-status.json" "$d/fx5/cmd/"
+    out=$(FIXTURE=$d/fx5 TAG=stable cmd_plan) || {
+        echo "self-test: plan failed on the opted-in fixture: $out"
+        exit 1
+    }
+    grep -q '6. (ntfsplus opt-in active: fstab kept' <<< "$out" && grep -q 'ntfsplus opt-in *active' <<< "$out" \
+        && ! grep -qE 'bazzite-mx-(ntfsplus|msi)\.conf' <<< "$(grep '6b\.' <<< "$out")" || {
+        echo "self-test: the opted-in plan rewrites fstab or reports the opt-in or setup-msi file as residue:"
+        echo "$out"
+        exit 1
+    }
+    # Known-bad 4: the EXIT trap reads script-level state. With a local of
+    # cmd_apply it dies under set -u and uupd.timer stays stopped.
     out=$(
         systemctl() { echo "stub: systemctl $*"; }
         export -f systemctl restore_timer
@@ -424,7 +419,7 @@ EOF
         echo "self-test: restore_timer did not restart the timer at EXIT: $out"
         exit 1
     }
-    echo "self-test ok: fstab rewrite exact, plan lists the steps, pending / missing scope / local policy refused, residue reported, timer restored at EXIT"
+    echo "self-test ok: fstab rewrite exact, plan lists the steps, pending / missing scope / local policy refused, residue reported, opt-in keeps fstab, timer restored at EXIT"
 }
 
 TAG=${2:-${TAG:-stable}}

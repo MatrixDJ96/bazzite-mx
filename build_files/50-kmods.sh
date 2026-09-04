@@ -1,14 +1,7 @@
 #!/usr/bin/env bash
-# Kernel modules for the MSI laptop of the fleet (decision 1.5a, 1.5g): one
-# per build_files/kmods/<name>/source.env (msi-ec, acpi_ec), compiled by the
-# Containerfile's kmod-builder stage (build-kmods.sh) against the base's own
-# kernel-devel and bound here at /kmods/<kver>/updates/*.ko. They go to
-# /usr/lib/modules/<kver>/updates/, where depmod looks before kernel/, so the
-# out-of-tree msi-ec wins over the in-tree copy. Asserts (lib/kmod.sh): each
-# module readable, stamped for the image's one kernel and at source.env's
-# version, resolved by modprobe to our copy, listed in modules.dep. Nothing
-# loads them at boot: `ujust setup-msi enable` does, on the MSI host. Why,
-# with sources: docs/divergences.md § MSI laptop.
+# Installs what the kmod-builder stage staged, one module per
+# build_files/kmods/<name>/source.env. They land under updates/, which depmod
+# searches before kernel/, so ours wins over an in-tree copy of the same name.
 # shellcheck source=lib/env.sh
 source "$(dirname "$(realpath "$0")")/lib/env.sh"
 # shellcheck source=lib/kmod.sh

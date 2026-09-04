@@ -5,6 +5,38 @@ decision 1.3 it satisfies: (1) upstream does not cover it, (2) it needs the imag
 host of the fleet uses it, (4) it ships a smoke test and cites its source. Facts carry the
 date they were measured.
 
+## Three flavours, one recipe (`Containerfile`, `resolve-base.sh`)
+
+Bazzite publishes one image per graphics stack: `bazzite` (AMD, Intel), `bazzite-nvidia-open`
+(the open kernel modules, Turing and newer) and `bazzite-nvidia` (the closed driver, for the
+GPUs the open modules do not cover). The image follows all three: `bazzite-mx`,
+`bazzite-mx-nvidia-open`, `bazzite-mx-nvidia`, the base being the only difference
+(`Containerfile` takes `BASE_IMAGE`; `resolve-base.sh` maps flavour to image name and pins
+the base to its digest). Criteria (1) and (3): upstream covers each stack, but a host that
+needs the image's other divergences on one of them can get them only from an image built on
+that base; the fleet has NVIDIA hosts on the open modules and the closed flavour is kept
+buildable and published for the day a GPU needs it. What differs between the bases and
+matters here:
+
+- **The closed base carries its own kernel.** `bazzite-nvidia:stable` 44.20260902 ships
+  6.18.48-ogc1.1 where the other two ship 7.2.1-ogc4.1 (MEASURED 2026-09-04 08:45Z,
+  `skopeo inspect`, label `ostree.linux`), with `kernel-devel-matched`, gcc, make and
+  binutils for it (MEASURED the same day, `podman run … rpm -q`). The kmod-builder stage
+  compiles the out-of-tree modules against whatever kernel its base carries, so each flavour
+  gets modules for its own kernel and the release notes list one kernel per image.
+- **Every enumeration is literal and complete.** `PACKAGES` (`lib.sh`) names the three
+  packages and every count derives from it (the env files the gate and the changelog
+  expect, the promotion's report); the matrix (`reusable-build.yml`), the retention list
+  (`clean.yml`), the recovery signer's `case` (`sign-image.yml`) and the watcher's
+  `FLAVOURS` list them one by one; the name regex is `^bazzite-mx(-nvidia(-open)?)?$` in
+  every script and test that reads an image name.
+- **A package that was never published has no tag taken.** `release-tag.sh` probes every
+  package for taken tags; GHCR answers `name unknown` to a logged-in probe of a package that
+  does not exist yet and 403 to an anonymous one (MEASURED 2026-09-04, skopeo 1.22.2), so the
+  version job of `release.yml` logs in first and the probe takes that answer as "no tags",
+  while any other registry error still fails it closed. The watcher classifies the same
+  answer as "absent" (`absent_error`), next to a missing tag's `manifest unknown`.
+
 ## Signing trust for our own images (`11-image-signing.sh`)
 
 Criteria 1, 2, 3, 4. Bazzite verifies `ghcr.io/ublue-os/*` against its key
@@ -438,6 +470,72 @@ installed per host). The fleet's laptop is an MSI (llaptop-matrix, RTX 4070).
   its desktop without `amdgpu` on that boot); only an explicit `modprobe` ignores a
   `blacklist` line.
 
+## NTFSPLUS as a per-host opt-in (`55-ntfsplus.sh`, `bazzite-mx-ntfsplus-setup`, `setup-ntfsplus`)
+
+Criteria 1, 2, 3, 4; decision 1.5a (the in-kernel `ntfs3` is the fleet's baseline; NTFSPLUS
+returns "in a separate round after a green baseline", which is this one); the owner's rule
+that no host changes driver without its own decision.
+
+- **What it is**: NTFSPLUS is the from-scratch read/write NTFS driver on iomap and folios
+  that Linux 7.1 carries as `fs/ntfs` (Namjae Jeon, the author of exFAT and ksmbd; `ntfs3`
+  and it coexist: `fs/ntfs3/Kconfig` `depends on !NTFS_FS || m`). The ogc kernel builds it
+  off (`# CONFIG_NTFS_FS is not set` in the base's kernel config, measured 2026-09-04 on
+  7.2.1-ogc4.1 and on the closed flavour's 6.18.48-ogc1.1), so the image builds the author's
+  standalone packaging of the same code (`namjaejeon/linux-ntfs`, pinned to a merge commit of
+  `main`: `ntfs-next` is force-pushed) in the kmod-builder stage. The module is `ntfs.ko`
+  and registers the filesystem type `ntfs` (`MODULE_ALIAS_FS("ntfs")`): "ntfsplus" is the
+  project's name, never the module's nor the mount type's.
+- **Why an opt-in, and how it is one**: `system_files/usr/lib/modprobe.d/bazzite-mx-ntfsplus.conf`
+  ships `blacklist ntfs`, which stops the kernel from loading the driver by alias — the
+  first `mount -t ntfs` — while an explicit `modprobe ntfs` still works. kmod reads
+  `/etc/modprobe.d` before `/usr/lib/modprobe.d` and skips a later file of the same name, so
+  a `/etc/modprobe.d/bazzite-mx-ntfsplus.conf` holding only comments masks the blacklist
+  (measured 2026-09-04 with kmod 34.2: `modprobe -n -v fs-ntfs3` printed nothing under a
+  test blacklist, `modprobe -c` lost the line once a twin with the helper's three comment
+  lines existed in `/etc`). `enable` proves the mask on the host before loading anything:
+  no `blacklist ntfs` in `modprobe -c` and `fs-ntfs` resolving to an `insmod` line. That file is
+  the opt-in; `ujust setup-ntfsplus enable` writes it, `disable` removes it, `verify-host`
+  and `migrate` read it. No `modules-load.d` entry is needed: the kernel autoloads a
+  filesystem module by alias at the first mount of its type, the early fstab mounts included.
+- **The mount helpers**: `mount(8)` hands any type with a `/sbin/mount.<type>` helper to it
+  before the kernel sees the type, and `ntfs-3g` installs `mount.ntfs` and `mount.ntfs-fuse`
+  in `/usr/bin` and `/usr/sbin` as links to `mount.ntfs-3g` (six links, measured on the base
+  2026-09-04). With them in place `mount -t ntfs` from fstab, a `.mount` unit or `mount -t
+  auto` lands on FUSE (`fuseblk`), and `mount -i`, the only way past the helper, has no fstab
+  equivalent. `55-ntfsplus.sh` removes those four links; `mount.ntfs-3g`, `ntfs-3g`,
+  `ntfsprogs` (`mkntfs`, `ntfsfix`) stay, so `mount -t ntfs-3g` remains the explicit FUSE
+  route. Consequence on a host that did not opt in: an explicit `mount -t ntfs` fails with
+  "unknown filesystem type" instead of landing on FUSE silently; `ntfs3` and `ntfs-3g` are
+  the types to name. udisks2 2.11.2 prefers `ntfs` then `ntfs3` (`ntfs_drivers=ntfs,ntfs3`
+  compiled in, no `mount_options.conf` in the base): its behaviour with the helper gone is
+  measured on the pilot host and recorded here.
+- **The recipe**: `ujust setup-ntfsplus enable` (root half `bazzite-mx-ntfsplus-setup`)
+  writes the opt-in, loads the driver, then proves it before touching fstab: a 64 MB loop
+  image formatted with `mkntfs`, mounted with `-t ntfs` and checked to be `ntfs` (not
+  `fuseblk`), 8 MB and 20 directory entries written, unmounted, remounted, checksum compared.
+  Only then the `ntfs3` rows of fstab become `ntfs` (type column alone, options untouched,
+  backup `/etc/fstab.bazzite-mx-ntfsplus.bak`), `daemon-reload`, `findmnt --verify --fstab`,
+  and each rewritten volume is unmounted and mounted again unless busy — a busy volume keeps
+  its driver until the next boot; nothing is forced or lazily unmounted. `disable` is the
+  exact reverse and unloads the driver when idle. The probe is there because of the v1
+  failure shape below: a module built for the wrong kernel API dies at its first mount with
+  vermagic and modinfo green, and fstab mounts fire at boot before the journal is on disk;
+  the probe makes that first mount happen in a session, with fstab intact. Recovery after a
+  boot panic: boot the previous deployment from the boot menu, `ujust setup-ntfsplus disable`.
+- **Build guards**: the module's kbuild fragment is `obj-$(CONFIG_NTFS_FS) += ntfs.o`;
+  against a kernel that leaves the symbol unset kbuild compiles nothing and exits 0
+  (`MODPOST Module.symvers`, no `.ko`, measured 2026-09-04 on both kernels), so
+  `source.env` carries `KO_BUILD_ARGS=CONFIG_NTFS_FS=m` and the builder puts it on the make
+  line; `55-ntfsplus.sh` and its test assert the `fs-ntfs` alias, the blacklist directive,
+  the four links gone, the alias unresolvable and the name resolvable to `updates/ntfs.ko`.
+  The runtime mount is proven on the pilot host, never in the build (no kernel to load into).
+- **What v1 did differently**: same module and helper removal, but no blacklist and no
+  recipe — type `ntfs` in fstab was the switch, and the driver loaded on any `mount -t
+  ntfs`. Two facts from that round still hold and are documented in [`gotchas.md`](gotchas.md):
+  the two drivers agree on modes and case sensitivity (the mode bits come from the WSL
+  metadata EAs, not the mask; both mount case-sensitive), and a `.N` bump of the pin needs
+  the runtime proof.
+
 ## ujust recipes: the justfile feature (`70-justfile.sh`, `95-bazzite-mx.just`)
 
 Criteria 1, 2, 3, 4; decision 1.5f (recipes with an upstream name replace the upstream
@@ -477,7 +575,7 @@ every file under `/usr/share/ublue-os/just/` by name and sets `allow-duplicate-r
   gotchas) and no `regenerate-initramfs`, the ghcr.io/matrixdj96 scope with its key and
   `registries.d` stanza in force and `default` still `reject`, `msi_ec` + `acpi_ec` loaded
   on a Micro-Star host, NVIDIA GPU (`lspci -d 10de:`) and flavour agreeing with the
-  `nvidia` module loaded, every fstab NTFS row on `ntfs3` and mounted as such, no ntfsplus
+  `nvidia` module loaded, every fstab NTFS row on `ntfs3` (or `ntfs` after `setup-ntfsplus`) and mounted as such, no v1 ntfsplus
   file or kernel argument; a Firefox Flatpak is reported (INFO), not failed: no Flatpak is
   required by the image. Positive control: run live on ldesktop-zrombi (v1 image,
   2026-09-02): 6 FAIL lines (incompatible, unsigned origin, `1password` layered, local
@@ -534,3 +632,321 @@ every file under `/usr/share/ublue-os/just/` by name and sets `allow-duplicate-r
   `rm -rf` while the app could be running; here a running Toolbox stops the install.
 - Not carried over: the v1 `96-bazzite-mx-overrides.just` monolith (every other v1 recipe
   either returned as its own feature or was dropped with the feature).
+
+## CI: two profiles, one build, no push (`build.yml`, `reusable-build.yml`)
+
+Decisions 1.4 (shellcheck, shfmt, tests modelled on the base images), 1.5d (corrected and
+precised: a push to `main` builds, rechunks and checks, and publishes nothing; `develop` is
+the minimal sandbox; releases only from a dispatched workflow), 1.6 (action pins by commit
+SHA, key reused). What differs from the family and why:
+
+- **Profiles as inputs.** Bazzite's `build.yml` builds, rechunks, tests and pushes in one job
+  gated on `github.event_name != 'pull_request'` (`build.yml:547-560`); aurora's
+  `reusable-build.yml` takes `publish` as an input and conditions every publishing step on it
+  (`reusable-build.yml:23-27`, `343-455`). Here `reusable-build.yml` takes `rechunk` (and,
+  with the release workflow, `publish`): `develop` and PRs stop at the sandbox image, `main`
+  composes and probes the chunked image and proves the signing key, and a dispatch runs the
+  main profile on any ref. Nothing in `build.yml` reaches GHCR.
+- **The chunked image is probed, not the raw one.** Bazzite runs goss on `localhost/chunked-img`
+  (`build.yml:522-542`, `tests/dgoss/`), the only member of the family that executes the
+  artefact it ships. Here `check-image.sh` does the same with the tools the image has: labels,
+  `/run` and `/tmp` on the mounted image, `bootc container lint`, `rpm -q`, `modinfo`,
+  `image-info.json`. goss would add a pinned binary for checks bash covers; the in-build smoke
+  tests remain the place for per-feature assertions (2.5 #2.2).
+- **One labels file.** `rpm-ostree compose build-chunked-oci --rootfs` produces a new config:
+  the raw image's labels are not on the composed image unless passed again (bazzite
+  `build.yml:407-420` builds the list with `ostree.bootable` and `ostree.linux`, `:442-458`
+  passes it to compose; 2.5 #2.1). `image-labels.sh` is the one owner and both `podman build`
+  and the compose step read its file; `check-image.sh` asserts every line on the artefact.
+  Without labels of our own the image keeps the base's and calls itself Bazzite
+  (`docs/gotchas.md`).
+- **The signing key is proven on `main`.** No family repo does this: the secret is first used
+  in the run that publishes. Here the main profile signs the chunked image's digest with
+  `SIGNING_SECRET` (`cosign sign-blob`, no transparency log, no signing config: the bundle
+  stays local) and verifies it with the `cosign.pub` the image trusts, then must refuse a
+  tampered copy (cosign 3.1.3 `sign-blob`/`verify-blob`, flags measured 2026-09-02: `--bundle`
+  is the only output form, `--output-signature` is deprecated). A rotated or mispasted secret
+  fails on a push to `main`.
+- **A lint job before the build.** The family runs no shellcheck, shfmt or yamllint in CI
+  (design 2.2 § 1, checkouts of 2026-09-02); aurora and image-template check `.just` syntax
+  (`Justfile:69-76`, `validate-just.yml:26-34`). Here `lint` gates `build`: shellcheck 0.11.0
+  from the runner, shfmt 3.7.0 and yamllint from `quay.io/fedora/fedora:44` (the image's own
+  release, so hook, CI and image format alike), `node --check` on the Plasma update scripts
+  (a syntax error there is only a journal warning on the host, plasma-workspace
+  `shellcorona.cpp:1153-1155`), `just --unstable --fmt --check` on every `.just` file with
+  just from the runner's Linuxbrew (aurora `validate-just.yml:26-29`; `ublue-os/just-action@v3`
+  is a moving tag, against decision 1.6), and the `--self-test` of every script under
+  `.github/scripts/`.
+- **Runner.** `ubuntu-26.04` for every job, explicit (the family: bazzite `build.yml`, aurora
+  `reusable-build.yml:44`, image-template): the only runner with podman 5 and the only one
+  whose kernel keeps in-place writeback (`docs/gotchas.md` § Torn writeback). `ubuntu-slim`
+  has no container engine, no Homebrew and shellcheck 0.9.0 (2.5 #2.4).
+- **Disk.** No space-freeing action. The `ubuntu-26.04` runner starts with 92 GB free of
+  145 GB (`df` on run 33644315576, 2026-09-02) and the main profile needs the raw image, its
+  OCI archive and the pulled chunked copy at once: 17 GB, 6.3 GB and 17 GB, the raw image
+  removed before the pull (run 33645065090, 2026-09-02: 73 GB free before the compose, 85 GB
+  before the pull, 74 GB after; the compose took 11.5 min, the pull 4 min). The family's
+  `ublue-os/remove-unwanted-software` v9 (image-template `build-disk.yml:73`) fails on this
+  runner (`apt-get remove powershell`, package absent: `docs/gotchas.md`); aurora and the
+  template's `build.yml` pin an untagged commit of its `v10` merge instead. The compose step
+  prints `df` before and after, so the margin stays measured.
+- **`/run` in the image.** Bazzite empties `/run` and `/tmp` of the raw image with
+  `buildah unshare` before the compose (`build.yml:431-437`). Here the build `RUN` mounts a
+  tmpfs on `/run` (and `/tmp`), so the resolver file buildah binds there never reaches the
+  image (`docs/gotchas.md`), and `check-image.sh` proves both directories empty on the
+  artefact.
+
+## CI: the release run (`release.yml`, `promote.yml`, `sign-image.yml`, `gate-release.sh`, `changelog.sh`, `refresh-pins.sh`)
+
+Decisions 1.5d (a release only from a dispatched workflow), 1.5g (`44.<build date>`, `.N`
+only on a same-day collision), 1.6 (key reused, `sigstoreSigned` policy, signature +
+attestation + SBOM, SHA pins refreshed by a script in the repo, no bot), 1.1 (`:stable` moves
+only onto a release a host has verified). What differs from the family and why:
+
+- **The tag is born in a gate, by digest.** Bazzite and bazzite-dx push the dated tag and
+  every alias from the build job, right after the push and before the signature (bazzite
+  `build.yml:554-575`, bazzite-dx `build.yml:247-266`); aurora pushes `:staging`, signs it,
+  then pushes the real tags from the same job (`reusable-build.yml:343-407`). Here the build
+  job stops at `:staging` and hands the digest to a separate job as an artifact
+  (`release-<flavour>.env`); `gate-release.sh` inspects `docker://<image>@<digest>`, checks
+  title, vendor, `version` = release tag and `revision` = the run's commit, verifies the
+  signature and the attestation, and only then copies the digest onto `:<tag>`. A `:staging`
+  left by a failed run of the same day never reaches a tag (2.5 #2.7), and no tag ever points
+  at an unsigned manifest. A `:<tag>` that already exists with another digest is refused: a
+  release tag never moves (v1 `promote-release-tags.sh` warned and skipped; here it fails).
+- **`:stable` has a switch.** No family repo distinguishes "publish" from "promote": their
+  `:stable` moves on every run. Here the dispatch input `promote_stable` (default `false`)
+  AND the repository variable `PROMOTE_STABLE` must both be true; otherwise the gate prints
+  the reason and exits 0 (2.5 #1.1). `promote.yml` moves `:stable` onto a release a host has
+  verified; the variable (`true` since 2026-09-03) lets the trigger and the watcher promote.
+- **Negative controls in the gate.** `cosign verify` with `cosign.pub` and
+  `gh attestation verify --repo MatrixDJ96/bazzite-mx` are first run on the flavour's own base
+  at the digest the build pinned (`base.digest` label), signed and attested by ublue-os: cosign
+  must answer with a signature-class rejection (either shape of `docs/gotchas.md`; any other
+  failure is inconclusive) and the attestation lookup must find nothing. Lifted from v1
+  `verify-published-signatures.sh` (akmods `verify-publication` pattern), extended to the
+  attestation.
+- **Attestation with `actions/attest`, `push-to-registry: false`.** Decision 1.6 names
+  `attest-build-provenance`; its README (v4, read 2026-09-02) calls itself "simply a wrapper
+  on top of actions/attest" and points new implementations at `actions/attest`, which bazzite
+  (`build.yml:649`) and aurora (`reusable-build.yml:450`) use. The attestation stays in the
+  GitHub store, where `gh attestation verify` reads it (aurora keeps `push-to-registry: false`
+  with "this confuses cosign verify", `:454-455`; `true` is tried on a throwaway tag after the
+  first release, 2.0 §10).
+- **SBOM as a signed referrer, changelog from its diff, in bash.** As bazzite
+  (`build.yml:476-497`, `:617-645`: syft on the exported root, `oras attach`, the referrer's
+  digest signed). The release notes are `changelog.sh` (decision 1.4: bash), not
+  `changelog.py`: the previous release comes from `gh release list` by `publishedAt`, never
+  from the manifest's `RepoTags` (bazzite `changelog.py:254-281`; an orphan tag would hijack
+  the comparison, v1 audit root R1); the package diff is `join` of the two RPM lists; a
+  previous release without an SBOM (every v1 release) is stated in the notes and on stderr,
+  never rendered as "no changes". Base version and kernel come from the labels of the exact
+  base the image was built from (`base.name@base.digest`), not from a second `:stable` read.
+- **One tag per run, taken tags probed on every package and the releases.** `release-tag.sh`
+  reads `skopeo list-tags` of every package (a package never published answers `name unknown`
+  and has no tag taken; § Three flavours) and `gh release list`; a probe that fails or
+  returns nothing aborts (bazzite `build.yml:79-94` swallows the probe with `|| true` and would
+  reuse a tag on a mute registry, v1 audit A.1). The Fedora major comes from the base's
+  kernel label through `resolve-base.sh` (bazzite-dx `build.yml:89-109`), not from a constant.
+- **No retry action, no release action.** `podman push` runs twice inside a three-attempt
+  loop (podman#27796: the layer annotations land on the second push; bazzite-dx and aurora
+  wrap it in `nick-fields/retry`), `gh release create --latest --target <sha>` replaces
+  `softprops/action-gh-release` (aurora `generate-release.yml:65-77`): two pins fewer.
+- **ORAS from its release, not from `setup-oras`.** The first release run (33697633900,
+  2026-09-03 00:00Z) died on both flavours at `oras-project/setup-oras` v2.0.1 with "official
+  ORAS CLI releases does not contain version 1.3.4": the action installs only the versions of
+  the list embedded in its own release (`src/lib/data/releases.json`, up to 1.3.0 at v2.0.1;
+  1.3.4 is on its `main` only), so a pin the release check calls current is not installable
+  until the action itself is released again. `install-oras.sh` downloads the linux/amd64
+  tarball and the checksums file of the ORAS release and refuses a tarball whose sha256 does
+  not match (`--self-test`: a matching checksum accepted, a mismatch and a missing line
+  refused; proven live on 1.3.4, 2026-09-03), `ORAS_VERSION` is the one input and
+  `refresh-pins.sh` compares it with the ORAS releases, which is now also what installs. One
+  action pin fewer (bazzite `build.yml:610` keeps `setup-oras`).
+- **The recovery signer is restricted and closes on a verification.** bazzite-dx
+  `sign_image.yml` signs whatever reference the dispatch names; here the reference must be one
+  of the three images of this repository, is resolved to a digest first, and the signature is
+  verified with `cosign.pub` before the job is green.
+- **Pins refreshed by a script, five classes, offline self-test.** aurora runs renovate
+  (`validate-renovate.yml`); decision 1.6 wants no bot. `refresh-pins.sh` reads the workflows
+  and reports actions (sha and comment against the latest release, the sha proven to be a
+  commit of that repository: GitHub docs "Security hardening for GitHub Actions"), binaries
+  (`cosign-release`, `syft-version`, `ORAS_VERSION`), runner labels against the
+  `actions/runner-images` README (the preview badge of `ubuntu-26.04` is reported, not
+  hidden), the state of every workflow (`disabled_inactivity`: GitHub docs, events
+  `schedule`) and the upstream issues the comments cite (a closed one means a flag is up for
+  review). `--self-test` runs on fixture answers, offline, and covers every verdict. The
+  live table on 2026-09-02 15:12Z: every pin `OK`, `ubuntu-26.04` "still marked preview",
+  the three issues open.
+- **Immutable releases.** A repository setting (GitHub docs "Immutable releases": the tag is
+  locked to its commit, assets frozen, a release attestation generated; REST
+  `PUT /repos/{owner}/{repo}/immutable-releases`), enabled on the repository (MEASURED
+  2026-09-04) and listed in [`workflow.md`](workflow.md) § Repository settings.
+- **Retention.** Dated tags are prunable like bazzite's and aurora's (`clean.yml`: 90 days,
+  7 kept); the GitHub Release outlives its tag and says so.
+
+Sources read 2026-09-02: GitHub docs "Reuse workflows" (permissions "can be only downgraded
+(not elevated) by the called workflow"), "Immutable releases", REST "Repositories" (the
+`immutable-releases` endpoints), `gh attestation verify` manual (`oci://` needs a registry
+login; `--repo`, `--owner`), `actions/attest` README (inputs, permissions
+`id-token`/`attestations`/`artifact-metadata`, `push-to-registry`), `actions/runner-images`
+README (label table, preview badge) and `Ubuntu2604-Readme.md` (no cosign, syft or oras
+preinstalled); releases and tags of every pinned action via `gh api` (table in the audit file
+`2.1-ci-design.md` § 5, re-measured 15:12Z: unchanged; `actions/upload-artifact` v7.0.1
+`043fb46d`, `actions/download-artifact` v8.0.1 `3e5f45b2`, `oras-project/oras` v1.3.4 added);
+bazzite `build.yml` (version, push, SBOM, attest), `changelog.py`, `generate_release.yml`,
+`sign_image.yml`; bazzite-dx `build.yml`, `sign_image.yml`; aurora `reusable-build.yml`,
+`generate-release.yml`, `trigger-schedule-stable-image.yml`, `build-image-stable.yml`; v1
+`verify-published-signatures.sh`, `promote-release-tags.sh`, `changelog.sh`, `sign-image.yml`
+(read as reference, rewritten).
+
+Sources read 2026-09-02: GitHub docs "Reuse workflows" (inputs typed, secrets by name,
+"Permissions can only be maintained or reduced—not elevated—throughout the chain"),
+"Workflow syntax" (`on.workflow_call.inputs.default`: a boolean input defaults to `false`,
+a string to `""`), "Contexts" (`inputs` empty outside a dispatch or a call);
+`rpm-ostree compose build-chunked-oci --help` (2026.2: `--rootfs` and `--from` mutually
+exclusive, `--bootc` required, `--format-version 2` writes every parent directory,
+`--max-layers` default 64); cosign 3.1.3 `sign-blob --help` and `verify-blob --help`;
+`actions/runner-images` `Ubuntu2604-Readme.md` (kernel 7.0.0-1012-azure, Node.js 24.19.0,
+Homebrew 6.0.19 not on `PATH`, Podman 5.7.0, Skopeo 1.21.0, yamllint 1.38.0, shellcheck 0.11.0).
+
+## CI: the schedule, the watcher and the retention (`trigger-release.yml`, `watch-upstream.yml`, `clean.yml`, `watch-upstream.sh`)
+
+Decisions 1.5d (a release from a weekly cron "tipo aurora", an upstream watcher every 6 h, a
+manual dispatch; never from a push), 1.5g (cleanup as a weekly cron in the bazzite/aurora
+form, thresholds declared, aliases excluded, dry run read before the cron is armed), 1.5c (bazzite-63
+7b5f68f: a poll every 6 h). What differs from the family and why:
+
+- **The trigger keeps `release.yml` on one event.** Aurora's
+  `trigger-schedule-stable-image.yml` exists because its release branch is not the default
+  ("we can't schedule builds on non-default branches"); ours is `main`, where a `schedule`
+  would run ("Scheduled workflows run on the latest commit on the default branch", GitHub docs,
+  events `schedule`, read 2026-09-02). The trigger stays because `release.yml` then has a
+  single trigger, `workflow_dispatch`, for the cron, the watcher and the owner: no `if:` on
+  the event inside the jobs, and the `reason` input in the run name is what the watcher
+  coalesces on. The minutes are off `:00` (`20 3 * * 2`, `37 */6 * * *`): "the schedule event
+  can be delayed during periods of high loads [...] High load times include the start of every
+  hour" (same page). A dispatch from `GITHUB_TOKEN` creates the run ("workflow_dispatch and
+  repository_dispatch events always create workflow runs", GitHub docs "Triggering a workflow
+  from a workflow"); the boolean input travels as the string `true` (`-f rechunk=true` on
+  `build.yml` ran the main profile on run 33648149093, 2026-09-02).
+- **The watcher compares digests, through the labels our build writes.** bazzite-dx reads the
+  base's `org.opencontainers.image.version` (`build.yml:89-98`); v1 compared the tag recorded in
+  `base.name`. Here `watch-upstream.sh` compares the digest of `ghcr.io/ublue-os/<base>:stable`
+  (`resolve-base.sh`, the one owner of the coordinates) with the `base.digest` label of our own
+  `:stable`, per flavour: a retag or a `.N` rebuild upstream moves the digest and not the
+  version. The base carries no `base.*` label (measured 2026-09-02); `image-labels.sh` writes
+  both on every image. Fail-closed as in v1 and stricter: a base that cannot be resolved, an
+  image that cannot be inspected or a `:stable` without the label exit 1 and the run is red
+  (refutation 4.1: a missing label read as "stale" would produce a green release every 6 h); a
+  `:stable` that does not exist (`manifest unknown`) is `absent`, nothing to compare.
+- **The variable, not the absence of `:stable`, gates the crons.** The design (2.0 § 6) counted
+  on "our `:stable` absent = no dispatch"; `:stable` exists on `bazzite-mx` and
+  `bazzite-mx-nvidia-open` and carries the `base.digest` of the current base (MEASURED
+  2026-09-02 15:26Z; `bazzite-mx-nvidia` has none until its first release, and one absent
+  image beside current ones is still `current`), so an upstream move would
+  produce a release the gate cannot promote, one per day. `decide` refuses the dispatch while
+  the repository variable `PROMOTE_STABLE` is not `true`; the trigger job carries the same
+  condition as an `if:`. The variable is the switch on both sides: it lets the gate move
+  `:stable` and it lets the crons create releases.
+- **Coalescing on the run name.** One dispatch per run even when every flavour is stale (one
+  run builds both); none while a release run is queued or in progress, and none when a
+  release with the same `reason` completed in the last 24 h, whatever its conclusion: a
+  stable failure is rebuilt once a day, not four times, and a success whose promotion the
+  gate skipped is not repeated (2.1 § 3). The runs come from the repository-wide endpoint
+  filtered on the workflow's path, because the per-workflow endpoint answers 404 while the
+  file is not on the default branch (`docs/gotchas.md`). The reason is
+  `upstream:<12 hex>+<12 hex>`, one short digest per base, so the same upstream state always
+  produces the same run name.
+- **The retention names its packages.** bazzite and aurora list their packages literally
+  (`clean.yml:23`, `:19`); the design (2.0 § 6) planned anchored regular expressions on
+  `packages` so that `bazzite-mx` could not match another package of the owner. The
+  action's source says `packages` is a plain list unless `expand-packages` is set, which needs
+  a classic PAT and turns the whole string into one regular expression (`docs/gotchas.md`), so
+  the literal list `bazzite-mx,bazzite-mx-nvidia-open,bazzite-mx-nvidia` is both the simpler and the only form
+  that works with `GITHUB_TOKEN`; a literal name cannot match another package. `use-regex`
+  stays for `exclude-tags: ^(stable|staging)$` (v1 also spared `latest`, `stable-44` and the
+  `testing*` aliases, which v2 does not emit). Thresholds as bazzite (`older-than: 90 days`,
+  `keep-n-tagged: 7`, `keep-n-untagged: 7`, `delete-orphaned-images: true`), plus
+  `validate: true`. The dated tags are prunable, as in the family; the GitHub Release outlives
+  them and says so. `dry_run` defaults to `true` on a dispatch; the weekly cron (Sundays
+  00:15 UTC, the family's slot) deletes for real (decision 1.5g); a dry run is read before
+  any change to its parameters.
+- **Exercised so far.** The watcher's `stale` branch and the cleanup's deleting branch have run
+  only in their self-tests and dry runs (no base moved while the watcher watched; nothing older
+  than 90 days yet); a first real run is read like any first run.
+- **Runners.** The trigger and the cleanup run on `ubuntu-slim` (Node.js 24, GitHub CLI 2.96,
+  jq; `ubuntu-slim-Readme.md`, image 20260728.2.1, read 2026-09-02): nothing there needs a
+  container engine. The watcher needs skopeo and runs on `ubuntu-26.04`.
+
+Sources read 2026-09-02: GitHub docs "Events that trigger workflows" § schedule (default
+branch, high-load delay, 60-day disabling, 5-minute minimum), "Triggering a workflow from a
+workflow", REST "Workflow runs" (`GET /repos/{owner}/{repo}/actions/runs` with `event`,
+`status`, `created`; the per-workflow endpoint by file name), `gh workflow run` manual (`-f`,
+`--ref`, the workflow by file name); `dataaxiom/ghcr-cleanup-action` README (inputs,
+`expand-packages`, token setup) and `src/main.ts`, `src/config.ts` at v1.2.2; runner-images
+README (`ubuntu-slim` row) and `ubuntu-slim-Readme.md`; aurora
+`trigger-schedule-stable-image.yml`, `clean.yml`; bazzite `clean.yml`; v1 `watch-upstream.yml`,
+`clean.yml` (read as reference, rewritten).
+
+## The landing page (`site/index.html`, `deploy-pages.yml`, `check-site.sh`)
+
+Decision 1.5e (one page: the switch commands and the signature check; the full site returns
+when v2 is stable), 1.6 (action pins by SHA). What differs from v1 and why:
+
+- **One file, no build.** v1's page was 41 KB of markup with two web fonts and four SVG
+  assets, animated, and it still advertised `:testing`, `:latest`, the closed-driver flavour
+  and an hourly rebuild after all four were gone. Here `site/index.html` is one hand-written
+  file: the three images and their bases, the dated tags and what `:stable` means, the four
+  commands that move a Bazzite host (unsigned rebase, reboot, `ujust migrate apply`,
+  `ujust verify-host`: the chicken-and-egg of the signed transport is stated on the page,
+  [`migration.md`](migration.md) has the rest), `cosign verify` with the repository's key and
+  `gh attestation verify` (the manual's note that an `oci://` reference needs a registry
+  login, read 2026-09-02: `gh` reads the Docker credential keychain, cli/cli
+  `pkg/cmd/attestation/artifact/oci/client.go:55-57`), and three links into the docs. System
+  fonts, a light and a dark palette through `prefers-color-scheme`, no script.
+- **The page is checked before it is published, and on every sandbox run.** No family repo
+  checks its page (bazzite's site is a separate repository; aurora and bazzite-dx have none).
+  `check-site.sh` refuses: a symbolic or hard link in `site/` ("The tar file ... should not
+  contain any symbolic or hard links", GitHub docs "Using custom workflows with GitHub
+  Pages"), markup that is not well-formed (the page is written as XML on purpose, so
+  Python's expat is the parser: on `ubuntu-slim` 20260728.2.1 and `ubuntu-26.04`), a page
+  that does not name the three images (each as a whole name: `bazzite-mx-nvidia` inside
+  `bazzite-mx-nvidia-open` does not count) or the public key, any of `:testing` and
+  `:latest`, and a dead link: a link into this repository
+  (`blob/main`, raw `main`) must be a file of the checkout, so the page and the file ship in
+  the same push and the check holds while the branch is not yet on `main` (the first live run,
+  2026-09-02 17:15Z, was red on `docs/migration.md`, which v1's `main` does not have: the
+  positive control, before the repository links were resolved on the checkout); every other
+  link is fetched. `--self-test`: one good page accepted, six lesions refused. The self-test
+  runs in the lint job, the live check in the lint job and in `deploy-pages.yml` before the
+  upload.
+- **The workflow is the starter's, pinned.** GitHub's `starter-workflows/pages/static.yml`
+  and the docs' custom-workflow page: `configure-pages`, `upload-pages-artifact` (a composite
+  step: GNU `tar --dereference --hard-dereference` of the directory, then
+  `actions/upload-artifact`, `action.yml` at v5.0.0), `deploy-pages` in the `github-pages`
+  environment with `pages: write` and `id-token: write`; `contents: read` for the checkout;
+  the group `bazzite-mx-pages` with `cancel-in-progress: false` (the starter's comment: a
+  production deployment is never cancelled). Pins measured 2026-09-02 17:08Z:
+  `configure-pages` v6.0.0 `45bfe019`, `upload-pages-artifact` v5.0.0 `fc324d35`,
+  `deploy-pages` v5.0.1 `368f8252` (released 2026-09-01); `refresh-pins.sh --check` reports
+  all three `OK`. Runner `ubuntu-slim`: the actions run on Node.js 24 and the step
+  needs tar, python3 and curl, all there (`ubuntu-slim-Readme.md`). Trigger: a push to `main`
+  that touches `site/`, the check or the workflow, or a dispatch; no schedule (the page has no
+  reason to change on its own) and no run on any other branch: the repository's Pages source is
+  "GitHub Actions" (`build_type: workflow`, `gh api .../pages`, 2026-09-02).
+- **Deployment.** The first `Deploy Pages` run followed the first push of this tree to `main`,
+  dispatched by hand (a force-push of an unrelated history creates no `push` run,
+  `docs/gotchas.md`); since then every push to `main` that touches `site/`, the check or the
+  workflow deploys, and the check runs first.
+
+Sources read 2026-09-02: GitHub docs "Using custom workflows with GitHub Pages" (the three
+actions, permissions, the `github-pages` environment, the artifact's tar rules),
+"Configuring a publishing source for your GitHub Pages site" (source "GitHub Actions");
+`actions/starter-workflows` `pages/static.yml`; `actions/upload-pages-artifact` README and
+`action.yml` at v5.0.0, `actions/deploy-pages` README and `action.yml` at v5.0.1,
+`actions/configure-pages` `action.yml` at v6.0.0 (all `node24`); `gh attestation verify`
+manual; cli/cli `pkg/cmd/attestation/artifact/oci/client.go`; runner-images
+`ubuntu-slim-Readme.md` (image 20260728.2.1) and `images/ubuntu-slim/Dockerfile`
+(`FROM ubuntu:24.04`); v1 `site/index.html` and `deploy-pages.yml` (read as reference,
+rewritten).
