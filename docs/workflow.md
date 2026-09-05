@@ -70,10 +70,10 @@ podman run --rm -v "$PWD:/repo:ro,z" -w /repo quay.io/fedora/fedora:44 \
 
 ## Probe a pre-flight image by hand
 
-The `/preflight` command names its files after the flavour's image:
-`/var/tmp/<image>-base.env`, `-labels.txt`, `-preflight.log` and `localhost/<image>:preflight`,
-`<image>` being `bazzite-mx`, `bazzite-mx-nvidia-open` or `bazzite-mx-nvidia`, so the flavours
-coexist. The probe and one smoke test by hand, on the labels it stamped:
+`preflight-build.sh` names its files after the flavour's image: `/var/tmp/<image>-base.env`,
+`-labels.txt`, `-preflight.log` and `localhost/<image>:preflight`, `<image>` being
+`bazzite-mx`, `bazzite-mx-nvidia-open` or `bazzite-mx-nvidia`, so the flavours coexist. The
+probe and one smoke test by hand, on the labels it stamped:
 
 ```bash
 # probe a built image: labels, /run and /tmp, lint, packages, modules, the ntfsplus opt-in,
