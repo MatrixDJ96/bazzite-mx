@@ -4,7 +4,8 @@
 # the kmod-builder stage and tests 21, 22, 50 and 55 source it on their own.
 #
 # Output contract: `::group::` and `::endgroup::` fold a section in the
-# Actions log; `FAIL: <reason>` on stderr is what the test runner greps for.
+# Actions log; `FAIL: <reason>` on stderr is what preflight-build.sh and the
+# test runner grep for.
 
 group() {
     echo "::group:: === $* ==="

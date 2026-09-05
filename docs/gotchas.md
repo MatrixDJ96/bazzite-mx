@@ -340,7 +340,11 @@ buildah keys a `RUN` layer on its command string and its parent layer; the conte
 kmod-builder and build steps and exits 0 in about three minutes with an image built from the
 old scripts. Measured 2026-09-04: the closed flavour's pre-flight after a new feature printed
 ten `Using cache` lines and no `kmod ntfsplus:` line, while `--no-cache` produced the real
-build. CI is not affected, a fresh runner having no layer cache.
+build. CI is not affected, a fresh runner having no layer cache. `preflight-build.sh` judges
+the exit status first, then refuses a log without the scripts' own output
+(`build.sh: N scripts ran`, `tests: N passed`) as a cached build. The image id is no proof
+either way: the `LABEL` layer carries a fresh `created` stamp, so the id changes on every run,
+cached or not (measured 2026-09-05: a fully cached run committed a new id).
 
 ## The OGC kernel's changelog is its git tag, not the RPM changelog
 

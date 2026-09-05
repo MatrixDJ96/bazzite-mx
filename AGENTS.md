@@ -15,6 +15,7 @@ shellcheck -x -P SCRIPTDIR --severity=warning <file>.sh     # the lint job's She
 ./.github/scripts/check-form.sh <file>.sh                   # banned shapes, 100 columns
 ./.github/scripts/check-commits.sh HEAD                     # every commit message on the ref
 ./.github/scripts/refresh-pins.sh --check                   # one row per pin; STALE is a row
+./.github/scripts/preflight-build.sh bazzite --no-cache     # build and probe one flavour
 # the main profile (chunked image, its probe, the signing-key proof) on a branch
 gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref <branch> -f rechunk=true
 ```

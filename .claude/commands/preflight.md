@@ -1,9 +1,7 @@
 ---
 description: Local podman pre-flight build of one bazzite-mx flavour before any push.
-allowed-tools: Bash(./.github/scripts/resolve-base.sh:*),
-  Bash(./.github/scripts/image-labels.sh:*), Bash(./.github/scripts/check-image.sh:*),
-  Bash(git rev-parse:*), Bash(sed:*), Bash(mapfile:*), Bash(eval:*), Bash(podman:*),
-  Bash(echo:*), Bash(xargs:*), Bash(rm:*), Bash(id:*), Bash(df:*), Bash(grep:*), Bash(tail:*)
+allowed-tools: Bash(./.github/scripts/preflight-build.sh:*), Bash(podman:*), Bash(xargs:*),
+  Bash(rm:*), Bash(id:*), Bash(df:*), Bash(grep:*), Bash(tail:*)
 argument-hint: "[bazzite|bazzite-nvidia-open|bazzite-nvidia] [--no-cache]"
 ---
 
@@ -28,33 +26,19 @@ in minutes without running the changed script (`docs/gotchas.md` § A local pre-
    The second line does what `podman image prune -f` does: every dangling image of the storage
    goes, the user's too. Never `podman image prune -a`, which also removes the user's tagged
    images no container uses, or `podman system prune`, which removes their stopped containers.
-2. Resolve the base and write the labels the way CI does, then build, in the background; the
-   harness notifies on completion. `FLAVOUR` is the flavour named in the arguments, `bazzite`
-   by default; `--no-cache`, when the arguments carry it, goes after `--pull=newer`.
+2. Run the script, in the background; the harness notifies on completion.
    ```bash
-   ./.github/scripts/resolve-base.sh FLAVOUR > /var/tmp/IMAGE-base.env
-   ./.github/scripts/image-labels.sh /var/tmp/IMAGE-base.env "" "$(git rev-parse HEAD)" \
-     > /var/tmp/IMAGE-labels.txt
-   eval "$(cat /var/tmp/IMAGE-base.env)"
-   version=$(sed -n 's/^org\.opencontainers\.image\.version=//p' /var/tmp/IMAGE-labels.txt)
-   mapfile -t labels < <(sed 's/^/--label=/' /var/tmp/IMAGE-labels.txt)
-   podman build --pull=newer --build-arg BASE_IMAGE="$base_image" \
-     --build-arg IMAGE_NAME="$image_name" --build-arg VERSION="$version" "${labels[@]}" \
-     --tag localhost/IMAGE:preflight . > /var/tmp/IMAGE-preflight.log 2>&1
-   echo "BUILD_EXIT=$?" >> /var/tmp/IMAGE-preflight.log
+   ./.github/scripts/preflight-build.sh $ARGUMENTS
    ```
-   The log is `/var/tmp/IMAGE-preflight.log` (`/tmp` is a tmpfs on a bootc host), its last line
-   the build's own exit status.
-3. Judge the log: it passes with `BUILD_EXIT=0`, the build scripts' own lines
-   (`build.sh: N scripts ran`, `tests: N passed`) and no `FAIL:` line; on a failure, read the
-   log before the verdict.
+   It resolves the base and writes the labels the way CI does, builds
+   `localhost/IMAGE:preflight` with the log in `/var/tmp/IMAGE-preflight.log` (`/tmp` is a
+   tmpfs on a bootc host), refuses a log without the build scripts' own output
+   (`build.sh: N scripts ran`, `tests: N passed`) or with a `FAIL:` line, probes the image with
+   `check-image.sh` and ends with one `preflight ok:` line.
+3. On a failure, read the log before the verdict.
    ```bash
-   grep -E 'BUILD_EXIT|^FAIL:|Using cache|scripts ran|^tests: ' /var/tmp/IMAGE-preflight.log
+   grep -E 'BUILD_EXIT|^FAIL:|Using cache' /var/tmp/IMAGE-preflight.log
    tail -20 /var/tmp/IMAGE-preflight.log
-   ```
-   On a passing log, probe the image the way CI does:
-   ```bash
-   ./.github/scripts/check-image.sh localhost/IMAGE:preflight /var/tmp/IMAGE-labels.txt
    ```
 4. Give the verdict in one line: ready for `develop`, or the fix needed with `file:line` when
    the log names it.

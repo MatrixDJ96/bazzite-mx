@@ -4,7 +4,7 @@
 #
 # Usage: run by the Containerfile's build RUN; no arguments.
 # Output: the scripts' own, each folded in a group; `build.sh: N scripts ran`
-#   at the end.
+#   at the end, the line preflight-build.sh reads.
 # Exit status: 0 when every script did; the first failing script's otherwise.
 
 # shellcheck source=lib/env.sh
