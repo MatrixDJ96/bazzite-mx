@@ -1,52 +1,30 @@
 ---
 description: Local podman pre-flight build of one bazzite-mx flavour before any push.
-allowed-tools: Bash(./.github/scripts/resolve-base.sh:*), Bash(./.github/scripts/image-labels.sh:*), Bash(./.github/scripts/check-image.sh:*), Bash(podman build:*), Bash(podman image inspect:*), Bash(grep:*), Bash(tail:*)
-argument-hint: "[bazzite|bazzite-nvidia-open|bazzite-nvidia]"
+allowed-tools: Bash(./.github/scripts/preflight-build.sh:*), Bash(grep:*), Bash(tail:*)
+argument-hint: "[bazzite|bazzite-nvidia-open|bazzite-nvidia] [--no-cache]"
 ---
 
 Build one flavour locally with the same recipe CI runs, and judge it on the exit status.
-Default flavour: `bazzite`; pass `bazzite-nvidia-open` or `bazzite-nvidia` as `$1`.
+Default flavour: `bazzite`; name `bazzite-nvidia-open` or `bazzite-nvidia` instead. After a
+change under `build_files/` or `system_files/` add `--no-cache`: buildah keys a `RUN` on its
+command string and parent layer, never on the content of a bind mount, so a cached run exits 0
+in minutes without running the changed script (`docs/gotchas.md`).
 
-1. Resolve the base and write the labels the way CI does.
+1. Run the script, in the background; the harness notifies on completion.
    ```bash
-   FLAVOUR="${1:-bazzite}"
-   ./.github/scripts/resolve-base.sh "$FLAVOUR" | tee /var/tmp/bazzite-mx-base.env
-   eval "$(cat /var/tmp/bazzite-mx-base.env)"
-   ./.github/scripts/image-labels.sh /var/tmp/bazzite-mx-base.env "" "$(git rev-parse HEAD)" > /var/tmp/bazzite-mx-labels.txt
-   VERSION=$(sed -n 's/^org\.opencontainers\.image\.version=//p' /var/tmp/bazzite-mx-labels.txt)
-   echo "base_image=$base_image kernel_version=$kernel_version version=$VERSION"
+   ./.github/scripts/preflight-build.sh $ARGUMENTS
    ```
-2. Build, logging to `/var/tmp` because `/tmp` is a tmpfs here, and keep the build's own exit
-   status rather than `tee`'s.
+   It resolves the base and writes the labels the way CI does, builds
+   `localhost/bazzite-mx:preflight` with the log in `/var/tmp/bazzite-mx-preflight.log` (`/tmp`
+   is a tmpfs here), refuses a log without the build scripts' own output (`build.sh: N scripts
+   ran`, `tests: N passed`) or with a `FAIL:` line, probes the image with `check-image.sh` and
+   ends with one `preflight ok:` line.
+2. On a failure, read the log before the verdict.
    ```bash
-   mapfile -t label_args < <(sed 's/^/--label=/' /var/tmp/bazzite-mx-labels.txt)
-   podman build --pull=newer \
-     --build-arg BASE_IMAGE="$base_image" \
-     --build-arg IMAGE_NAME="$image_name" \
-     --build-arg VERSION="$VERSION" \
-     "${label_args[@]}" \
-     --tag localhost/bazzite-mx:preflight . 2>&1 | tee /var/tmp/bazzite-mx-preflight.log
-   BUILD_EXIT=${PIPESTATUS[0]}
-   echo "BUILD_EXIT=$BUILD_EXIT" >> /var/tmp/bazzite-mx-preflight.log
-   exit $BUILD_EXIT
-   ```
-   Run it with `run_in_background: true`; the harness notifies on completion.
-3. Read the log before trusting the exit status. Buildah keys a `RUN` on its command string
-   and parent layer, never on the content of a bind mount. After a change under `build_files/`
-   or `system_files/` a cached run prints `Using cache`, exits 0 in minutes and commits the
-   previous image id (`docs/gotchas.md`). The proof that the scripts ran is their own output
-   (`kmod <name>:`, `tests: N passed`) and a fresh image id; when the id repeats, rerun with
-   `--no-cache`.
-   ```bash
-   grep BUILD_EXIT /var/tmp/bazzite-mx-preflight.log
+   grep -E 'BUILD_EXIT|^FAIL:|Using cache' /var/tmp/bazzite-mx-preflight.log
    tail -20 /var/tmp/bazzite-mx-preflight.log
-   podman image inspect --format '{{.Size}}' localhost/bazzite-mx:preflight
    ```
-4. Probe the built image the way CI probes the sandbox image.
-   ```bash
-   ./.github/scripts/check-image.sh localhost/bazzite-mx:preflight /var/tmp/bazzite-mx-labels.txt
-   ```
-5. Give the verdict in one line: ready for `develop`, or the fix needed with `file:line` when
+3. Give the verdict in one line: ready for `develop`, or the fix needed with `file:line` when
    the log names it.
 
 Cleanup, only when asked: `podman rmi localhost/bazzite-mx:preflight`. Never a bare
