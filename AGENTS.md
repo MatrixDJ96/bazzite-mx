@@ -98,6 +98,9 @@ with them. What the image changes over Bazzite, and why, is `docs/divergences.md
 ./.github/scripts/image-labels.sh /var/tmp/bazzite-mx-base.env "" "$(git rev-parse HEAD)" > /var/tmp/bazzite-mx-labels.txt
 for s in resolve-base image-labels check-image release-tag gate-release changelog refresh-pins watch-upstream; do ./.github/scripts/$s.sh --self-test; done
 
+# Pre-flight one flavour: base, labels, build, log judged on the scripts' own output, probe
+./.github/scripts/preflight-build.sh bazzite --no-cache
+
 # Probe a built image the way CI does (labels, /run and /tmp, lint, packages, modules, version)
 ./.github/scripts/check-image.sh localhost/bazzite-mx:preflight /var/tmp/bazzite-mx-labels.txt
 
