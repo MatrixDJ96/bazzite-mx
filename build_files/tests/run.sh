@@ -9,7 +9,8 @@
 # Usage: run.sh              run every test of both classes, each in its group
 #        run.sh --self-test  the runner on fixture pairs, one good and six bad
 #   An argument after the first is ignored.
-# Output: the tests' own lines; `tests: N passed` or `tests: FAILED`.
+# Output: the tests' own lines; `tests: N passed`, the line
+#   preflight-build.sh reads, or `tests: FAILED`.
 # Exit status: 0 when every test passed; 1 otherwise.
 set -euo pipefail
 shopt -s nullglob
