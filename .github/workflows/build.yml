@@ -10,6 +10,7 @@ on:
     paths-ignore:
       - "**.md"
       - docs/**
+      - site/**
       - .claude/**
       - LICENSE
   pull_request:
@@ -129,6 +130,9 @@ jobs:
           done
 
           echo "node --check ok: ${#scripts[@]} scripts"
+
+      - name: Check Site
+        run: ./.github/scripts/check-site.sh site
 
   build:
     name: Build
