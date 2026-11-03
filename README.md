@@ -10,6 +10,8 @@ workstation, gaming included. Everything ships in a signed
 [bootc](https://bootc-dev.github.io/bootc/) image that updates and rolls back with the system,
 rebuilt on every new Bazzite `stable` image.
 
+The [site](https://matrixdj96.github.io/bazzite-mx/) covers installation in detail.
+
 - **[CLI tools](docs/divergences.md#command-line-tools):** `gh`, `glab`, `shellcheck`, `shfmt`,
   `ripgrep` and `telnet`.
 - **[Development](docs/divergences.md#visual-studio-code):** VS Code, GitKraken, mise and full
