@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Prepare the build: dnf keeps its cache across builds, and the base image's
-# repository files, enabled repositories, recipe sets and module dependencies
-# are recorded, so the gates that run later can tell what the build changed.
+# Prepare the build: dnf keeps its cache across builds, its metadata refreshed
+# once here, and the base image's repository files, enabled repositories,
+# recipe sets and module dependencies are recorded, so the gates that run later
+# can tell what the build changed.
 #
 # Usage: run by build.sh as the first script; no arguments.
 # Writes: $BUILD_TMP/dnf.conf.base, restored by 95-clean-stage.sh;
@@ -27,6 +28,11 @@ keep_dnf_cache() {
     if ! grep -q '^keepcache=1' /etc/dnf/dnf.conf; then
         fail_build "dnf.conf: keepcache=1 not applied"
     fi
+}
+
+# The cache outlives a build, so metadata it kept could predate the mirrors.
+refresh_dnf_metadata() {
+    dnf_retry makecache --refresh
 }
 
 # By content: 90-validate-repos.sh refuses a base file the build modified and
@@ -88,6 +94,7 @@ record_base_module_deps() {
 # --- main ---------------------------------------------------------------------
 
 keep_dnf_cache
+refresh_dnf_metadata
 record_base_repo_files
 record_base_enabled_repos
 record_base_recipe_sets

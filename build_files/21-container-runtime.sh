@@ -19,7 +19,7 @@ install_from_repo docker-ce-stable \
     docker-ce-cli \
     docker-compose-plugin
 
-dnf5 -y install \
+dnf_retry -y install \
     bcvk \
     podman-compose \
     podman-machine \

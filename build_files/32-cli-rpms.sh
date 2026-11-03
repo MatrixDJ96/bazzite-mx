@@ -10,7 +10,7 @@
 # shellcheck source=lib/env.sh
 source "$(dirname "$(realpath "$0")")/lib/env.sh"
 
-dnf5 -y install \
+dnf_retry -y install \
     ShellCheck \
     android-tools \
     bcc \

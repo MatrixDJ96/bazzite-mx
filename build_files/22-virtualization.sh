@@ -43,7 +43,7 @@ install_mesa_demos() {
         fail_build "cannot read the installed mesa packages before the install"
     fi
 
-    dnf5 -y --setopt=fedora.exclude= install mesa-demos
+    dnf_retry -y --setopt=fedora.exclude= install mesa-demos
 
     if ! after=$(installed_mesa_packages); then
         fail_build "cannot read the installed mesa packages after the install"
@@ -56,7 +56,7 @@ install_mesa_demos() {
 }
 
 install_virtualization_packages() {
-    dnf5 -y install \
+    dnf_retry -y install \
         guestfs-tools \
         libvirt \
         libvirt-daemon-kvm \

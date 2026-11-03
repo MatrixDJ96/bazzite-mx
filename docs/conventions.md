@@ -278,6 +278,8 @@ known-bad still red after it. The rules above add to the earlier bullets of this
   build modified; any other added file left enabled; and an enabled set, as `dnf5 repolist`
   reports it, that differs from the base's. It reads the snapshots `00-prep.sh` recorded, so a
   file under a name nobody listed is caught too.
+- A dnf5 call that reaches a mirror goes through `dnf_retry` of `lib/repos.sh`, which
+  `install_from_repo` uses too: one failed request would otherwise fail a flavour's build.
 - The enablement lives in the `.repo` file, never in `dnf5 config-manager setopt`. `setopt`
   writes to an override file under `/etc/dnf/repos.override.d/` and leaves the repository file
   untouched (`man dnf5-config-manager`), so the state would sit in a file the gate's byte

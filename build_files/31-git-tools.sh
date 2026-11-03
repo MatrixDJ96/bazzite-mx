@@ -25,9 +25,9 @@ log "gitkraken: downloaded $version ($(stat -c %s "$RPM_FILE") bytes)"
 
 # The vendor's RPM carries no OpenPGP signature: integrity is TLS to the
 # vendor plus the payload digests checked above, hence --no-gpgchecks here.
-dnf5 -y --no-gpgchecks install "$RPM_FILE"
+dnf_retry -y --no-gpgchecks install "$RPM_FILE"
 
-dnf5 -y install git-credential-libsecret
+dnf_retry -y install git-credential-libsecret
 
 gitkraken_version=$(rpm -q --qf '%{VERSION}' gitkraken)
 libsecret_version=$(rpm -q --qf '%{VERSION}' git-credential-libsecret)

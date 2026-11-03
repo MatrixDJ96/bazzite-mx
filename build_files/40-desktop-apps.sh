@@ -28,7 +28,7 @@ ONEPASSWORD_MCP_GID=31002
 # --- the steps ----------------------------------------------------------------
 
 install_firefox_and_gparted() {
-    dnf5 -y install firefox firefox-langpacks gparted
+    dnf_retry -y install firefox firefox-langpacks gparted
     install -m 0644 "$BAZZITE_FIREFOX_PREFS" "$FIREFOX_PREFS_DIR/"
     deny_flatpak 'org.mozilla.firefox/*'
 }
