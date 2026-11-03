@@ -72,15 +72,16 @@ Files: `build_files/11-image-signing.sh` and its test, `cosign.pub`,
 
 ## Hook framework: ublue-setup-services
 
-The base ships no `system-setup.hooks.d` dispatcher. Three features here need a step that
+The base ships no `system-setup.hooks.d` dispatcher. Four features here need a step that
 converges at every boot or login: the group memberships the container runtime and libvirt need,
-the VS Code extensions of each account, and the copy-and-paste skel files of the accounts that
-predate the image. `ublue-setup-services` comes from the COPR `ublue-os/packages`, the way
-bazzite-dx installs it (`bazzite-dx/build_files/20-install-apps.sh`) and enables it
+the VS Code extensions of each account, the copy-and-paste skel files of the accounts that
+predate the image, and qemu's ACL on each home. `ublue-setup-services` comes from the COPR
+`ublue-os/packages`, the way bazzite-dx installs it
+(`bazzite-dx/build_files/20-install-apps.sh`) and enables it
 (`bazzite-dx/build_files/40-services.sh`). Only the system unit is enabled here;
-`ublue-user-setup.service` is enabled `--global` by the IDE feature, the first one with a user
-hook. Our hooks converge instead of stamping a version. bazzite-dx gates the same work behind
-libsetup's `version-script`
+`ublue-user-setup.service` is enabled `--global` by the IDE feature (`30-ide.sh`), and the other
+user hooks run through it too. Our hooks converge instead of stamping a version. bazzite-dx
+gates the same work behind libsetup's `version-script`
 (`bazzite-dx/system_files/usr/share/ublue-os/privileged-setup.hooks.d/20-dx.sh`), which records
 the run before the body executes: it never repeats a failed run and never reaches an account
 created later.
@@ -233,25 +234,34 @@ virtualization group, whose `virt-on` and `virt-off` it does not have, is remove
 status and runs the kvmfr setup, bazzite-dx's helper (commit a0f3842) in the form of
 `conventions.md` § Bash → Form: the same steps in the same order with the same text, one
 function per step, `set -euo pipefail`, and one shellcheck directive: the bold codes its notice
-prints, `b` and `n`, are readonly names of `ujust.sh`'s own `libformatting.sh`, which
-shellcheck cannot follow on a runner, and a copy that assigned them failed at every run
+prints, `b` and `n`, are readonly names of `ujust.sh`'s own `libformatting.sh`, which shellcheck
+cannot follow on a runner, and a copy that assigned them failed at every run
 ([`gotchas.md`](gotchas.md) § `ujust.sh` declares its colour and formatting names readonly).
 Upstream's `qemu.conf` edit is not carried: it matches the commented `cgroup_device_acl` block
 of a libvirt this base does not ship, so it wrote nothing on any host
-([`gotchas.md`](gotchas.md) § The kvmfr helper's `qemu.conf` edit matches nothing on this
-base). Not carried over: Bazzite's enable and disable switches, whose work the image already
-does: `libvirtd` as the modular daemons, the Flatpak as the RPM, the kernel arguments as
-`modprobe.d` options, `/var/lib/swtpm-localca` and the `restorecon` as the tmpfiles file and
-the workarounds unit, the `libvirt` membership as the boot hook. The build removes the base's
-`bazzite-libvirtd-setup.service`, which Bazzite's `virt-on` enables and which would enable and
-start the monolithic `libvirtd` at the first boot of a host that ran `virt-on` before it came
-to the image. The recipe's help (`ujust setup-virtualization help`) gives the kvmfr undo, which
-frees the 128 MiB the module holds at every boot.
+([`gotchas.md`](gotchas.md) § The kvmfr helper's `qemu.conf` edit matches nothing on this base).
+Carried: the ACL `u:qemu:rx` that bazzite-dx's `virt-on` sets on the home and, since commit
+86c8ffb, on `/run/media` and `/var/mnt`, so qemu reads an ISO kept there: the home's from the
+user hook `13-bazzite-mx-qemu-home.sh` at every login, the mount roots' from the tmpfiles file.
+On `/run/media` the same line adds the entry as a default ACL too, which bazzite-dx does not: the
+`/run/media/<user>` that udisks creates 0750 root at a user's first mount, then adds the user's
+entry to the ACL it inherited, keeps qemu's (udisks 2.11.2, `src/udiskslinuxfilesystem.c`, the
+per-user `g_mkdir` and `add_acl`), and does again whenever udisks recreates it. Any other
+directory below the roots with a tighter mode of its own still bars qemu, as it does on
+bazzite-dx. Not carried over: Bazzite's enable and disable
+switches, whose work the image already does: `libvirtd` as the modular daemons, the Flatpak as
+the RPM, the kernel arguments as `modprobe.d` options, `/var/lib/swtpm-localca` and the
+`restorecon` as the tmpfiles file and the workarounds unit, the `libvirt` membership as the boot
+hook. The build removes the base's `bazzite-libvirtd-setup.service`, which Bazzite's `virt-on`
+enables and which would enable and start the monolithic `libvirtd` at the first boot of a host
+that ran `virt-on` before it came to the image. The recipe's help (`ujust setup-virtualization
+help`) gives the kvmfr undo, which frees the 128 MiB the module holds at every boot.
 
 Files: `build_files/22-virtualization.sh` and its test, `build_files/lib/flatpak.sh`,
 `build_files/lib/just.sh`, `system_files/usr/lib/modprobe.d/bazzite-mx-kvm.conf`,
 `system_files/usr/lib/tmpfiles.d/bazzite-mx-virt.conf`,
 `system_files/usr/share/ublue-os/just/84-bazzite-virt.just`,
+`system_files/usr/share/ublue-os/user-setup.hooks.d/13-bazzite-mx-qemu-home.sh`,
 `system_files/usr/libexec/bazzite-dx-kvmfr-setup`,
 `system_files/usr/libexec/bazzite-mx-libvirt-forward`,
 `system_files/usr/lib/systemd/system/docker.service.d/bazzite-mx-libvirt.conf`.

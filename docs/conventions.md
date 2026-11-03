@@ -373,8 +373,8 @@ three rules:
 
 User hooks (`user-setup.hooks.d/`, `ublue-user-setup.service`) follow the same three rules
 through the same kind of dispatcher. Their check must be cheap enough for every login, so it
-reads a file and never spawns the application. Their fixture is `HOME` plus a stub binary first
-in `PATH`.
+reads a file and never spawns the application. Their fixture is `HOME`, plus a stub binary first
+in `PATH` when the hook calls the application.
 
 ## Tests
 

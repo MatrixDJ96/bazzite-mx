@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Smoke test of 22-virtualization.sh: the packages, the modular libvirt
 # daemons on and the monolithic one off, binfmt kept out, the KVM options,
-# the tmpfiles list, the qemu user, the recipe that replaces the base's,
-# the helper that keeps libvirt's bridges forwarding under Docker's
-# firewall, and the Portal's virtualization group removed.
+# the tmpfiles list, the qemu user and its ACLs on the home and /run/media, the
+# recipe that replaces the base's, the helper that keeps libvirt's bridges
+# forwarding under Docker's firewall, and the Portal's virtualization group
+# removed.
 #
 # Usage: run by tests/run.sh inside the image (offline, on the cleaned tree).
 # Output: one `OK: <what>` or `FAIL: <what>` line per check, on stdout.
@@ -26,6 +27,7 @@ RECIPE=/usr/share/ublue-os/just/84-bazzite-virt.just
 KVMFR_HELPER=/usr/libexec/bazzite-dx-kvmfr-setup
 LIBVIRT_FORWARD=/usr/libexec/bazzite-mx-libvirt-forward
 DOCKER_DROPIN=/usr/lib/systemd/system/docker.service.d/bazzite-mx-libvirt.conf
+QEMU_HOME_HOOK=/usr/share/ublue-os/user-setup.hooks.d/13-bazzite-mx-qemu-home.sh
 LIBVIRTD_SETUP=/usr/lib/systemd/system/bazzite-libvirtd-setup.service
 
 # --- the image ----------------------------------------------------------------
@@ -420,6 +422,43 @@ check_libvirt_forward() {
     rm -rf "$fixture"
 }
 
+# A /run/media/<user> made as udisks makes it, mode 0750 and its user's ACL
+# added to the inherited one, still lets qemu through.
+check_run_media_acl() {
+    local root acl
+
+    root=$(mktemp -d)
+    mkdir -p "$root/run/media"
+    grep '^a+ /run/media ' "$TMPFILES" > "$root/run-media.conf" || true
+    systemd-tmpfiles --root="$root" --create "$root/run-media.conf" > /dev/null 2>&1 || true
+    mkdir -m 0750 "$root/run/media/alice"
+    setfacl -m u:1000:rx "$root/run/media/alice"
+    acl=$(getfacl -p "$root/run/media/alice" 2>&1 || true)
+    rm -rf "$root"
+
+    if grep -qx 'user:qemu:r-x' <<< "$acl" && grep -qx 'mask::r-x' <<< "$acl"; then
+        echo "OK: a /run/media/<user> udisks creates inherits qemu's r-x"
+    else
+        echo "FAIL: /run/media/<user> without qemu's r-x: $(on_one_line 'no ACL' <<< "$acl")"
+    fi
+}
+
+check_qemu_home_hook() {
+    local home output after
+
+    home=$(mktemp -d)
+    output=$(HOME=$home bash "$QEMU_HOME_HOOK" 2>&1 || true)
+    after=$(getfacl -p "$home" 2>&1 || true)
+    rm -rf "$home"
+
+    if grep -qx 'user:qemu:r-x' <<< "$after"; then
+        echo "OK: qemu-home hook gives qemu r-x on HOME"
+    else
+        echo "FAIL: qemu-home hook left HOME without user:qemu:r-x:" \
+            "$(on_one_line 'no output' <<< "$output")"
+    fi
+}
+
 # --- main ---------------------------------------------------------------------
 
 kernel=$(kernel_version)
@@ -429,6 +468,8 @@ check_daemons
 check_kvm_options "$kernel"
 check_tmpfiles
 check_qemu_user
+check_run_media_acl
+check_qemu_home_hook
 check_recipe_help "$RECIPE" setup-virtualization
 check_kvmfr_helper
 check_kvmfr_helper_stops_without_ok
