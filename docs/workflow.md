@@ -9,11 +9,11 @@ the weekly trigger and the upstream watcher · GHCR retention · keeping the pin
 
 ## Branches and profiles
 
-| Where                        | What runs                                                            | What it proves                                                     | What it publishes                                          |
-| ---------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------- |
-| `develop`, pull requests     | the `lint` job, then the three flavours with `check-image.sh`        | the tree builds and the artefact carries what it claims            | nothing                                                    |
-| `main`                       | the same plus the chunked image, its probe and the signing-key proof | the image a host would pull, and the key a release would sign with | nothing                                                    |
-| `release.yml`, dispatch only | the release profile, the gate, the GitHub Release                    | see below                                                          | `:staging`, `:<tag>`, `:stable` when promoted, the Release |
+| Where                        | What runs                                                                                           | What it proves                                                     | What it publishes                                          |
+| ---------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------- |
+| `develop`, pull requests     | the `lint` job, then the three flavours with `check-image.sh`                                       | the tree builds and the artefact carries what it claims            | nothing                                                    |
+| `main`                       | the same, `--no-probe` on the plain image, the full probe on the chunked one, the signing-key proof | the image a host would pull, and the key a release would sign with | nothing                                                    |
+| `release.yml`, dispatch only | the release profile, the gate, the GitHub Release                                                   | see below                                                          | `:staging`, `:<tag>`, `:stable` when promoted, the Release |
 
 The `lint` job runs shellcheck, `check-form.sh` and `check-commits.sh` (every commit of the
 pushed ref, `conventions.md` § Commits) on the runner, then shfmt, yamllint and
@@ -84,7 +84,7 @@ release.yml   workflow_dispatch: reason (becomes the run name), promote_stable (
               free (release-tag.sh --tag)
               -> resolve-base.sh --digests: the three bases read once, base_digest_<flavour>
   build       reusable-build.yml with release_tag, rechunk and publish; one job per flavour:
-                build -> check-image.sh -> compose the chunked image -> check-image.sh again
+                build -> check-image.sh --no-probe -> compose the chunked image -> check-image.sh
                 -> prove the signing key
                 -> SBOM (syft) -> push :staging -> digest from --digestfile -> cosign sign by
                 digest -> SBOM attached as a referrer with oras and signed

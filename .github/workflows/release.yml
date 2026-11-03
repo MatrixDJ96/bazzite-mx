@@ -197,7 +197,7 @@ jobs:
 
       - name: Install ORAS
         env:
-          ORAS_VERSION: 1.3.5
+          ORAS_VERSION: 1.3.6
         run: |
           set -euo pipefail
           ./.github/scripts/install-oras.sh "$ORAS_VERSION" "$RUNNER_TEMP/oras"

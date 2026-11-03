@@ -9,14 +9,16 @@
 # descend from one resolve-base.sh run, so this catches a wrong
 # 10-image-info.sh, not a wrong resolution.
 #
-# Usage: check-image.sh <image> <labels-file>
+# Usage: check-image.sh [--no-probe] <image> <labels-file>
+#          --no-probe     the labels and /run and /tmp alone, for an image a
+#                         later compose replaces and the full check then reads
 #          <image>        a reference in the local containers-storage
 #          <labels-file>  the image-labels.sh KEY=value lines the build stamped
 #        check-image.sh --self-test
 # Output: `labels ok: N labels match`, `run and tmp ok: empty in the image`, the
-#   probe's own lines, then `check-image ok: <image>`. The first refusal is a
-#   `check-image: …` line on stderr, the leftovers under /run and /tmp listed
-#   below it.
+#   probe's own lines unless --no-probe, then `check-image ok: <image>`. The
+#   first refusal is a `check-image: …` line on stderr, the leftovers under /run
+#   and /tmp listed below it.
 # Exit status: 0 the image passes every check; 1 on the first check failed or a
 #   bad argument; podman's own status when the image is not known.
 set -euo pipefail
@@ -213,11 +215,12 @@ run_probe() {
     fi
 }
 
-# check_image <image> <labels file>: the labels, the empty /run and /tmp, then
-# the probe; stops at the first failure.
+# check_image <image> <labels file> [no-probe]: the labels, the empty /run and
+# /tmp, then the probe unless no-probe; stops at the first failure.
 check_image() {
     local image=$1
     local file=$2
+    local mode=${3:-}
     local labels_json kernel version title
 
     labels_json=$(podman image inspect --format '{{json .Labels}}' "$image")
@@ -231,7 +234,10 @@ check_image() {
     title=$(sed -n 's/^org\.opencontainers\.image\.title=//p' "$file")
 
     check_run_and_tmp_empty "$image"
-    run_probe "$image" "$kernel" "$version" "$title"
+
+    if [ "$mode" != no-probe ]; then
+        run_probe "$image" "$kernel" "$version" "$title"
+    fi
 
     echo "check-image ok: $image"
 }
@@ -340,6 +346,12 @@ EOF
         fail_self_test "the probe left the image mounted"
     fi
 
+    if ! output=$(PATH="$dir/bin:$PATH" STUB_LABELS=$labels STUB_PROBE_STATUS=1 \
+        check_image stub:latest "$dir/labels.txt" no-probe 2>&1) \
+        || grep -q "^probe ran" <<< "$output"; then
+        fail_self_test "no-probe ran the probe: ${output//$'\n'/ }"
+    fi
+
     REFUSED=$((REFUSED + 1))
 
     if output=$(PATH="$dir/bin:$PATH" STUB_LABELS='{}' \
@@ -397,7 +409,7 @@ self_test() {
     self_test_check_labels "$dir"
     self_test_run_and_tmp "$dir"
 
-    echo "self-test ok: 1 matching label set accepted, 1 image checked whole," \
+    echo "self-test ok: 1 image checked whole," \
         "$REFUSED bad inputs refused"
 }
 
@@ -407,8 +419,15 @@ case "${1:-}" in
     --self-test)
         self_test
         ;;
+    --no-probe)
+        if [ $# -ne 3 ]; then
+            exit_with_error "usage: check-image.sh --no-probe <image> <labels-file>"
+        fi
+
+        check_image "$2" "$3" no-probe
+        ;;
     "" | -*)
-        exit_with_error "usage: check-image.sh <image> <labels-file> | --self-test"
+        exit_with_error "usage: check-image.sh [--no-probe] <image> <labels-file> | --self-test"
         ;;
     *)
         if [ $# -ne 2 ]; then

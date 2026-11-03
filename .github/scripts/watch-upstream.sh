@@ -249,7 +249,7 @@ runs_live() {
 
     jq --arg path "$RELEASE_WORKFLOW" \
         '[.workflow_runs[] | select(.path == $path)
-          | {id, display_title, status, conclusion, created_at}]' \
+          | {display_title, status}]' \
         <<< "$recent"
 }
 
@@ -262,16 +262,15 @@ open_runs() {
         <<< "$runs"
 }
 
-# same_reason_runs <runs json> <reason>: how many runs with that reason in their
-# name started inside COALESCE_HOURS, whatever their status and conclusion.
+# same_reason_runs <runs json> <reason>: how many runs carry that reason in
+# their name, whatever their status and conclusion; runs_live's query already
+# holds them to COALESCE_HOURS.
 same_reason_runs() {
     local runs=$1
     local reason=$2
-    local since
 
-    since=$(date -u -d "-${COALESCE_HOURS} hours" +%Y-%m-%dT%H:%M:%SZ)
-    jq -r --arg title "${RUN_NAME_PREFIX}${reason}" --arg since "$since" \
-        '[.[] | select(.display_title == $title and .created_at >= $since)] | length' \
+    jq -r --arg title "${RUN_NAME_PREFIX}${reason}" \
+        '[.[] | select(.display_title == $title)] | length' \
         <<< "$runs"
 }
 
@@ -651,36 +650,40 @@ self_test_runs_read_failure() {
     unset -f gh
 }
 
-# self_test_runs_live_filter: the runs of every other workflow dropped, the
-# watcher's own run among them, so it never counts as an open release.
+# self_test_runs_live_filter: the runs read within a created window, the one
+# that bounds same_reason_runs, and the runs of every other workflow dropped,
+# the watcher's own run among them, so it never counts as an open release.
 self_test_runs_live_filter() {
     local runs
 
     gh() {
+        if [[ " $* " != *" created=>="* ]]; then
+            echo "no created window in: $*" >&2
+            return 1
+        fi
+
         printf '{"workflow_runs":[%s,%s]}' \
             '{"id":1,"path":".github/workflows/watch-upstream.yml","status":"in_progress"}' \
             '{"id":2,"path":".github/workflows/release.yml","status":"completed"}'
     }
 
-    runs=$(runs_live)
+    if ! runs=$(runs_live 2>&1); then
+        fail_self_test "runs_live read the runs unbounded: $runs"
+    fi
 
-    if [ "$(jq -r '[.[].id] | join(" ")' <<< "$runs")" != 2 ]; then
+    if [ "$(jq -r '[.[].status] | join(" ")' <<< "$runs")" != completed ]; then
         fail_self_test "runs_live kept another workflow's runs: $runs"
     fi
 
     unset -f gh
 }
 
-# self_test_run <title> <status> <conclusion> <created at>: a one-run JSON array
-# as the release runs.
+# self_test_run <title> <status>: a one-run JSON array as the release runs.
 self_test_run() {
     local title=$1
     local status=$2
-    local conclusion=$3
-    local created_at=$4
 
-    printf '[{"display_title":"%s","status":"%s","conclusion":%s,"created_at":"%s"}]' \
-        "$title" "$status" "$conclusion" "$created_at"
+    printf '[{"display_title":"%s","status":"%s"}]' "$title" "$status"
 }
 
 # self_test_expect_decision <expected dispatch> <what> <decide argument>...:
@@ -698,12 +701,9 @@ self_test_expect_decision() {
     fi
 }
 
-# self_test_decisions: nine decisions, each for its own reason.
+# self_test_decisions: eight decisions, each for its own reason.
 self_test_decisions() {
-    local now old output
-
-    now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    old=$(date -u -d '-30 hours' +%Y-%m-%dT%H:%M:%SZ)
+    local output
 
     if ! output=$(decide stale upstream:aaaa true '[]' false); then
         fail_self_test "decide failed on a clean slate"
@@ -720,16 +720,13 @@ self_test_decisions() {
     self_test_expect_decision false "PROMOTE_STABLE=false dispatched" \
         stale upstream:aaaa false '[]' false
     self_test_expect_decision false "a running release did not coalesce" \
-        stale upstream:aaaa true "$(self_test_run 'Release: weekly' in_progress null "$now")" false
-    self_test_expect_decision false "a fresh failure with the same reason did not coalesce" \
+        stale upstream:aaaa true "$(self_test_run 'Release: weekly' in_progress)" false
+    self_test_expect_decision false "a finished run with the same reason did not coalesce" \
         stale upstream:aaaa true \
-        "$(self_test_run 'Release: upstream:aaaa' completed '"failure"' "$now")" false
-    self_test_expect_decision true "a 30 h old run blocked the dispatch" \
+        "$(self_test_run 'Release: upstream:aaaa' completed)" false
+    self_test_expect_decision true "a run with another reason blocked the dispatch" \
         stale upstream:aaaa true \
-        "$(self_test_run 'Release: upstream:aaaa' completed '"success"' "$old")" false
-    self_test_expect_decision true "a failure with another reason blocked the dispatch" \
-        stale upstream:aaaa true \
-        "$(self_test_run 'Release: upstream:bbbb' completed '"failure"' "$now")" false
+        "$(self_test_run 'Release: upstream:bbbb' completed)" false
 
     output=$(decide stale upstream:aaaa true '[]' true)
 
@@ -837,7 +834,7 @@ self_test() {
     self_test_weekly_reads
 
     echo "self-test ok: 4 verdicts derived, a retried inspect kept clean," \
-        "$REFUSED bad inputs refused, 9 decisions and 9 weekly ones checked"
+        "$REFUSED bad inputs refused, 8 decisions and 9 weekly ones checked"
 }
 
 # --- main ---------------------------------------------------------------------

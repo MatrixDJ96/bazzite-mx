@@ -96,8 +96,19 @@ jobs:
             --tag "$IMAGE" \
             .
 
+      # With rechunk the chunked image is what ships and gets the full probe.
       - name: Check Image
-        run: ./.github/scripts/check-image.sh "$IMAGE" "$RUNNER_TEMP/labels.txt"
+        env:
+          RECHUNK: ${{ inputs.rechunk }}
+        run: |
+          set -euo pipefail
+          probe_args=()
+
+          if [ "$RECHUNK" = true ]; then
+            probe_args=(--no-probe)
+          fi
+
+          ./.github/scripts/check-image.sh "${probe_args[@]}" "$IMAGE" "$RUNNER_TEMP/labels.txt"
 
       # The df line records the disk left before the pull, the figure a run that
       # dies on ENOSPC needs.
@@ -167,7 +178,7 @@ jobs:
         id: syft
         uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
-          syft-version: v1.55.0
+          syft-version: v1.56.0
 
       - name: Generate SBOM
         if: inputs.publish
@@ -208,7 +219,9 @@ jobs:
           echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       # Pushed twice on purpose: podman writes the layer annotations only on the
-      # second push (containers/podman#27796).
+      # second push (containers/podman#27796). The fix, in container-libs
+      # (https://github.com/podman-container-tools/container-libs/pull/1154), is
+      # not in the runner's podman: Ubuntu 26.04 ships 5.7.0, no update published.
       - name: Push to GHCR
         if: inputs.publish
         id: push
@@ -266,7 +279,7 @@ jobs:
       - name: Install ORAS
         if: inputs.publish
         env:
-          ORAS_VERSION: 1.3.5
+          ORAS_VERSION: 1.3.6
         run: |
           set -euo pipefail
           ./.github/scripts/install-oras.sh "$ORAS_VERSION" "$RUNNER_TEMP/oras"
