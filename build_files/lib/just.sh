@@ -18,16 +18,6 @@ recipe_set() {
     tr ' ' '\n' <<< "$summary" | sed '/^$/d' | sort
 }
 
-has_recipe() {
-    local justfile=$1 recipe=$2 recipes
-
-    if ! recipes=$(recipe_set "$justfile"); then
-        return 1
-    fi
-
-    grep -qx -- "$recipe" <<< "$recipes"
-}
-
 # remove_portal_group <id>: drops the group <id> of Bazzite's Portal (yafti.yml),
 # its `- id:` line and every line indented under it.
 remove_portal_group() {

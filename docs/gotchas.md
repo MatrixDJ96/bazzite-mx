@@ -44,8 +44,8 @@ a fresh-inode helper. A runner whose kernel is a 6.17-azure brings the defect ba
 With `set allow-duplicate-recipes` and the same recipe name in two imported files, just keeps
 the recipe of the file imported first (just manual, "Imports"; measured 2026-09-02 with two
 files on just 1.57.0). An import appended after the base's files can never override a base
-recipe, so `70-justfile.sh` replaces the base file or cuts the recipe out of it, and fails the
-build on any name defined twice.
+recipe, so `70-justfile.sh` replaces the base file or cuts the recipe out of it, and
+`tests/70-justfile.sh` fails the build on any name defined twice.
 
 ## `ujust.sh` declares its colour and formatting names readonly
 
@@ -583,8 +583,8 @@ The same log carries
 `modprobe: FATAL: Module uhid not found in directory /lib/modules/<kernel>`, from the `%post`
 of Sunshine loading `uhid` for the kernel the build runs on: the building host's,
 `7.0.0-1012-azure` on the runner, never the image's. The image carries `uhid.ko` for its own
-kernel and the package's `60-sunshine.conf` loads it at boot, the file `41-sunshine.sh`
-requires and `tests/41-sunshine.sh` reads for `uhid`. The `%post` then prints
+kernel and the package's `60-sunshine.conf` loads it at boot, the file `tests/41-sunshine.sh`
+requires with `uhid` in it. The `%post` then prints
 `rpm-ostree environment detected, skipping post install steps`: it finds `rpm-ostree` in the
 base and leaves out its udev reload.
 

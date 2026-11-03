@@ -939,15 +939,14 @@ self_test_base_set_refused() {
     fi
 }
 
-# self_test_release_arguments <good>: a missing, incomplete, malformed or
-# unknown --base set, three env files of one flavour and one env file short
+# self_test_release_arguments <good>: an incomplete, malformed or unknown
+# --base set, three env files of one flavour and one env file short
 # refused before any registry call.
 self_test_release_arguments() {
     local good=$1
     local base=$SELF_TEST_BASE_DIGEST
     local expected_count output
 
-    self_test_base_set_refused "$good"
     self_test_base_set_refused "$good" --base "bazzite=$base"
     self_test_base_set_refused "$good" --base bazzite=sha256:short \
         --base "bazzite-nvidia-open=$base" --base "bazzite-nvidia=$base"

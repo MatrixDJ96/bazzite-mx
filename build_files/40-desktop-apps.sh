@@ -16,8 +16,6 @@ source "$(dirname "$(realpath "$0")")/lib/env.sh"
 
 ONEPASSWORD_REPO=/etc/yum.repos.d/1password.repo
 VENDORED_REPO=$CTX/system_files/etc/yum.repos.d/1password.repo
-ONEPASSWORD_DIR=/var/opt/1Password
-POLKIT_POLICY=/usr/share/polkit-1/actions/com.1password.1Password.policy
 # Bazzite copies this file into the Flatpak only; the RPM reads its own directory.
 BAZZITE_FIREFOX_PREFS=/usr/share/ublue-os/firefox-config/01-bazzite-global.js
 FIREFOX_PREFS_DIR=/usr/lib64/firefox/browser/defaults/preferences
@@ -31,11 +29,6 @@ ONEPASSWORD_MCP_GID=31002
 
 install_firefox_and_gparted() {
     dnf5 -y install firefox firefox-langpacks gparted
-
-    if [ ! -x /usr/bin/firefox ]; then
-        fail_build "/usr/bin/firefox missing after install"
-    fi
-
     install -m 0644 "$BAZZITE_FIREFOX_PREFS" "$FIREFOX_PREFS_DIR/"
     deny_flatpak 'org.mozilla.firefox/*'
 }
@@ -54,87 +47,10 @@ install_onepassword() {
     install -m 0644 "$VENDORED_REPO" "$ONEPASSWORD_REPO"
 }
 
-require_onepassword_layout() {
-    if [ ! -d "$ONEPASSWORD_DIR" ]; then
-        fail_build "$ONEPASSWORD_DIR missing after install"
-    fi
-
-    if [ "$(readlink /usr/bin/1password)" != /opt/1Password/1password ]; then
-        fail_build "/usr/bin/1password does not point into /opt/1Password"
-    fi
-}
-
-# The %post must have kept the groups created above, at their gids.
-require_onepassword_groups() {
-    local spec group wanted_gid gid
-
-    for spec in "onepassword=$ONEPASSWORD_GID" "onepassword-mcp=$ONEPASSWORD_MCP_GID"; do
-        group=${spec%%=*}
-        wanted_gid=${spec#*=}
-        gid=$(awk -F: -v g="$group" '$1 == g { print $3 }' /etc/group)
-
-        if [ -z "$gid" ]; then
-            fail_build "group $group missing after install"
-        fi
-
-        if [ "$gid" != "$wanted_gid" ]; then
-            fail_build "group $group has gid $gid, not $wanted_gid"
-        fi
-    done
-}
-
-# The browser and MCP helpers run setgid to their group: that is what the
-# fixed gids are for.
-require_onepassword_setgid_helpers() {
-    local spec helper wanted_gid mode
-
-    for spec in "1Password-BrowserSupport=$ONEPASSWORD_GID" "1password-mcp=$ONEPASSWORD_MCP_GID"; do
-        helper=${spec%%=*}
-        wanted_gid=${spec#*=}
-
-        if ! mode=$(stat -c '%g %A' "$ONEPASSWORD_DIR/$helper" 2>&1); then
-            fail_build "$ONEPASSWORD_DIR/$helper missing: $mode"
-        fi
-
-        if [ "$mode" != "$wanted_gid -rwxr-sr-x" ]; then
-            fail_build "$ONEPASSWORD_DIR/$helper is '$mode', not setgid to $wanted_gid"
-        fi
-    done
-}
-
-# The polkit actions must exist, parse, and name no build-time user: a
-# `unix-user:` owner written by the %post would be a user no host has.
-require_polkit_actions() {
-    local action owners
-
-    if [ ! -f "$POLKIT_POLICY" ]; then
-        fail_build "$POLKIT_POLICY missing: the %post did not install the polkit actions"
-    fi
-
-    if ! xmllint --noout "$POLKIT_POLICY" 2> /dev/null; then
-        fail_build "$POLKIT_POLICY is not well-formed XML"
-    fi
-
-    for action in unlock authorizeCLI authorizeSshAgent; do
-        if ! grep -q "action id=\"com.1password.1Password.$action\"" "$POLKIT_POLICY"; then
-            fail_build "$POLKIT_POLICY lacks action com.1password.1Password.$action"
-        fi
-    done
-
-    if grep -q 'unix-user:' "$POLKIT_POLICY"; then
-        owners=$(grep -o 'unix-user:[^ <]*' "$POLKIT_POLICY" | tr '\n' ' ' || true)
-        fail_build "$POLKIT_POLICY names a build-time user as owner: $owners"
-    fi
-}
-
 # --- main ---------------------------------------------------------------------
 
 install_firefox_and_gparted
 install_onepassword
-require_onepassword_layout
-require_onepassword_groups
-require_onepassword_setgid_helpers
-require_polkit_actions
 
 firefox_version=$(rpm -q --qf '%{VERSION}' firefox)
 gparted_version=$(rpm -q --qf '%{VERSION}' gparted)

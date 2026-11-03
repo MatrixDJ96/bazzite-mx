@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Checks the smoke tests share. Each prints exactly one `OK: …` or `FAIL: …`
 # line per item, the contract tests/run.sh reads. Sourced by the tests that
-# need them; brings lib/just.sh (recipe_set, has_recipe) and lib/gpg.sh
+# need them; brings lib/just.sh (recipe_set) and lib/gpg.sh
 # (key_fingerprint, KEY_FPR) along.
 
 # shellcheck source=../lib/just.sh

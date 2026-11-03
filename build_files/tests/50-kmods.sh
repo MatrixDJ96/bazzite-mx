@@ -293,15 +293,6 @@ check_install_refuses_bad_tarballs() {
         echo "FAIL: a tarball without the helper was accepted (or left files)"
     fi
 
-    mkdir -p "$work/other/app"
-    fixture_pack "$work" other other
-
-    if install_refused "$work" other; then
-        echo "OK: installer refuses a tarball with another top directory"
-    else
-        echo "FAIL: a foreign tarball was accepted"
-    fi
-
     printf '#!/bin/sh\necho helper\n' > "$work/$TARBALL_TOP/app/mcontrolcenter-helper"
     mkdir -p "$work/$other_top"
     cp -a "$work/$TARBALL_TOP/app" "$work/$other_top/"

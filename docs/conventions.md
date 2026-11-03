@@ -56,9 +56,11 @@ in `# form: literal`. The rest is checked by hand at review, like § Prose.
   ```bash
   # before, 22-virtualization.sh
   ! rpm -q "$pkg" > /dev/null || die "$pkg was pulled in (the image keeps binfmt out)"
-  # after
-  if rpm -q "$package" > /dev/null; then
-      fail_build "$package was pulled in (the image keeps binfmt out)"
+  # after, tests/22-virtualization.sh
+  if rpm -q "$package" > /dev/null 2>&1; then
+      echo "FAIL: $package installed (the image keeps binfmt out)"
+  else
+      echo "OK: $package absent"
   fi
   ```
 
@@ -181,7 +183,7 @@ in `# form: literal`. The rest is checked by hand at review, like § Prose.
   the host helpers (prints `ERROR:`, the command stops) and in the CI scripts
   (`.github/scripts/lib.sh`, prints `<script>: …`, the script stops), where `print_error` prints
   the same line and returns 1 for a function a caller runs under `if`. A function a caller runs
-  under `if` is named as the question its status answers: `module_loaded`, `has_recipe`.
+  under `if` is named as the question its status answers: `module_loaded`, `group_in_etc`.
 
   ```bash
   # before
@@ -327,14 +329,14 @@ known-bad still red after it. The rules above add to the earlier bullets of this
   exactly the recipes we replace, and `70-justfile.sh` refuses the build when the base's recipe
   set, recorded by `00-prep.sh` before the copy, differs from ours.
 - When the base file holds other recipes too, the recipe goes in the `OVERRIDES` list of
-  `70-justfile.sh`. That cuts the recipe out of the base file, proves the removal changed
-  nothing else and proves our file defines the name. `install-jetbrains-toolbox` is the one
-  entry.
+  `70-justfile.sh`. That cuts the recipe out of the base file and proves the removal changed
+  nothing else; `tests/70-justfile.sh` proves our file defines the name.
+  `install-jetbrains-toolbox` is the one entry.
 - Our own recipes live in `95-bazzite-mx.just`, imported last into the master justfile on a
   fresh inode. With `allow-duplicate-recipes` the earlier import wins
   ([`gotchas.md`](gotchas.md) § `just`: the earlier import wins on a duplicate recipe name), so
-  `70-justfile.sh` fails the build on any name defined in two files and checks that the master
-  justfile exposes every name of ours and still parses.
+  `tests/70-justfile.sh` fails the build on any name defined in two files and checks that the
+  master justfile exposes every name of ours and still parses.
 - A recipe that needs more than a few lines of logic calls a helper under
   `system_files/usr/libexec/bazzite-mx-<x>`, the recipe staying a thin front: the `help` text,
   the not-as-root check, `sudo` where root is needed, the call. A recipe that prints a line

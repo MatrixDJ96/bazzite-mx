@@ -30,13 +30,6 @@ installed_mesa_packages() {
     grep -v '^mesa-demos-' <<< "$installed" | sort -u || true
 }
 
-# Prints `enabled`, `disabled`, `static`…; stderr stays out: a warning on the
-# unit file would land under the state as a second line and fail an enabled
-# unit.
-unit_state() {
-    systemctl is-enabled "$1" 2> /dev/null || true
-}
-
 # --- the steps ----------------------------------------------------------------
 
 # quickemu needs glxinfo, from mesa-demos. The base excludes `mesa-*` from
@@ -83,46 +76,19 @@ install_virtualization_packages() {
     deny_flatpak 'org.virt_manager.virt-manager/*'
 }
 
-require_binfmt_out() {
-    local package
-
-    for package in qemu-user-binfmt qemu-user-static; do
-        if rpm -q "$package" > /dev/null; then
-            fail_build "$package was pulled in (the image keeps binfmt out)"
-        fi
-    done
-}
-
-# The Fedora preset enables the modular socket; the monolithic daemon must
-# stay off or it takes the sockets over. Bazzite's `virt-on`, run on a host
-# before it came to the image, leaves the base's setup unit enabled, and here
-# it would enable libvirtd at the next boot: no package owns the unit and
-# nothing of the image calls it, so it goes.
-require_modular_daemons() {
-    local state
-
+# Bazzite's `virt-on`, run on a host before it came to the image, leaves the
+# base's setup unit enabled, and here it would enable libvirtd at the next boot:
+# no package owns the unit and nothing of the image calls it, so it goes.
+set_up_libvirt_units() {
     systemctl enable ublue-os-libvirt-workarounds.service
     rm -f "$LIBVIRTD_SETUP"
-
-    state=$(unit_state virtqemud.socket)
-
-    if [ "$state" != enabled ]; then
-        fail_build "virtqemud.socket is $state (Fedora preset expected to enable it)"
-    fi
-
-    state=$(unit_state libvirtd.service)
-
-    if [ "$state" != disabled ]; then
-        fail_build "libvirtd.service is $state: the monolithic daemon must stay off"
-    fi
 }
 
 # --- main ---------------------------------------------------------------------
 
 install_mesa_demos
 install_virtualization_packages
-require_binfmt_out
-require_modular_daemons
+set_up_libvirt_units
 remove_portal_group virtualization
 
 libvirt_version=$(rpm -q --qf '%{VERSION}' libvirt)

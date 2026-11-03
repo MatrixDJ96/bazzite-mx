@@ -10,7 +10,7 @@
 #   without it finds no recorded set and passes the drift guard.
 # Writes: each base recipe in OVERRIDES cut out of its file; the import of
 #   95-bazzite-mx.just appended to the master justfile, on a fresh inode; a
-#   second run by hand appends it again, which tests/70-justfile.sh refuses.
+#   second run by hand appends it again.
 # Exit status: 0 done; the build stops on a `FAIL: …` line; the self-test
 #   exits 1 on its first `self-test: …` or `FAIL: …` line.
 
@@ -302,26 +302,12 @@ guard_vendored_files() {
     done
 }
 
-# Each override needs the base recipe still there, which remove_recipe
-# proves, and ours defined, or nothing would replace it.
+# remove_recipe proves the base recipe is still there to cut.
 apply_overrides() {
-    local entry file name our_recipes
+    local entry file name
 
     for entry in "${OVERRIDES[@]}"; do
         read -r file name <<< "$entry"
-
-        if [ ! -f "$JUST_DIR/$file" ]; then
-            fail_build "$JUST_DIR/$file missing"
-        fi
-
-        if ! our_recipes=$(recipe_set "$JUST_DIR/$OURS"); then
-            fail_build "$OURS does not parse"
-        fi
-
-        if ! grep -qx "$name" <<< "$our_recipes"; then
-            fail_build "$OURS does not define $name, nothing overrides the base's"
-        fi
-
         remove_recipe "$JUST_DIR/$file" "$name"
     done
 }
@@ -332,35 +318,6 @@ import_our_recipes() {
         echo "import \"$JUST_DIR/$OURS\""
     } > "$MASTER.new"
     mv -f "$MASTER.new" "$MASTER"
-}
-
-require_unique_recipe_names() {
-    local file all_names duplicates
-
-    all_names=$(
-        for file in "$JUST_DIR"/*.just; do
-            recipe_set "$file"
-        done | sort || true
-    )
-    duplicates=$(uniq -d <<< "$all_names")
-
-    if [ -n "$duplicates" ]; then
-        fail_build "recipes defined in more than one file (the earlier import would win):" \
-            "$(one_line "$duplicates")"
-    fi
-}
-
-# <master-set> and <our-set> are recipe sets, one name per line.
-require_master_exposes_ours() {
-    local master_set=$1
-    local our_set=$2
-    local name
-
-    while IFS= read -r name; do
-        if ! grep -qx "$name" <<< "$master_set"; then
-            fail_build "$MASTER does not expose $name"
-        fi
-    done <<< "$our_set"
 }
 
 # `--check` reads the file it is given under any name and writes nothing.
@@ -384,15 +341,9 @@ fi
 guard_vendored_files
 apply_overrides
 import_our_recipes
-require_unique_recipe_names
 
-if ! master_set=$(recipe_set "$MASTER"); then
-    fail_build "$MASTER does not parse after the import"
-fi
-
-our_set=$(recipe_set "$JUST_DIR/$OURS")
-
-require_master_exposes_ours "$master_set" "$our_set"
+master_set=$(recipe_set "$MASTER" || true)
+our_set=$(recipe_set "$JUST_DIR/$OURS" || true)
 require_fmt_clean
 
 log "justfile: $OURS imported ($(wc -l <<< "$our_set") recipes: $(one_line "$our_set"))," \

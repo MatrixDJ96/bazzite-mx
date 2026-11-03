@@ -60,7 +60,7 @@ Each script owns one artefact and ships a `--self-test`.
 | `lib/log.sh`              | `group`, `endgroup`, `log`, `fail_build`                                                                                                         |
 | `lib/repos.sh`            | `install_from_repo`, `enabled_repos`                                                                                                             |
 | `lib/flatpak.sh`          | `deny_flatpak <ref>`: one deny line in the base's Flatpak filter                                                                                 |
-| `lib/just.sh`             | `recipe_set`, `has_recipe`, `remove_portal_group <id>`; output captured before any grep                                                          |
+| `lib/just.sh`             | `recipe_set`, `remove_portal_group <id>`; output captured before any grep                                                                        |
 | `lib/kmod.sh`             | `kernel_version`, `assert_module`; shared with the kmod-builder stage                                                                            |
 | `lib/gpg.sh`              | the `KEY_FPR` table, `key_fingerprint` and `assert_key_fingerprint`                                                                              |
 | `kmods/build-kmods.sh`    | the kmod-builder stage: BTF prepared (vmlinux extracted, pahole built from the kernel's tag), then per module fetch, build, strip, stage, assert |
@@ -78,7 +78,7 @@ Each script owns one artefact and ships a `--self-test`.
 | `33-mise.sh`              | mise from its COPR; activation and defaults come from `system_files/`                                                                            |
 | `40-desktop-apps.sh`      | Firefox, gparted, 1Password, and the Firefox Flatpak denied                                                                                      |
 | `41-sunshine.sh`          | Sunshine from its COPR, its user unit left disabled, its menu entry routed to the recipe                                                         |
-| `45-kde-defaults.sh`      | asserts the Plasma update scripts, the skel files and their login hook landed                                                                    |
+| `45-kde-defaults.sh`      | logs the Plasma update scripts, skel files and login hook `system_files/` ships                                                                  |
 | `50-kmods.sh`             | installs the staged modules under `updates/`, runs depmod, asserts each                                                                          |
 | `55-ntfsplus.sh`          | NTFSPLUS as the type `ntfs`: the alias, the generic `mount.ntfs` helpers removed, and on a kernel whose `ntfs3` claims the type the routing file |
 | `70-justfile.sh`          | the ujust recipes: drift guard, overrides, import, format check                                                                                  |

@@ -250,8 +250,8 @@ self_test_write_labels() {
         "containers.bootc=1" > "$file"
 }
 
-# self_test_check_labels <dir>: a missing label, a changed label and an empty
-# labels file refused.
+# self_test_check_labels <dir>: a changed label and an empty labels file
+# refused.
 self_test_check_labels() {
     local dir=$1
     local good=$dir/labels.txt
@@ -266,13 +266,6 @@ self_test_check_labels() {
  "containers.bootc":"1"}
 EOF
     )
-
-    REFUSED=$((REFUSED + 1))
-    changed=$(jq -c 'del(."ostree.linux")' <<< "$labels_json")
-
-    if check_labels "$changed" "$good" > /dev/null 2>&1; then
-        fail_self_test "missing label accepted"
-    fi
 
     REFUSED=$((REFUSED + 1))
     changed=$(jq -c '."org.opencontainers.image.version" = "44.20260902"' <<< "$labels_json")

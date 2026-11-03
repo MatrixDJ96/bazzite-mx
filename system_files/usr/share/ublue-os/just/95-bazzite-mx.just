@@ -1,6 +1,6 @@
 # vim: set ft=make :
 # The image's own recipes, imported last into the master justfile by
-# 70-justfile.sh, which refuses a name defined twice.
+# 70-justfile.sh; tests/70-justfile.sh refuses a name defined twice.
 
 # Add the taskbar panel to every other screen that has none.
 [group("desktop")]

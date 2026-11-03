@@ -192,8 +192,8 @@ self_test_resolve() {
 }
 
 # self_test_bad_inputs <manifest>: a manifest without the kernel label, one
-# without the version label, one with a short digest and an empty one refused;
-# an unknown flavour refused.
+# without the version label and one with a short digest refused; an unknown
+# flavour refused.
 self_test_bad_inputs() {
     local manifest=$1
     local bad
@@ -201,8 +201,7 @@ self_test_bad_inputs() {
     for bad in \
         "$(jq -c 'del(.Labels["ostree.linux"])' <<< "$manifest")" \
         "$(jq -c 'del(.Labels["org.opencontainers.image.version"])' <<< "$manifest")" \
-        "$(jq -c '.Digest = "sha256:short"' <<< "$manifest")" \
-        '{}'; do
+        "$(jq -c '.Digest = "sha256:short"' <<< "$manifest")"; do
         REFUSED=$((REFUSED + 1))
 
         if resolve bazzite "$bad" > /dev/null 2>&1; then

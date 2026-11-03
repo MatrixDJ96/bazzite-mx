@@ -647,8 +647,8 @@ ours that carries an upstream name therefore takes the upstream file's place, as
 we replace. When the upstream file holds other recipes too, the upstream recipe is cut out of
 it with its neighbours proven unchanged. `00-prep.sh` records every base recipe file's recipe
 set before `system_files` is copied. `70-justfile.sh` then refuses a replaced file whose set
-differs from ours, an override whose recipe the base no longer has, and any name defined in two
-files.
+differs from ours and an override whose recipe the base no longer has; its test refuses any name
+defined in two files.
 
 `verify-host` answers whether a host is where the image expects it. The name is ours, after
 Bazzite's `verify-image`, which only rewrites the transport for `ghcr.io/ublue-os`. `migrate`
