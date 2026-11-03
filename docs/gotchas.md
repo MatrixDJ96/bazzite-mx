@@ -16,12 +16,12 @@ fs-ntfs on 6.18 · mount -t ntfs helper · module panics at first use · NTFS dr
 case · udisks defaults outside allow · pre-flight without the changed script · OGC kernel
 changelog · NTFSPLUS EINVAL · skel and existing accounts · KXmlGui write-back · flags in a
 command substitution · findmnt --verify on nofail · fstab row with leading whitespace ·
-automount over autofs · root's flatpak list · SBOM media type · image-info.json vs OCI label
-day · FAIL branch before its verdict · sunshine --version home · Docker FORWARD policy and
-libvirt · # inside an fstab field · 2> /dev/null on a failed redirection · recipe description
-line · cosign 3.1.3 bundle flag · vendor build-log warnings · no BTF from kernel-devel ·
-arithmetic error escapes set -e · scriptlet rewrote a .pyc · anonymous GHCR 403 · sysusers m
-line on a base group.
+automount over autofs · root's flatpak list · SBOM media type · image-info.json vs OCI label day
+· FAIL branch before its verdict · sunshine --version home · Docker FORWARD policy and libvirt
+· # inside an fstab field · 2> /dev/null on a failed redirection · recipe description line ·
+cosign 3.1.3 bundle flag · vendor build-log warnings · no BTF from kernel-devel · arithmetic
+error escapes set -e · scriptlet rewrote a .pyc · anonymous GHCR 403 · sysusers m line on a base
+group · groupmod and a /usr/lib/passwd user.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -659,3 +659,16 @@ keeps `kvm` and `tss` in `/usr/lib/group`, which `systemd-sysusers` leaves alone
 and a host's own `systemd-sysusers` run left it so. Measured 2026-10-03 in the pre-flight image
 `f7272bf8b1e3`. `carry_gshadow_members` in `95-clean-stage.sh` carries the members into
 `/usr/lib/group`, and `tests/95-clean-stage.sh` requires every `m` line to resolve.
+
+## `groupmod -g` fails on a `/usr/lib/passwd` user whose primary gid is the old one
+
+`groupmod -g` also moves every user whose primary gid is the group's old one, and finds them
+through NSS: on a v1 host whose `/etc/group` had `docker:x:959:…`, the image's `wsdd`
+(`/usr/lib/passwd`, dynamic gid 959) resolved its primary group to `docker`, and `groupmod -o -g
+995 docker` stopped on «user 'wsdd' does not exist in /etc/passwd», exit 10, after the gid walk
+had already run: `ublue-system-setup.service` failed at every boot and `docker` kept 959.
+Reported from `sonny-l14g6` on bazzite-63 44.20261027, reproduced 2026-11-03 in the pre-flight
+image without the fixture prefix; under `--prefix` groupmod reads only the prefix's files, so
+the smoke test never saw it. `10-bazzite-mx-groups.sh` rewrites the gid field of the group's
+`/etc/group` line instead, and `tests/21-container-runtime.sh` requires a user on the old gid to
+keep it.

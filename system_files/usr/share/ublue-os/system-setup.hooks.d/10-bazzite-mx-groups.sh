@@ -4,7 +4,7 @@
 # A group whose /etc/group gid differs from the image's (sysusers.d) takes the
 # image's when no other group holds it. The files under /run (docker.sock
 # predates this hook), /etc and /var/lib/libvirt with the old gid follow first,
-# so a walk cut short runs again; a file of another group on that gid moves
+# so a run killed mid-walk runs again; a file of another group on that gid moves
 # too. Homes and container stores are not walked: their gids are their own.
 #
 # Usage: 10-bazzite-mx-groups.sh        (root; ublue-system-setup runs it)
@@ -12,11 +12,12 @@
 #   (etc/passwd, etc/group, usr/lib/group), which usermod --prefix edits.
 # Output: `bazzite-mx-groups: …` lines, the last one the count of wheel users
 #   and the groups.
-# Writes: /etc/group and /etc/gshadow (groupmod, usermod), the group of the
-#   files under /run, /etc and /var/lib/libvirt that carried a realigned
-#   group's old gid.
-# Exit status: 0 done; non-zero when groupmod or usermod fails, their own
-#   message on stderr.
+# Writes: /etc/group (lines copied from /usr/lib/group, the gid field, usermod)
+#   and /etc/gshadow (usermod), the group of the files under /run, /etc and
+#   /var/lib/libvirt that carried a realigned group's old gid.
+# Exit status: 0 done; 1 when a group line's copy, the /etc/group rewrite or
+#   usermod fails, in a `bazzite-mx-groups: ERROR: …` line on stderr after the
+#   failing tool's own message when it prints one.
 set -euo pipefail
 
 GROUPS_TARGET=(docker libvirt)
@@ -30,6 +31,11 @@ USERMOD_OPTIONS=()
 if [ -n "$PREFIX" ]; then
     USERMOD_OPTIONS=(--prefix "$PREFIX")
 fi
+
+exit_with_error() {
+    echo "bazzite-mx-groups: ERROR: $*" >&2
+    exit 1
+}
 
 # --- the group files ----------------------------------------------------------
 
@@ -92,10 +98,26 @@ realign_gids() {
                 "kept gid $etc_gid" >&2
         fi
 
-        # The number is the group's own line in /usr/lib/group, which groupmod
-        # reads through NSS as taken: -o lets the two lines agree.
-        groupmod "${USERMOD_OPTIONS[@]}" -o -g "$lib_gid" "$group"
+        if ! set_gid_in_etc "$group" "$lib_gid"; then
+            exit_with_error "cannot set $group's gid to $lib_gid in $ETC_GROUP"
+        fi
     done
+}
+
+# set_gid_in_etc <group> <gid>: rewrites the gid field of the group's line; a
+# user whose primary gid is the old one keeps it. Not groupmod, which fails on a
+# `/usr/lib/passwd` user whose primary gid is the old one.
+set_gid_in_etc() {
+    local group=$1 gid=$2
+    local staged=$ETC_GROUP.bazzite-mx
+
+    # The copy first, so the renamed file keeps /etc/group's mode, owner and label.
+    if ! cp --preserve=all "$ETC_GROUP" "$staged" \
+        || ! awk -F: -v OFS=: -v group="$group" -v gid="$gid" \
+            '$1 == group { $3 = gid } { print }' "$ETC_GROUP" > "$staged" \
+        || ! mv -f "$staged" "$ETC_GROUP"; then
+        return 1
+    fi
 }
 
 # The groups exist in /usr/lib/group and NSS resolves them, but usermod edits
@@ -106,7 +128,10 @@ copy_groups_to_etc() {
     for group in "${GROUPS_TARGET[@]}"; do
         if ! group_in_etc "$group"; then
             echo "bazzite-mx-groups: copying $group from $LIB_GROUP to $ETC_GROUP"
-            grep "^${group}:" "$LIB_GROUP" >> "$ETC_GROUP"
+
+            if ! grep "^${group}:" "$LIB_GROUP" >> "$ETC_GROUP"; then
+                exit_with_error "cannot copy $group from $LIB_GROUP to $ETC_GROUP"
+            fi
         fi
     done
 }
@@ -127,7 +152,10 @@ add_wheel_users_to_groups() {
             fi
 
             echo "bazzite-mx-groups: adding $user to $group"
-            usermod "${USERMOD_OPTIONS[@]}" -aG "$group" "$user"
+
+            if ! usermod "${USERMOD_OPTIONS[@]}" -aG "$group" "$user"; then
+                exit_with_error "usermod could not add $user to $group"
+            fi
         done
     done
 }

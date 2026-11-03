@@ -193,6 +193,47 @@ check_hook_realigns_gids() {
     rm -rf "$fixture"
 }
 
+# A system user whose primary gid is docker's old one keeps it: `groupmod -g`
+# fails on a `/usr/lib/passwd` user whose primary gid is the old one.
+check_hook_leaves_a_primary_gid() {
+    local fixture output docker_gid
+
+    fixture=$(fixture_create)
+    docker_gid=$(awk -F: '$1 == "docker" { print $3 }' "$fixture/usr/lib/group")
+    printf 'wsdd:x:959:959::/:/usr/sbin/nologin\n' >> "$fixture/etc/passwd"
+    printf 'docker:x:959:alice\n' >> "$fixture/etc/group"
+
+    if output=$(run_hook "$fixture") \
+        && grep -qx "docker:x:$docker_gid:alice" "$fixture/etc/group" \
+        && grep -q '^wsdd:x:959:959:' "$fixture/etc/passwd"; then
+        echo "OK: hook moves docker off gid 959, wsdd's primary gid stays"
+    else
+        echo "FAIL: hook with wsdd on docker's old gid: $(on_one_line 'no output' <<< "$output");" \
+            "$(grep -E '^(docker|wsdd):' "$fixture/etc/group" "$fixture/etc/passwd" \
+                | on_one_line none)"
+    fi
+
+    rm -rf "$fixture"
+}
+
+# A wheel member usermod cannot find stops the hook with its one ERROR line.
+check_hook_reports_a_failed_usermod() {
+    local fixture output
+    local expected='bazzite-mx-groups: ERROR: usermod could not add ghost to docker'
+
+    fixture=$(fixture_create)
+    sed -i 's/^wheel:x:10:alice$/wheel:x:10:alice,ghost/' "$fixture/etc/group"
+
+    if ! output=$(run_hook "$fixture") && grep -qx "$expected" <<< "$output"; then
+        echo "OK: hook exits 1 with an ERROR line when usermod fails"
+    else
+        echo "FAIL: hook with a wheel user usermod cannot find:" \
+            "$(on_one_line 'no output' <<< "$output")"
+    fi
+
+    rm -rf "$fixture"
+}
+
 # --- main ---------------------------------------------------------------------
 
 kernel=$(kernel_version)
@@ -207,3 +248,5 @@ check_hook_first_run "$fixture"
 check_hook_second_run "$fixture"
 rm -rf "$fixture"
 check_hook_realigns_gids
+check_hook_leaves_a_primary_gid
+check_hook_reports_a_failed_usermod
