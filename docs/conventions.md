@@ -209,9 +209,9 @@ in `# form: literal`. The rest is checked by hand at review, like § Prose.
 - **A comment says what the code cannot.** The contract of a function when its name does not
   carry it (empty when…, status 0 when…), or the reason for a choice the reader would otherwise
   question. A comment that restates the name or the next line is deleted; a function whose name
-  and arguments say it all has none. The history behind a choice (dates, versions,
-  measurements, the bug that forced it) lives in `docs/gotchas.md` and the comment points at
-  its heading.
+  and arguments say it all has none. The history behind a choice (dates, versions, measurements,
+  the bug that forced it) lives in `docs/gotchas.md`; the comment keeps the reason in its own
+  words and names no file of the repository's docs.
 
   ```bash
   # before (a measurement in the comment)
@@ -219,11 +219,10 @@ in `# form: literal`. The rest is checked by hand at review, like § Prose.
   # prints no summary (measured 2026-09-07, util-linux 2.41.5) …
   # after, host.sh
   # fstab_verify_answers <fstab>: findmnt gave its verdict on that table, the
-  # summary line it ends with (…). A findmnt that never ran prints
-  # nothing, one that died on a malformed row prints its diagnostic and no
-  # summary (docs/gotchas.md § `findmnt --verify` reports an unplugged `nofail`
-  # volume as an error); a caller judging a rewrite refuses both instead of
-  # reading an empty error set as a clean one.
+  # summary line it ends with (…). A `findmnt --verify` that never ran
+  # prints nothing, one that died on a malformed row prints its diagnostic and no
+  # summary; a caller judging a rewrite refuses both instead of reading an empty
+  # error set as a clean one.
   ```
 
 - **A function stays short**, about 25 statements as the guide (blank and comment lines do not
@@ -252,7 +251,7 @@ in `# form: literal`. The rest is checked by hand at review, like § Prose.
   # after, describe_what_the_run_changed and abort_declined_step
   next="reboot into it, or rpm-ostree cleanup -p, then apply again"
   …
-  echo "what the run changed stands ($changed): $next"
+  echo "what the run changed stands (${changed#, }): $next"
   …
   abort "step $step not confirmed; $(describe_what_the_run_changed)"
   ```
@@ -355,14 +354,16 @@ known-bad still red after it. The rules above add to the earlier bullets of this
 ## Boot hooks
 
 Scripts under `system_files/usr/share/ublue-os/system-setup.hooks.d/` run as root at every boot
-through `ublue-system-setup.service`, before user sessions. The dispatcher is a loop of
-`bash $script` and reads no exit status, which sets three rules:
+through `ublue-system-setup.service`, ordered before `systemd-user-sessions.service` but, being
+`Type=simple`, not holding logins until the hooks finish. The dispatcher is a loop of
+`bash $script` that stops on no failure, the unit's status being only the last hook's, which sets
+three rules:
 
 - a hook converges on every boot, checking first and changing only what differs. It does not
   stamp a version with libsetup's `version-script`, which records the run before the body
   executes, so it never repeats a failed run nor reaches a user created later;
 - a hook that cannot do its job prints one `ERROR:` line to stderr and exits 1, because the
-  journal line is the only signal it can leave;
+  journal line is the one signal every hook leaves;
 - a hook takes a fixture prefix (`usermod --prefix`, files under a temporary tree) so its smoke
   test exercises the real script, positive and known-bad, without touching the image.
 

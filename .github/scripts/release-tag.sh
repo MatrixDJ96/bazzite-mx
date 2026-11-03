@@ -3,14 +3,11 @@
 # highest suffix taken on any package or release, so all three flavours land on
 # one tag.
 #
-# The taken tags are probed live: skopeo list-tags on every package of
-# ghcr.io/matrixdj96 (logged in, docs/gotchas.md § An anonymous probe of a GHCR
-# package never published answers 403) and gh release list on the repository. A
-# probe that fails stops the run; a probe that answers with no tag at all means
-# nothing is taken, which is how a cleaned registry starts again. A name a
-# deleted immutable release once carried is burnt on GitHub and invisible to
-# both probes, so a release is never deleted to reuse its name; a dispatch can
-# force another name instead.
+# The taken tags are probed live on every GHCR package (logged in: anonymously,
+# a package never published answers 403, not `name unknown`) and on the
+# repository's releases; a failed probe stops the run, one with no tag means
+# nothing is taken. A deleted immutable release burns its name on GitHub unseen
+# by both probes: force another name, never delete one to reuse it.
 #
 # Usage: release-tag.sh <coords-file>
 #          <coords-file>  the KEY=value output of resolve-base.sh; only
@@ -42,10 +39,8 @@ fedora_of() {
 }
 
 # next_tag <fedora> <date> <taken file>: <fedora>.<date> on stdout, or the .N
-# after the day's highest taken suffix (the bare name counting 0) when one is in
-# the taken file; a gap below it is never filled, since it may be a name a
-# deleted release burnt. An empty taken file is a registry with no tag: the
-# day's name is free.
+# after the day's highest taken suffix (the bare name counting 0); a gap below
+# it is never filled, since it may be a name a deleted release burnt.
 next_tag() {
     local fedora=$1
     local date=$2
@@ -62,11 +57,9 @@ next_tag() {
     fi
 }
 
-# check_forced_shape <fedora> <tag>: status 0 when the tag has the TAG_SHAPE of
-# lib.sh, <fedora>.<yyyymmdd>[.<n>], with the fedora_version of the resolved
-# base; status 1 with the reason otherwise. Checked before any probe runs, so a
-# typo costs no round trip. The name is the dispatcher's choice, so the shape is
-# the only thing checked about the date.
+# check_forced_shape <fedora> <tag>: status 0 when the tag has lib.sh's
+# TAG_SHAPE and the resolved base's Fedora; status 1 with the reason otherwise.
+# The date is the dispatcher's choice: only its shape is checked.
 check_forced_shape() {
     local fedora=$1
     local tag=$2
@@ -166,9 +159,8 @@ emit_tag() {
 }
 
 # emit_forced_tag <coords file> <tag>: the forced tag as `release_tag=<tag>`
-# once its shape is accepted and the live probes show it free; exits 1
-# otherwise. The taken file is the script-wide `taken`, removed by the EXIT trap
-# after the function returns.
+# once its shape is accepted and the probes show it free; exits 1 otherwise.
+# `taken` is script-wide: the EXIT trap reads it after the function returns.
 emit_forced_tag() {
     local coords=$1
     local forced=$2

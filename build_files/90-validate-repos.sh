@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Repository gate: a vendored .repo that is absent, drifted or enabled, a base
 # .repo the build modified, any addition left enabled, and an enabled set dnf5
-# reports that differs from the base's all fail the build. It compares against
-# 00-prep.sh's snapshots, so no list of names to maintain. The base's priorities
-# and excludes live in /etc/dnf/repos.override.d, outside the snapshot: no
-# build script writes there.
+# reports that differs from the base's all fail the build, against 00-prep.sh's
+# snapshots. /etc/dnf/repos.override.d is outside the snapshot: no build
+# script writes there.
 #
 # Usage: 90-validate-repos.sh              run by build.sh after the last install
 #        90-validate-repos.sh --self-test  the gate on a fixture tree, one good

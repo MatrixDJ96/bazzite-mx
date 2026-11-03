@@ -70,8 +70,8 @@ remove_generic_helpers() {
 }
 
 # fs-ntfs reaches NTFSPLUS alone, and with the routing file ntfs3 loads it
-# first. --show-depends, because -v prints nothing for a module the builder's
-# kernel already has loaded.
+# first. The check reads `--show-depends`: `modprobe -n -v` is silent for a
+# loaded module.
 require_ntfs_routed() {
     local kernel=$1
     local want="insmod /lib/modules/$kernel/updates/ntfs.ko"

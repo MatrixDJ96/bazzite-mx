@@ -19,8 +19,8 @@ kernel_version() {
 
 # Status 0 for a readable module stamped for <kver> and, when <version> is
 # given, carrying it. A vermagic mismatch means the kernel-devel tree and the
-# installed kernel disagree: docs/gotchas.md § A kernel module can pass
-# vermagic and modinfo and panic at its first use.
+# installed kernel disagree; a kernel module can pass vermagic and modinfo and
+# still panic at its first use.
 assert_module() {
     local ko=$1 kver=$2 version=${3:-} vermagic found
 

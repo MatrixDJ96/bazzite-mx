@@ -53,10 +53,9 @@ dest=/usr/lib/modules/$kernel/updates
 names=()
 versions=()
 
-# The one walk of the source.env files, in this shell: what a walk inside
-# `$( )` reads does not survive it (docs/gotchas.md § A step run in a command
-# substitution sets its flags in a subshell), and the resolve pass needs the
-# names again after depmod has indexed them.
+# The one walk of the source.env files, in this shell: a step run in a command
+# substitution runs in a subshell, whose reads do not survive it, and the
+# resolve pass needs the names again after depmod has indexed them.
 for source_env in "$KMODS_DIR"/*/source.env; do
     unset KO_NAME KO_VERSION
     # shellcheck disable=SC1090

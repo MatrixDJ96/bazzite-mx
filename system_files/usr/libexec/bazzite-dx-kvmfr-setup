@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 # Set up the kvmfr module for Looking Glass on this host: a note in modprobe.d,
 # the static-size kernel argument, the udev rule for /dev/kvmfr0, its SELinux
-# context and policy, and the module loaded once. The kvmfr half of `ujust
-# setup-virtualization`: bazzite-dx's helper (commit a0f3842) in the form of
-# docs/conventions.md, same steps in the same order and the same text, less
-# upstream's `qemu.conf` edit: it matches the commented block of a libvirt this
-# base does not ship, so it never changed a byte here (docs/gotchas.md § The
-# kvmfr helper's `qemu.conf` edit matches nothing on this base).
+# context and policy, and the module loaded once. The kvmfr half of
+# `ujust setup-virtualization`: the same steps, order and messages as
+# bazzite-dx's helper; its `qemu.conf` edit is left out, since it matches
+# nothing in this base's `qemu.conf`.
 #
 # Usage: bazzite-dx-kvmfr-setup
 #   Interactive: a prompt to confirm before the first change, one to
@@ -14,17 +12,15 @@
 #   the recipe calling the helper through sudo.
 # Exit status: 0 done, or cancelled at the first prompt; the status of the
 #   failing step otherwise.
-# Writes: /etc/modprobe.d/kvmfr.conf, /etc/udev/rules.d/99-kvmfr.rules,
-#   the SELinux fcontext of /dev/kvmfr0, the policy module kvmfr built under
-#   /root/.config/selinux_te/ (the image's sudoers sets always_set_home, so
-#   HOME and USER are root's: docs/gotchas.md § The kvmfr helper runs under
-#   sudo, so `$HOME` and `$USER` are root's), the kernel argument
-#   kvmfr.static_size_mb=128.
+# Writes: /etc/modprobe.d/kvmfr.conf, /etc/udev/rules.d/99-kvmfr.rules, the
+#   SELinux fcontext of /dev/kvmfr0, the policy module kvmfr built under
+#   /root/.config/selinux_te/ (sudo makes `$HOME` and `$USER` root's), the
+#   kernel argument kvmfr.static_size_mb=128.
 set -euo pipefail
 
-# Urllink and Choose, and the readonly bold codes b and n the closing note
-# prints (docs/gotchas.md § `ujust.sh` declares its colour and formatting
-# names readonly).
+# Urllink and Choose, and the bold codes b and n the closing note prints, which
+# this helper never assigns: ujust.sh declares its colour and formatting names
+# readonly.
 source /usr/lib/ujust/ujust.sh
 
 STATIC_SIZE_MB=128
@@ -33,8 +29,7 @@ UDEV_RULE=/etc/udev/rules.d/99-kvmfr.rules
 POLICY_DIR=$HOME/.config/selinux_te
 POLICY_SOURCE=$POLICY_DIR/kvmfr.te
 
-# The image this helper speaks for, from its own file name: bazzite-dx ships
-# it as bazzite-dx-kvmfr-setup, and the issue tracker it names is that image's.
+# The image named in the disclaimer and its issue tracker, from the file name.
 IMAGE_NAME=$(basename "$0" | sed -E 's/(-dx|)-kvmfr-setup//' || true)
 
 if [ "$IMAGE_NAME" == "bazzite" ]; then

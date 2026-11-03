@@ -4,10 +4,9 @@
 #
 # Usage: run by build.sh; no arguments. Reads the build args IMAGE_NAME,
 #   IMAGE_VENDOR and VERSION from the environment (the Containerfile passes
-#   them). base-version is what the base's image-info.json says, which can
-#   trail the base's OCI label (the source of a sandbox or pre-flight build's
-#   `<base version>.dev`) by a day: docs/gotchas.md § The base's
-#   image-info.json and its OCI label can name different days.
+#   them). base-version is what the base's image-info.json says, which can trail
+#   the base's OCI label (the source of a sandbox or pre-flight build's
+#   `<base version>.dev`) by a day.
 # Writes: /usr/share/ublue-os/image-info.json, /usr/lib/os-release and
 #   /etc/xdg/kcm-about-distrorc.
 # Exit status: 0 done; the build stops on a `FAIL: …` line.
@@ -33,7 +32,6 @@ require_build_args() {
     fi
 }
 
-# Prints the version the base calls itself, read from its image-info.json.
 base_version() {
     local version
 

@@ -7,10 +7,9 @@ argument-hint: "[bazzite|bazzite-nvidia-open|bazzite-nvidia] [--no-cache]"
 
 Build one flavour locally with the same recipe CI runs, and judge it on the exit status.
 Default flavour: `bazzite`; name `bazzite-nvidia-open` or `bazzite-nvidia` instead. After a
-change under `build_files/` or `system_files/` add `--no-cache`: buildah keys a `RUN` on its
-command string and parent layer, never on the content of a bind mount, so a cached run exits 0
-in minutes without running the changed script (`docs/gotchas.md` § A local pre-flight can exit
-0 without running a changed build script).
+change under `build_files/` or `system_files/` add `--no-cache`, or a cached run exits 0 without
+running the changed script (`docs/gotchas.md` § A local pre-flight can exit 0 without running a
+changed build script).
 
 1. Free the space the build needs first: the previous image of this flavour and the new one are
    both on disk otherwise. The verdict of the previous run is already in its log, so nothing is

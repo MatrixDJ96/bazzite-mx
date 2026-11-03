@@ -2,9 +2,8 @@
 # Smoke test of 55-ntfsplus.sh: the ntfs.ko under updates/ takes fs-ntfs alone,
 # and where the kernel's ntfs3 claims fs-ntfs too, ntfs3 loads NTFSPLUS first,
 # elsewhere the image adds no modprobe file; no generic mount.ntfs helper, the
-# FUSE route kept, and udisks's ntfs options with errors=remount-ro.
-# The runtime mount is proven on a booted host (docs/divergences.md § NTFSPLUS on
-# every flavour).
+# FUSE route kept, and udisks's ntfs options with errors=remount-ro. The runtime
+# mount is proven on a booted host.
 #
 # Usage: run by tests/run.sh inside the image (offline, on the cleaned tree).
 # Output: one `OK: <what>` or `FAIL: <what>` line per check, on stdout.
@@ -38,8 +37,7 @@ check_module() {
     fi
 }
 
-# --show-depends, because -v prints nothing for a module the running kernel
-# already has loaded.
+# Reads `--show-depends`: `modprobe -n -v` is silent for a loaded module.
 check_alias_resolution() {
     local kernel=$1
     local want="insmod /lib/modules/$kernel/updates/ntfs.ko"

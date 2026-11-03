@@ -30,9 +30,7 @@ check_image_ref() {
     fi
 }
 
-# The version is a release tag or `<base>.dev`, the base version carries the
-# base's own tag (an empty string is not a version), and the pretty string
-# carries the version.
+# The version is a release tag or `<base>.dev`; an empty base-version fails.
 check_version_fields() {
     local fields
     local wanted='(.version | test("^[0-9]+\\.[0-9]{8}"))

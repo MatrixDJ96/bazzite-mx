@@ -12,8 +12,6 @@ set -euo pipefail
 SOURCE_TREE=$(dirname "$(realpath "$0")")/../../system_files
 FIXED_GROUPS=$SOURCE_TREE/usr/lib/sysusers.d/bazzite-mx-groups.conf
 
-# One FAIL line per file that is missing, differs or carries another mode;
-# one OK line when every file matched.
 check_system_files() {
     local file target count=0 failed=0
 
@@ -40,7 +38,6 @@ check_system_files() {
     fi
 }
 
-# One line per `g <name> <gid>` line of the sysusers file.
 check_fixed_groups() {
     local type name gid got
 

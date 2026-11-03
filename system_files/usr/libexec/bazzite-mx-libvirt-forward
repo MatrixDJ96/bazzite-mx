@@ -1,14 +1,7 @@
 #!/usr/bin/env bash
-# Forwarding for the libvirt bridges under Docker's firewall. When dockerd
-# starts and enables IP forwarding itself, it sets the iptables FORWARD
-# policy to DROP, so a guest on a libvirt NAT network loses the outside:
-# libvirt's own nftables chains accept its packets and Docker's policy drops
-# them next. Docker evaluates its
-# DOCKER-USER chain first and never flushes it, and documents an ACCEPT there
-# as the way to forward between host interfaces
-# (https://docs.docker.com/engine/network/firewall-iptables/). docker.service
-# runs this after dockerd is ready, from the drop-in
-# /usr/lib/systemd/system/docker.service.d/bazzite-mx-libvirt.conf.
+# Forwarding for the libvirt bridges under Docker's firewall, whose FORWARD
+# policy DROP cuts libvirt's NAT guests off. Docker evaluates DOCKER-USER first
+# and never flushes it (https://docs.docker.com/engine/network/firewall-iptables/).
 #
 # The rules live in a chain of their own, rebuilt at every run so their order
 # is always the one below, and DOCKER-USER jumps to it:
@@ -81,9 +74,8 @@ write() {
     fi
 }
 
-# Created once, emptied and refilled at every run. Only status 1 of the read
-# means the chain is absent (iptables(8)), so it is created on that status
-# alone; on any other the writes below report iptables' own reason.
+# Created on status 1 alone (absent), emptied and refilled at every run; on
+# any other status the writes below report iptables' own reason.
 rebuild_chain() {
     local status
 
@@ -105,11 +97,10 @@ rebuild_chain() {
     echo "libvirt-forward: chain $CHAIN rebuilt, 4 rules"
 }
 
-# The jump from Docker's chain, inserted once. Only status 1 of `-C` means
-# the jump is absent; any other status is a read the helper cannot trust
-# (iptables-nft's `Could not fetch rule set generation id` under a
-# concurrent writer, libvirt or dockerd at the same start), and inserting
-# on it would add a second jump at every start.
+# The jump from Docker's chain, inserted once, on status 1 of `-C` alone: any
+# other is an untrusted read (iptables-nft's `Could not fetch rule set
+# generation id` under a concurrent writer), and inserting on it would add a
+# second jump at every start.
 ensure_jump() {
     local status
 

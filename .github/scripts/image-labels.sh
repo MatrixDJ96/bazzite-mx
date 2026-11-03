@@ -10,20 +10,18 @@
 #          <revision>     the full sha of the commit the image is built from
 #        image-labels.sh --self-test
 # Output: the 16 labels, one KEY=value line each, on stdout.
-# Exit status: 0 labels written; 1 on a bad argument, when base_version or the
-#   revision is malformed, or the tag names a Fedora other than the base's
-#   kernel's, the reason on stderr as `image-labels: …`; the other coordinates
-#   are taken as resolve-base.sh wrote them.
+# Exit status: 0 labels written; 1 on a bad argument, a malformed base_version
+#   or revision, or a tag naming a Fedora other than the base kernel's, the
+#   reason on stderr as `image-labels: …`; the other coordinates are trusted.
 set -euo pipefail
 
 # shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
 REPO_URL=https://github.com/MatrixDJ96/bazzite-mx
-# The base stamps io.artifacthub.package.readme-url at ublue-os/bazzite:
-# restated here or the image hands out Bazzite's README as its own.
+# The base points the readme and logo labels at ublue-os/bazzite: restated, or
+# the image hands out Bazzite's as its own.
 README_URL=https://raw.githubusercontent.com/MatrixDJ96/bazzite-mx/refs/heads/main/README.md
-# The base stamps the logo at ublue-os/bazzite too: site/logo.svg is ours.
 LOGO_URL=https://raw.githubusercontent.com/MatrixDJ96/bazzite-mx/refs/heads/main/site/logo.svg
 VENDOR=matrixdj96
 DESCRIPTION="Personal bootc image on Bazzite (KDE, stable): the system layer of a three-host fleet"
@@ -123,8 +121,7 @@ SELF_TEST_REVISION=8cfea1732f154089321597d3c52084db3e9dd8ce
 SELF_TEST_CREATED=2026-09-02T14:00:00Z
 SELF_TEST_BASE_DIGEST=sha256:9556db65991d57a03a7dc18e4ba28a686d8bcdcd6b61235aa69c8267bb22ff76
 
-# self_test_write_coords <file>: the coords of a bazzite-mx build on a Fedora 44
-# base.
+# self_test_write_coords <file>: a bazzite-mx build's coords on a Fedora 44 base.
 self_test_write_coords() {
     local file=$1
 

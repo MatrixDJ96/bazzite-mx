@@ -36,11 +36,8 @@ check_binary() {
         echo "FAIL: /usr/bin/sunshine capabilities: '${capabilities:-none}'"
     fi
 
-    # The binary creates $HOME/.config/sunshine before it prints anything,
-    # --version included, and aborts when it cannot: the build's HOME is
-    # /root, a link to a /var/roothome the image does not carry
-    # (docs/gotchas.md § `sunshine --version` needs a home directory). A
-    # booted host has a home; the test lends one.
+    # `sunshine --version` needs a home directory, and the build's HOME does not
+    # exist.
     home=$(mktemp -d)
     version=$(HOME=$home sunshine --version 2>&1 || true)
     rm -rf "$home"

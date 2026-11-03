@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # IDE: Visual Studio Code as the RPM from Microsoft's vendored repository,
 # key asserted first. The RPM follows the image, so the skel settings.json
-# turns the built-in updater off (code.visualstudio.com/docs/supporting/faq).
+# turns the built-in updater off.
 #
 # Usage: run by build.sh; no arguments.
 # Writes: the code package; ublue-user-setup.service enabled for every user,

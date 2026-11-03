@@ -2,12 +2,10 @@
 # Decides whether a release run is dispatched: by the upstream watcher when a
 # base moved, by the weekly trigger when the day has no release yet.
 #
-# check compares, for each flavour, the base's live digest with the base.digest
-# label of our own :stable: the digest and not the version, because a retag or
-# an upstream `.N` rebuild moves one and leaves the other. Every mode fails
-# closed: an unreadable base or image, a :stable without the label, or a run or
-# release list that cannot be read exits 1, so the run goes red instead of
-# dispatching.
+# check compares each base's live digest with the base.digest label of our
+# :stable: the digest, not the version, since a retag or an upstream `.N`
+# rebuild moves one and leaves the other. Every mode fails closed: a reading it
+# cannot trust exits 1 instead of dispatching.
 #
 # Usage: watch-upstream.sh check
 #          one line per flavour, then verdict=current|stale|absent and
@@ -52,8 +50,8 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # --- the readings -------------------------------------------------------------
 
 # base_coords <flavour> <fixture dir>: the coords of the flavour's base, from
-# resolve-base.sh or from the fixture. GITHUB_OUTPUT is unset for the live call
-# so resolve-base.sh's keys do not become outputs of this step.
+# resolve-base.sh or the fixture; GITHUB_OUTPUT is unset so its keys do not
+# become this step's outputs.
 base_coords() {
     local flavour=$1
     local dir=$2
@@ -236,12 +234,10 @@ runs_page() {
 }
 
 # runs_live: the release workflow's runs of the last COALESCE_HOURS as one JSON
-# array, the open ones among them: the jobs' timeout-minutes end a release run
-# within three hours, one queued behind it within six. Status 1 when the read
-# fails, because an empty reading is never "no runs". Filtered by the workflow's
-# path: the per-workflow endpoint answers 404 while the file is not on the
-# default branch (docs/gotchas.md § A workflow that is not on the default
-# branch has no runs endpoint).
+# array, every open one among them (timeout-minutes end a run within three
+# hours, one queued behind it within six); status 1 when the read fails, an
+# empty reading never meaning "no runs". Filtered by path: a workflow not on the
+# default branch has no runs endpoint of its own.
 runs_live() {
     local since recent
 
@@ -267,10 +263,7 @@ open_runs() {
 }
 
 # same_reason_runs <runs json> <reason>: how many runs with that reason in their
-# name were started inside COALESCE_HOURS, whatever their status and conclusion.
-# The window is on the start, so it spaces the dispatches of one reason however
-# long a run then waits for a runner; a run still open is the check before this
-# one.
+# name started inside COALESCE_HOURS, whatever their status and conclusion.
 same_reason_runs() {
     local runs=$1
     local reason=$2
@@ -420,9 +413,9 @@ run_decide() {
     decide "$verdict" "$reason" "$promote" "$runs" "$dry_run"
 }
 
-# run_weekly: the runs and the releases read live, then decide_weekly on today's
-# UTC date; either read failing, or a release list neither blank nor a JSON
-# list, exits 1. A blank list counts as no release, as changelog.sh reads it.
+# run_weekly: decide_weekly on the live runs and releases and today's UTC date;
+# exits 1 on a failed read or a release list neither blank nor a JSON list. A
+# blank list counts as no release.
 run_weekly() {
     local runs releases error
 

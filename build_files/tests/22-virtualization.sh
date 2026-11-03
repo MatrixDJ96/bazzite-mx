@@ -139,10 +139,8 @@ check_tmpfiles() {
     fi
 }
 
-# 95-clean-stage.sh moves the accounts the packages' %post created where NSS
-# reads them, and qemu:///system runs its domains as this one: without the
-# line no domain starts, /etc/passwd having been reset to root alone
-# (tests/95-clean-stage.sh refuses any other line there).
+# qemu:///system runs its domains as qemu, and 95-clean-stage.sh leaves root
+# alone in /etc/passwd: without this line no domain starts.
 check_qemu_user() {
     if grep -q '^qemu:' /usr/lib/passwd 2> /dev/null; then
         echo "OK: qemu user in /usr/lib/passwd"
@@ -160,11 +158,9 @@ names_assigned_by() {
         | sort -u
 }
 
-# The helper sources ujust.sh, whose libraries declare their colour and
-# formatting names readonly; an assignment to one of them fails at every run
-# (docs/gotchas.md § `ujust.sh` declares its colour and formatting names
-# readonly). Both lists are read from the image, and an empty list on either
-# side is a failure: the probe cannot see, and a pass would prove nothing.
+# The helper sources ujust.sh and must assign none of its readonly colour and
+# formatting names. An empty list on either side fails: a pass would prove
+# nothing.
 check_kvmfr_helper() {
     local readonly_names assigned clash
 
@@ -200,9 +196,8 @@ check_kvmfr_helper_stops_without_ok() {
 # --- forwarding for the libvirt bridges under Docker --------------------------
 
 # The stub keeps chains and rules in STATE, one per line, and answers -S, -N,
-# -F, -A, -I and -C on them; REFUSE_WRITE=1 makes every write fail, the way a
-# netfilter that refuses the rule would, READ_FAILS=1 makes -S exit 4, the
-# way iptables does when it cannot read the rule set, and CHECK_FAILS=1 the -C.
+# -F, -A, -I and -C on them; REFUSE_WRITE=1 fails every write, READ_FAILS=1
+# and CHECK_FAILS=1 make -S and -C exit 4, as iptables on an unreadable rule set.
 write_iptables_stub() {
     local stub=$1
 
@@ -365,9 +360,8 @@ check_libvirt_forward_reports_an_unreadable_jump() {
     fi
 }
 
-# A read that fails for another reason than the absent chain (status 1) is
-# not a chain that is absent: the helper must say so and stop with the 1 its
-# header promises.
+# A -S failing otherwise than on an absent chain (status 1) is reported, and
+# the helper exits 1 as its header promises.
 check_libvirt_forward_reports_an_unreadable_chain() {
     local stub=$1 state=$2
     local output status
@@ -407,9 +401,9 @@ check_libvirt_forward_reports_a_refused_write() {
     fi
 }
 
-# The rules go in from a fixture iptables: a build container has no
-# netfilter to write, and the real chain is proven on a host
-# (docs/gotchas.md § Docker's `FORWARD` policy cuts libvirt's NAT guests off).
+# The rules, which reopen what Docker's FORWARD policy cuts off for libvirt's
+# NAT guests, go in from a fixture iptables: a build container has no netfilter
+# to write, and the real chain is proven on a host.
 check_libvirt_forward() {
     local fixture
 

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Vendor signing keys, pinned on purpose: the key ships in the repo, its
-# .repo reads it with gpgkey=file://, and the build asserts the fingerprint
-# before the first install. A rotation is a new key file plus a new line in
-# the table. Sourced by lib/env.sh and tests/lib.sh.
+# Vendor signing keys, pinned on purpose: the key ships in the repo, its .repo
+# reads it with gpgkey=file://, and the build asserts the fingerprint before
+# the first install. Sourced by lib/env.sh and tests/lib.sh.
 
 # KEY_FPR[<key file in the image>]=<primary key fingerprint>, each read with
 # `gpg --show-keys` on the file downloaded from the URL named above it.

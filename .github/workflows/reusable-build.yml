@@ -2,8 +2,8 @@
 # and release.yml. The inputs pick the profile: none for the sandbox (build and
 # probe), rechunk for main (the chunked image, its probe and the signing-key
 # proof), publish for a release (push to :staging, sign, SBOM, attestation, the
-# env file the gate reads). No concurrency group here: a callee inherits the
-# caller's context and would collide with the caller's own group.
+# env file the gate reads). No concurrency group: a callee would collide with
+# its caller's.
 name: Reusable Build
 
 on:

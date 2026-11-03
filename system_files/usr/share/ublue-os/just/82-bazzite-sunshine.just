@@ -98,8 +98,8 @@ setup-sunshine ACTION="":
           WROTE=1
         fi
 
-        # Until a username exists /api/password takes one from any origin
-        # (docs/divergences.md § Sunshine), so it is set before the start.
+        # Until a username exists /api/password takes one from any origin, so it
+        # is set before the start.
         STATE="$HOME/.config/sunshine/sunshine_state.json"
 
         if ! jq -e '(.username // "") != ""' "$STATE" > /dev/null 2>&1; then
@@ -190,10 +190,8 @@ setup-sunshine ACTION="":
           echo "Seeded $APPS from the package's default"
         fi
 
-        # The app replaces an existing one of the same name, else it is appended;
-        # a file jq cannot read is left as it is. The temporary file is beside
-        # apps.json so the final mv is a rename: from /tmp it is a copy, and a
-        # full home cuts it short with the user's list gone.
+        # Written beside apps.json so the mv is a rename: a copy from /tmp cut
+        # short by a full home would lose the user's list.
         if ! TMP_FILE=$(mktemp "$APPS.XXXXXX"); then
           exit 1
         fi

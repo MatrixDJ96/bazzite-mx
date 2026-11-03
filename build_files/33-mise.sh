@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# mise, the per-user runtime manager, as the RPM from the COPR its own
-# documentation names (mise.jdx.dev/installing-mise), key asserted first, so
+# mise, the per-user runtime manager, as the COPR RPM, key asserted first, so
 # every host has the same binary. The runtimes stay a per-user `mise install`.
 #
 # Usage: run by build.sh; no arguments.

@@ -77,10 +77,10 @@ disable_user_unit() {
     fi
 }
 
-# The package's entry starts the unit with `systemctl start`, past the
-# recipe's portal limit and credentials (docs/divergences.md § Sunshine): it
-# runs the recipe in a terminal instead, and its action that runs sunshine
-# directly goes; tests/41-sunshine.sh checks the result.
+# The package's entry starts the unit with `systemctl start`, past the recipe's
+# portal limit and credentials: it runs the recipe in a terminal instead, and
+# its action that runs sunshine directly goes; tests/41-sunshine.sh checks the
+# result.
 route_menu_entry() {
     local rewritten
 

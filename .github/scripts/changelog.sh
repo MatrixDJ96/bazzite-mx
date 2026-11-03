@@ -2,12 +2,11 @@
 # Writes the notes and the title of a GitHub Release from what the release run
 # resolved, in the shape of ublue-os/bazzite's .github/workflows/changelog.py.
 #
-# The notes keep changelog.py's sections: the release line, the previous
-# release, the major packages, the commits since it, the packages changed on
-# every flavour and on the NVIDIA ones, one package per new version, and how to
-# rebase, through `ujust migrate apply` since bazzite-rollback-helper rebases to
-# ghcr.io/ublue-os. The previous release is the newest in `gh release list`,
-# never a manifest's RepoTags, which an orphan tag would hijack.
+# Sections: the release line, the previous release, the major packages, the
+# commits since it, the packages changed on every flavour and on the NVIDIA ones,
+# and how to rebase, through `ujust migrate apply` since bazzite-rollback-helper
+# rebases to ghcr.io/ublue-os. The previous release is the newest in
+# `gh release list`, not a manifest's RepoTags, which an orphan tag would hijack.
 #
 # Usage: changelog.sh release --release-tag <tag> --out <file> <env-file>...
 #          --release-tag <tag>  the tag being released, <fedora>.<yyyymmdd>[.N]
@@ -31,16 +30,16 @@ set -euo pipefail
 
 SBOM_TYPE=application/vnd.spdx+json
 
-# One version per RPM name, as changelog.py's parse_sbom_packages reads a syft
-# SBOM: the first listed, unless a later one carries an epoch it lacks.
+# One version per RPM name: the first listed, unless a later one carries an
+# epoch it lacks.
 SBOM_PACKAGES='reduce (.artifacts[] | select(.type == "rpm" and (.name // "") != ""
         and (.version // "") != "")) as $a ({};
     if .[$a.name] == null
         or (($a.version | contains(":")) and (.[$a.name] | contains(":") | not))
     then .[$a.name] = $a.version else . end)'
 
-# The Major packages rows, label and RPM: changelog.py's CHANGELOG_FORMAT. A row
-# whose RPM no flavour carries is left out.
+# The Major packages rows, label and RPM; a row whose RPM no flavour carries is
+# left out.
 MAJOR_PACKAGES='[["Kernel", "kernel-core"], ["Kernel (Nvidia LTS)", "kernel-core-lts"],
     ["Firmware", "atheros-firmware"], ["Mesa", "mesa-filesystem"],
     ["Gamescope", "terra-gamescope"], ["Gamescope Session", "gamescope-session"],
@@ -52,21 +51,20 @@ MAJOR_PACKAGES='[["Kernel", "kernel-core"], ["Kernel (Nvidia LTS)", "kernel-core
     ["Waydroid", "waydroid"], ["Waydroid (Nvidia)", "waydroid-nvidia"],
     ["Nvidia Open", "nvidia-kmod-common"], ["Nvidia LTS", "nvidia-kmod-common-lts"]]'
 
-# changelog.py's BLACKLIST_VERSIONS: left out of the tables, and so is every
-# package sharing the current version of one of them.
+# Left out of the tables, and so is every package sharing the current version of
+# one of them.
 HIDDEN_VERSIONS='["kernel", "kernel-core", "kernel-lts", "kernel-core-lts", "mesa-filesystem",
     "terra-gamescope", "gamescope-session", "inputplumber", "powerstation",
     "steamos-manager-powerstation", "opengamepadui", "bazaar",
     "gnome-control-center-filesystem", "plasma-desktop", "atheros-firmware",
     "nvidia-kmod-common", "nvidia-kmod-common-lts"]'
 
-# changelog.py's get_versions, get_package_groups and calculate_changes over
-# {images: [{name, curr, prev}]}; $mode major prints the Major packages table,
-# changes the tables. prev is null for a flavour not compared, whose versions
-# reach only the Major values, never an arrow or a table. A name whose versions
-# all went to -lts keys is skipped where changelog.py raises KeyError (an NVIDIA
-# group of the LTS flavour alone). The images go in name order, standing for
-# changelog.py's IMAGES list: the last one carrying a package gives its version.
+# Over {images: [{name, curr, prev}]}; $mode major prints the Major packages
+# table, changes the tables. prev is null for a flavour not compared, whose
+# versions reach only the Major values, never an arrow or a table. A name whose
+# versions all went to -lts keys is skipped where changelog.py raises KeyError.
+# The images go in name order (changelog.py's IMAGES order): the last one
+# carrying a package gives its version.
 PACKAGE_TABLES='
 def norm: sub("^[0-9]+:"; "") | gsub("\\.fc[0-9]{2}"; "");
 def lts: test("nvidia") and (test("nvidia-open") | not);
@@ -323,10 +321,9 @@ find_previous_tag() {
 }
 
 # read_flavours: the image and the base of every env file; BASE_VERSION the
-# highest of the bases' versions, as changelog.py's get_release_tag takes it.
-# Every base carries org.opencontainers.image.version: resolve-base.sh refuses
-# one without it before any env file is written. Stops the run on a base it
-# cannot inspect.
+# highest of the bases' versions. Every base carries
+# org.opencontainers.image.version: resolve-base.sh refuses one without it.
+# Stops the run on a base it cannot inspect.
 read_flavours() {
     local file base_labels
     local versions=()
@@ -980,8 +977,7 @@ EOF
 }
 
 # self_test_fetch_sbom <dir>: an image without an SBOM referrer gives status 2;
-# a transport error gives status 1, never taken for a
-# missing SBOM.
+# a transport error gives status 1, never taken for a missing SBOM.
 self_test_fetch_sbom() {
     local dir=$1
     local digest status output

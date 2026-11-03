@@ -1,8 +1,5 @@
-# bazzite-mx: Windows-style Ctrl+C / Ctrl+V in PowerShell, copied from /etc/skel into every
-# new home and read by pwsh at start. pwsh is not in the image; this default applies to a
-# pwsh the user installs (Homebrew, distrobox).
-# PSReadLine's built-in clipboard functions need xclip on Linux; these handlers use
-# wl-clipboard, which the base ships.
+# bazzite-mx: Windows-style Ctrl+C / Ctrl+V for a pwsh the user installs (not in the image).
+# PSReadLine's clipboard functions need xclip on Linux; these use the base's wl-clipboard.
 
 if ((Get-Module PSReadLine) -and (Get-Command wl-copy, wl-paste -ErrorAction SilentlyContinue)) {
     # Copy the PSReadLine selection (Shift+arrows) when there is one, else

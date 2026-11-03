@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Copy system_files/ over the tree. rsync renames each file into place, so a
-# base file is replaced on a fresh inode, never written in place; -K writes
-# through the /opt -> var/opt link instead of replacing it (rsync(1),
-# --keep-dirlinks). The groups whose gid the image fixes are created next,
-# before a package's scriptlet or sysusers file allocates them dynamically.
+# base file is replaced on a fresh inode; -K writes through the /opt -> var/opt
+# link instead of replacing it. The groups whose gid the image fixes are
+# created next, before a package's scriptlet or sysusers file allocates them
+# dynamically.
 #
 # Usage: run by build.sh after 00-prep.sh; no arguments.
 # Writes: every file under system_files/, at the same path under /; the

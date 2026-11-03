@@ -3,9 +3,8 @@
 # stay on purpose: the kernel versionlock, which holds a host on the ogc
 # kernel, and flatpak-add-fedora-repos.service, which puts Flathub on a host.
 #
-# `restore_dnf_conf` asserts keepcache=0, which is the base's own content:
-# were upstream to drop the line, the assertion would blame the restore for a
-# change of the base.
+# `restore_dnf_conf` asserts keepcache=0, the base's own content: a base that
+# drops the line fails the restore.
 #
 # Usage: run by build.sh as the last script; no arguments.
 # Writes: /etc/dnf/dnf.conf restored from 00-prep.sh's backup; dnf5's history
@@ -77,10 +76,9 @@ relocate_accounts() {
     mv -f "$etc_file.new" "$etc_file"
 }
 
-# A package's sysusers `m <user> <group>` on a group of the base (kvm, tss)
-# lands in /etc/gshadow alone, the group's line living in /usr/lib/group:
-# the member is carried there, where NSS reads it (tests/95 checks every `m`
-# line resolves).
+# Carries the gshadow members of the base's groups into /usr/lib/group, where
+# NSS reads them: a sysusers `m` line on a group of the base reaches only
+# `/etc/gshadow`.
 carry_gshadow_members() {
     local merged
 

@@ -15,7 +15,7 @@ BUILD_FILES=$(realpath "$BUILD_FILES/..")
 CTX=$(realpath "$BUILD_FILES/..")
 BUILD_TMP=/tmp/bazzite-mx-build
 BUILD_STATE=/usr/lib/bazzite-mx/build-state
-# Scriptlets write no .pyc (docs/gotchas.md § A scriptlet rewrote a packaged `.pyc`).
+# No scriptlet rewrites a packaged `.pyc`, which `rpm -V` would flag.
 PYTHONDONTWRITEBYTECODE=1
 export BUILD_FILES CTX BUILD_TMP BUILD_STATE PYTHONDONTWRITEBYTECODE
 

@@ -18,16 +18,14 @@ shopt -s nullglob
 TESTS_DIR=$(dirname "$(realpath "$0")")
 BUILD_FILES=$(realpath "$TESTS_DIR/..")
 export BUILD_STATE=/usr/lib/bazzite-mx/build-state
-# Tests write no .pyc either (docs/gotchas.md § A scriptlet rewrote a packaged `.pyc`).
+# A test rewrites no packaged `.pyc` either.
 export PYTHONDONTWRITEBYTECODE=1
 
 # --- the runner ---------------------------------------------------------------
 
-# Pairing guard: a feature cannot land without its test and a test cannot
-# outlive its feature. Both directions for the numbered class; one direction
-# for the helpers, a test having to name an installed helper while a helper
-# may carry its cases in its own `--self-test` instead (bazzite-mx-migrate
-# does). One FAIL line per unpaired file.
+# Pairing guard, both directions for the numbered class; for the helpers a
+# test must name a helper, while a helper may keep its cases in its own
+# `--self-test` instead.
 require_pairs() {
     local tests=$1
     local scripts=$2

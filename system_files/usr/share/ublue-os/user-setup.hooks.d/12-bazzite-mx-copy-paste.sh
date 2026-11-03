@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # The Konsole shortcuts and the PowerShell profile of /etc/skel reach an
-# account that predates the image: each file is copied when the user has
-# none, and a file the user already has is left alone. Every graphical
-# session, from ublue-user-setup.service, so a home created later is reached
-# at its first login.
+# account that predates the image: each file is copied when the user has none.
+# Every graphical session.
 #
 # Usage: 12-bazzite-mx-copy-paste.sh   (as the user; ublue-user-setup runs it)
 #   The smoke test points HOME at a fixture home.
@@ -35,8 +33,7 @@ seed_file() {
 
     echo "bazzite-mx-copy-paste: seeding $file from $SKEL"
 
-    # Written beside and renamed, so a copy cut short by a full home leaves
-    # no empty file for the next login to count as present.
+    # Written beside and renamed: a copy cut short leaves no empty file.
     if mkdir -p "$(dirname "$HOME/$file")" 2> /dev/null \
         && cp "$SKEL/$file" "$HOME/$file.new" 2> /dev/null \
         && mv -f "$HOME/$file.new" "$HOME/$file" 2> /dev/null; then

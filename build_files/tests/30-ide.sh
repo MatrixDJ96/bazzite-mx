@@ -180,7 +180,7 @@ check_hook_with_failing_installs() {
 
 # Known-bad: ~/.config is a regular file, so the seed cannot create its
 # directory; the hook must say so on stderr and exit 1 rather than die on
-# `set -e` in silence (docs/conventions.md § Boot hooks).
+# `set -e` in silence.
 check_hook_with_config_as_file() {
     local fixture=$1
     local output

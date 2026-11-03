@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # VS Code gets the image's default settings when the user has none, and the
-# extensions below when they are missing. Every graphical session, from
-# ublue-user-setup.service, so a failed install is retried at the next login;
-# with extensions missing it first waits up to 60 s for a connection.
+# extensions below when missing. Every graphical session, so a failed install
+# is retried at the next login.
 #
 # Usage: 11-bazzite-mx-vscode-extensions.sh   (as the user; ublue-user-setup
 #                                              runs it)
@@ -39,10 +38,9 @@ seed_settings_from_skel() {
         return 0
     fi
 
-    # `set -e` alone would leave no journal line (docs/conventions.md § Boot
-    # hooks): a ~/.config that is a file, or a read-only home, is named.
-    # Written beside and renamed, so a copy cut short by a full home leaves
-    # no empty file for the next login to take as the user's settings.
+    # Named, not left to `set -e`: the ERROR line is the hook's one signal in
+    # the journal. Written beside and renamed: a copy cut short leaves no empty
+    # settings file.
     if ! mkdir -p "$(dirname "$SETTINGS")" 2> /dev/null \
         || ! cp "$SKEL" "$SETTINGS.new" 2> /dev/null \
         || ! mv -f "$SETTINGS.new" "$SETTINGS" 2> /dev/null; then
@@ -75,9 +73,8 @@ find_missing_extensions() {
     done
 }
 
-# count_present_extensions: how many of the three VS Code records now,
-# read again after the installs: a `code` that exits 0 and records
-# nothing is not a present extension.
+# count_present_extensions: re-read after the installs, as a `code` that
+# exits 0 may record nothing.
 count_present_extensions() {
     local installed extension count=0
 
@@ -111,9 +108,8 @@ main() {
 
     find_missing_extensions
 
-    # The unit's After=network-online.target names a unit the user manager
-    # lacks, so a session opened at boot starts this before the network; a
-    # timeout installs anyway and the failures go to the next login.
+    # The user manager has no network-online.target, so a session opened at
+    # boot can start this before the network.
     if [ ${#MISSING[@]} -gt 0 ]; then
         nm-online -q -t 60 || true
     fi

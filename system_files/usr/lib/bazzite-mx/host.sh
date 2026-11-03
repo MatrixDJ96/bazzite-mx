@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-# What the verify-host, migrate and msi-setup helpers read about the host,
-# the fstab errors= rewrite and the verification migrate judges it on, and the
-# error helpers all three call, the privilege one migrate and msi-setup.
-# Sourced by those three and by tests/helpers/verify-host.sh, never run; the
+# The host reads, the fstab errors= rewrite and its verification, the error
+# helpers verify-host, migrate and msi-setup share and the privilege one of the
+# last two. Sourced by those three and by tests/helpers/verify-host.sh, never run; the
 # sourcing script sets its own `set` options.
 #
-# FIXTURE=<dir>: every file is read under <dir> and every command's output
-# under <dir>/cmd/, so a helper runs on a synthetic host in the smoke tests;
-# fstab_verify_output (findmnt --verify on the running root) reads the host
-# whatever the fixture: its caller (migrate apply) runs under sudo, which drops
-# FIXTURE.
+# FIXTURE=<dir>: files read under <dir>, command outputs under <dir>/cmd/, for
+# the smoke tests; fstab_verify_output ignores it (migrate apply runs under
+# sudo, which drops FIXTURE).
 # Output contract: `ERROR: <reason>` on stderr is what the recipes and the
 # tests read.
 
@@ -73,12 +70,9 @@ src_kargs() {
     fi
 }
 
-# The recipe runs the helper through sudo, and root's `flatpak list` sees
-# the system installation and root's own user one, never the invoking
-# user's: that scope is listed as SUDO_USER (docs/gotchas.md § Root's
-# `flatpak list` misses the invoking user's installation). A flatpak that
-# cannot list is not a host without Flatpaks: each status is kept and
-# the caller names the reason.
+# The invoking user's scope is listed as SUDO_USER: root's `flatpak list` misses
+# it. A flatpak that cannot list is not a host without Flatpaks: the status
+# reaches the caller.
 src_flatpaks() {
     if [ -n "$FIXTURE" ]; then
         cat "$FIXTURE/cmd/flatpaks"
@@ -123,14 +117,11 @@ unescaped_on_one_line() {
     printf '%s' "${line% }"
 }
 
-# src_block_device <fstab source>: the device the source of an fstab row
-# resolves to, empty only when it is absent (an unplugged volume). The field
-# is read as fstab(5) writes it (unescape_fstab_field), as findfs does not
-# decode `\040` (LABEL=New\040Volume is unable to resolve). UUID=, LABEL=,
-# PARTUUID= and PARTLABEL= go through findfs(8), whose `unable to resolve`
-# is the one answer that means absent: any other failure ends the helper
-# with `ERROR:`, an unreadable probe being no evidence of absence. A path
-# stands for itself when it exists. Fixture: "<source> <device>" lines in
+# src_block_device <fstab source>: the device an fstab source resolves to,
+# empty only when it is absent (an unplugged volume). The field is unescaped
+# first, as findfs does not decode `\040`. Only findfs's `unable to resolve`
+# means absent: any other failure ends the helper with `ERROR:`. A path stands
+# for itself when it exists. Fixture: "<source> <device>" lines in
 # cmd/devices, the source unescaped and compared whole.
 src_block_device() {
     local source answer device
@@ -183,10 +174,9 @@ booted_deployment() {
 }
 
 # layered_requests <deployment-json>: every request the origin still carries,
-# space-separated. A request the image already satisfies leaves `packages`
-# empty and stays in requested-packages, where bootc still counts it
-# (docs/gotchas.md § An inactive package request stays in the origin and
-# keeps bootc incompatible).
+# space-separated. A request the image already satisfies leaves `packages` empty
+# yet stays in requested-packages: an inactive package request keeps bootc
+# incompatible.
 layered_requests() {
     local deployment_json=$1
     local request_lists='[(.packages // []), (."requested-packages" // []),
@@ -209,16 +199,12 @@ policy_scope_type() {
 
 # --- fstab and NTFS -----------------------------------------------------------
 
-# mount_fstype <target>: the type mounted at <target>, the point as libmount
-# reads it (a space is a space, not `\040`), empty when nothing is; of a
-# stack the topmost (an `x-systemd.automount` row lists `autofs` and, once
-# triggered, the volume's type over it: docs/gotchas.md § A triggered
-# automount stacks the volume's type over `autofs`). A fixture lists
-# "<target> <fstype>" lines under cmd/mounts (blanks or a tab between,
-# trailing blanks ignored), the target compared whole (a prefix is not a
-# mount) and passed through the environment: awk -v would unescape a `\040`
-# on its own. A fixture spells the target as fstab does; on a host findmnt
-# prints /var/mnt for /mnt, which ostree links to var/mnt.
+# mount_fstype <target>: the type mounted at <target> (a space, not `\040`),
+# empty when nothing is; of a stack (a triggered automount over `autofs`) the
+# topmost. A fixture lists "<target> <fstype>" lines under cmd/mounts, the
+# target compared whole and passed through the environment: awk -v would
+# unescape a `\040` on its own. A fixture spells /mnt as fstab does; a host's
+# findmnt prints /var/mnt.
 mount_fstype() {
     local mount_point=$1
 
@@ -260,15 +246,10 @@ fstab_entries() {
     grep -vE '^\s*(#|$)' "$fstab" 2> /dev/null | sed 's/\r$//' || true
 }
 
-# add_ntfs_errors_option <in> <out>: every entry of type `ntfs` without an
-# errors= option gains `errors=remount-ro`, under which NTFSPLUS mounts a dirty
-# or hibernated volume read-only (docs/divergences.md § NTFSPLUS on every
-# flavour); comments, blank lines and every other byte pass through unchanged.
-# The type may end the row: fstab(5) makes the last three fields optional. A
-# row may start with blanks, which libmount skips (docs/gotchas.md § A fstab
-# row may start with whitespace). Only the first non-blank character of a line
-# opens a comment, so a source field may carry a `#` (docs/gotchas.md § A `#`
-# inside an fstab field is not a comment).
+# add_ntfs_errors_option <in> <out>: every `ntfs` entry without an errors=
+# option gains `errors=remount-ro`; every other byte passes through. The type
+# may end the row (fstab(5) makes the last three fields optional), a row may
+# start with whitespace, and a `#` inside an fstab field is not a comment.
 add_ntfs_errors_option() {
     local input=$1 output=$2
     local fields='[[:space:]]*[^#[:space:]][^[:space:]]*[[:space:]]+[^[:space:]]+[[:space:]]+'
@@ -282,13 +263,10 @@ add_ntfs_errors_option() {
         "$input" > "$output"
 }
 
-# fstab_verify_output <fstab>: everything findmnt --verify prints on that
-# table, the summary line included, messages in C so the callers can read
-# them; the status is not the verdict, a stale nofail row making it 1 on any
-# table that carries one (docs/gotchas.md § `findmnt --verify` reports an
-# unplugged `nofail` volume as an error). The findings go to stdout, the
-# summary to stderr: into a pipe stdout is block-buffered and the summary
-# would land inside a cut line past 4096 bytes, so stdout is line-buffered.
+# fstab_verify_output <fstab>: everything findmnt --verify prints on that table,
+# summary included, in the C locale; its status is no verdict, an unplugged
+# `nofail` volume counting as an error. Findings go to stdout, the summary to
+# stderr: stdout is line-buffered so the summary cannot land inside a cut line.
 fstab_verify_output() {
     local fstab=$1
 
@@ -300,11 +278,10 @@ FSTAB_VERIFY_SUMMARY+='|[0-9]+ parse errors?, [0-9]+ errors?, [0-9]+ warnings?)$
 
 # fstab_verify_answers <fstab>: findmnt gave its verdict on that table, the
 # summary line it ends with (`Success, no errors or warnings detected` or
-# `N parse errors, N errors, N warnings`). A findmnt that never ran prints
-# nothing, one that died on a malformed row prints its diagnostic and no
-# summary (docs/gotchas.md § `findmnt --verify` reports an unplugged `nofail`
-# volume as an error); a caller judging a rewrite refuses both instead of
-# reading an empty error set as a clean one.
+# `N parse errors, N errors, N warnings`). A `findmnt --verify` that never ran
+# prints nothing, one that died on a malformed row prints its diagnostic and no
+# summary; a caller judging a rewrite refuses both instead of reading an empty
+# error set as a clean one.
 fstab_verify_answers() {
     local fstab=$1
     local output
@@ -345,10 +322,9 @@ ntfsplus_files() {
         | sed "s|^$FIXTURE||" || true
 }
 
-# ntfsplus_kargs <kernel arguments>: the ntfsplus arguments among them, one
-# per line, each once and in the order the command line carries them. The
-# reading is the caller's, so that a failed `rpm-ostree kargs` is seen instead
-# of reading as a host without the arguments.
+# ntfsplus_kargs <kernel arguments>: the ntfsplus ones, one per line, each
+# once, in order. The caller reads the arguments, so a failed `rpm-ostree
+# kargs` is seen instead of reading as a host without them.
 ntfsplus_kargs() {
     local kargs=$1
 

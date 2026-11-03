@@ -4,13 +4,10 @@
 # out-of-tree kernel modules for the image's kernel, the route of the type ntfs
 # and image-info.json.
 #
-# The in-build smoke tests see the tree before the rechunk and never the labels;
-# this sees what a host would pull. The probe holds image-info.json's image-name
-# and image-ref against the title label, so a host cannot be sent to another
-# flavour's repository by a file the build wrote wrong. The two sides still
-# descend from one resolve-base.sh run, so a build that resolved the wrong
-# flavour to begin with passes: what this catches is 10-image-info.sh, not the
-# resolution.
+# Unlike the in-build smoke tests, it sees what a host would pull, labels
+# included. image-name and image-ref are held against the title label; both
+# descend from one resolve-base.sh run, so this catches a wrong
+# 10-image-info.sh, not a wrong resolution.
 #
 # Usage: check-image.sh <image> <labels-file>
 #          <image>        a reference in the local containers-storage
@@ -34,8 +31,8 @@ PROBE_PACKAGES="docker-ce code 1password"
 # --- the labels ---------------------------------------------------------------
 
 # check_labels <labels json> <labels file>: every KEY=value line of the file
-# carried by the image with that value. Status 1 on the first mismatch or an
-# empty file, so the self-test can call it under `if`.
+# carried by the image with that value; status 1 on the first mismatch or an
+# empty file.
 check_labels() {
     local labels_json=$1
     local file=$2
@@ -168,11 +165,10 @@ EOF
 
 # --- the image ----------------------------------------------------------------
 
-# check_run_and_tmp_empty <image>: nothing under /run or /tmp in the image, or
-# exit 1. Read on the mounted image: podman populates /run inside a container,
-# where bootc's own lint cannot see the difference. The inner shell keeps find's
-# status and unmounts on both paths, so a directory it cannot read is a refusal
-# with a reason and never leaves the image mounted on the host.
+# check_run_and_tmp_empty <image>: nothing under /run or /tmp, or exit 1. Read
+# on the mounted image: podman populates /run inside a container. The inner
+# shell keeps find's status and unmounts on both paths, so an unreadable
+# directory is a refusal with a reason and never leaves the image mounted.
 check_run_and_tmp_empty() {
     local image=$1
     local leftovers
@@ -293,14 +289,10 @@ EOF
     fi
 }
 
-# self_test_run_and_tmp <dir>: on a podman stubbed on PATH, check_image on a
-# tree with both directories empty, each of its three checks' lines in its
-# output and the image unmounted; check_image stopping on an image without the
-# stamped labels and on a probe that fails; then the probe over one with a file
-# left under each and one missing both. Known-bad: find's failure ended the
-# inner shell before the unmount and the outer assignment died under set -e, so
-# the probe left the image mounted and printed find's line with no verdict of
-# its own.
+# self_test_run_and_tmp <dir>: on a podman stub, check_image passes a clean
+# tree with its three checks' lines and unmounts, and stops on missing labels
+# and on a failed probe; a file left under each directory is listed; a tree
+# missing both is one refusal line and is still unmounted.
 self_test_run_and_tmp() {
     local dir=$1
     local output labels line

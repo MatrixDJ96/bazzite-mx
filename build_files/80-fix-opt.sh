@@ -3,10 +3,8 @@
 # var/opt and 95-clean-stage.sh wipes /var. A tmpfiles.d line per name puts
 # the /var/opt/<name> symlink back at boot, so baked-in paths keep resolving.
 #
-# /var/opt always exists when this runs: 40-desktop-apps.sh creates it and
-# installs 1Password there. A build that stopped doing so writes an empty
-# tmpfiles file here, and tests/80-fix-opt.sh fails on the missing
-# /var/opt/1Password link.
+# /var/opt exists because 40-desktop-apps.sh installs 1Password there; without
+# it the tmpfiles file is empty and tests/80-fix-opt.sh fails.
 #
 # Usage: 80-fix-opt.sh              run by build.sh, no arguments
 #        80-fix-opt.sh --self-test  the move on fixture trees, `self-test ok: …`

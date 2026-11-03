@@ -32,8 +32,7 @@ TARBALL_TOP=MControlCenter-9.9-bin
 # --- the kernel and the modules -----------------------------------------------
 
 # The path modprobe would insmod for <module>, empty when it refuses the
-# name: the refusal stays out of the pipeline's status, the form 50-kmods.sh
-# uses too.
+# name: the refusal stays out of the pipeline's status.
 module_resolved_by_modprobe() {
     local kernel=$1
     local module=$2
@@ -110,13 +109,10 @@ check_every_staged_module() {
     done
 }
 
-# The build re-ran depmod over the base's modules too. Every dependency line
-# 00-prep.sh recorded before that run must still be there, byte for byte: a
-# base module gone and a base dependency gone both read as a recorded line the
-# tree no longer has. depmod keeps one entry per module name and searches
-# updates/ first, so an in-tree module sharing a name with ours loses its line:
-# only the paths in DISPLACED_ON_PURPOSE are exempt, so a new one reads red.
-# The subject is the record, never a list read from the tree.
+# The build's depmod re-ran over the base's modules: every dependency line
+# 00-prep.sh recorded before it must still be there, byte for byte. depmod
+# keeps one entry per module name, updates/ first, so an in-tree namesake of
+# ours loses its line: only DISPLACED_ON_PURPOSE is exempt, a new one reads red.
 check_base_modules_survive_depmod() {
     local kernel=$1
     local current=/usr/lib/modules/$kernel/modules.dep

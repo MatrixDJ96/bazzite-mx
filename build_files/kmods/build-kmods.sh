@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Builds one out-of-tree module per build_files/kmods/<name>/source.env into
 # $OUT/<kver>/updates/, after preparing the BTF inputs: vmlinux extracted from
-# the kernel image, pahole built from the tag CONFIG_PAHOLE_VERSION names (its
-# build dependencies from dnf5, its source from git.kernel.org).
+# the kernel image, pahole built from the tag CONFIG_PAHOLE_VERSION names.
 #
 # Usage: build-kmods.sh              build every module (the kmod-builder stage)
 #        build-kmods.sh --self-test  assert_module and kernel_version on known
@@ -26,11 +25,9 @@ PAHOLE_URL=https://git.kernel.org/pub/scm/devel/pahole/pahole.git
 
 # --- BTF ----------------------------------------------------------------------
 
-# kbuild writes a module's BTF with pahole against the kernel's vmlinux and
-# warns when pahole is not the release CONFIG_PAHOLE_VERSION names. The base
-# ships neither and Fedora not every pahole release: vmlinux comes out of the
-# kernel image, and pahole is built from the tag the kernel names, its
-# compiler and cmake warnings silenced as vendor code. Sets PAHOLE.
+# kbuild writes BTF with pahole against vmlinux and warns on a pahole other
+# than the CONFIG_PAHOLE_VERSION release; the base ships neither and Fedora
+# not every release. Warnings silenced as vendor code. Sets PAHOLE.
 prepare_btf() {
     local kernel=$1
     local kernel_source=$2
@@ -100,8 +97,7 @@ build_module() {
     fi
 }
 
-# What `make modules_install INSTALL_MOD_STRIP=1` does. The .ko is staged
-# bare: the base ships its in-tree modules uncompressed.
+# Staged bare: the base ships its in-tree modules uncompressed.
 stage_module() {
     local name=$1
     local module_file=$2

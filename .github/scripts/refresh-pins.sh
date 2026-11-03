@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Refreshes the repository's pins, run by hand and never by a bot: one table row
-# per pinned action, installed binary, runner label, workflow state and cited
-# issue, and on request the rewrite of the stale actions and binaries.
-#
-# Every lookup goes through `gh api`, which wants a login (`gh auth login` or
-# GH_TOKEN) even for public data; without one every row reads UNKNOWN.
+# Refreshes the repository's pins, by hand: one table row per pinned action,
+# installed binary, runner label, workflow state and cited issue, and on request
+# the rewrite of the stale actions and binaries. `gh api` wants a login even for
+# public data; without one every row reads UNKNOWN.
 #
 # Usage: refresh-pins.sh [--check]     the table, one row per item
 #        refresh-pins.sh --apply       rewrite the STALE actions and binaries in
@@ -94,9 +92,8 @@ latest_release() {
 }
 
 # --- the pins in the workflows ------------------------------------------------
-# The greps below may match nothing (a class with no item): `|| true` keeps an
-# empty set from stopping the script under pipefail (docs/gotchas.md § `grep -v`
-# on an empty set kills a `pipefail` script silently).
+# The greps below may match nothing (a class with no item), and a grep on an
+# empty set kills a `pipefail` script silently: `|| true` keeps it going.
 
 # uses_lines <workflows dir>: every pinned `uses:` line, once each.
 uses_lines() {
@@ -168,9 +165,8 @@ check_actions() {
     done
 }
 
-# check_binaries: one row per installed binary, its pinned versions against the
-# latest release; ORAS_VERSION carries no v (the release asset names), so the
-# versions are compared without it.
+# check_binaries: one row per installed binary against the latest release,
+# compared without the v that ORAS_VERSION lacks.
 check_binaries() {
     local pair key repo pinned latest tag latest_sha date
 
@@ -234,9 +230,8 @@ check_workflows() {
 
     workflows=$(github_api "repos/$REPO/actions/workflows")
 
-    # The render is judged, so a missing, empty or non-list `.workflows` reads
-    # as UNKNOWN instead of jq's error ending --check in the middle of the
-    # table.
+    # A missing, empty or non-list `.workflows` reads as UNKNOWN, not as jq's
+    # error ending --check mid-table.
     rows=$(jq -r '.workflows[] | "\(.path)\t\(.state)"' <<< "$workflows" 2> /dev/null || true)
 
     if [ -z "$rows" ]; then
@@ -486,12 +481,10 @@ self_test_expect_row() {
     fi
 }
 
-# self_test_garbage_answer <dir>: an API answer that is not JSON or empty leaves
-# the table readable: the row says UNKNOWN and jq's own parse error stays out of
-# it, one answer at a time, every read the table makes. The table is the
-# script's own run, not the function: bash clears set -e inside $( ), where a jq
-# that ends the live run would pass. Known-bad: bare `jq: parse error` lines
-# printed between the rows.
+# self_test_garbage_answer <dir>: an API answer that is not JSON, or empty,
+# reads as UNKNOWN with no `jq:` line in the table, for every read the table
+# makes. It runs the script, not the function: bash clears set -e inside $( ),
+# where a jq that ends the live run would pass.
 self_test_garbage_answer() {
     local dir=$1
     local annotated=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
@@ -623,8 +616,7 @@ self_test() {
 
     mkdir -p "$dir/empty"
 
-    # Known-bad: the documented no-argument form was refused as an argument
-    # count of 0; it is `--check`, and stops here on the empty directory.
+    # The no-argument form is --check, so it stops on the empty directory.
     if output=$(WORKFLOWS=$dir/empty "$0" 2>&1); then
         fail_self_test "the no-argument form ran on a WORKFLOWS without workflows"
     fi
@@ -639,9 +631,8 @@ self_test() {
 
 # --- main ---------------------------------------------------------------------
 
-# require_workflows: WORKFLOWS holds workflow files, or the run stops: from
-# another directory the relative default matches nothing and a table without one
-# action, binary or runner row would read as every pin fresh.
+# require_workflows: exits 1 when WORKFLOWS holds no workflow, since an empty
+# table would read as every pin fresh.
 require_workflows() {
     if ! compgen -G "$WORKFLOWS/*.yml" > /dev/null; then
         exit_with_error "no *.yml under WORKFLOWS=$WORKFLOWS:" \

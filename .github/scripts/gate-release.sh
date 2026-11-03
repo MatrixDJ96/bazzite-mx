@@ -23,9 +23,8 @@
 #        gate-release.sh --self-test
 # Output: one line per check passed. `release` prints `labels ok:`, `base ok:`,
 #   `negative controls ok:`, `verified:` and `tagged:`, then
-#   `gate ok: <tag> on N images, promote=<yes|no>`; `promote` checks the title,
-#   the vendor and the version with no line of its own and has no build to hold
-#   the revision and the base to, so it prints `negative controls ok:`,
+#   `gate ok: <tag> on N images, promote=<yes|no>`; `promote`, with no build to
+#   hold the revision and the base to, prints `negative controls ok:`,
 #   `verified:` and `tagged:`, then `promote ok: :stable -> <tag> on N images`.
 #   The first refusal is one `gate-release: …` line on stderr.
 # Exit status: 0 every image passed and the tags were written; 1 on a bad
@@ -153,10 +152,8 @@ tag_state() {
 }
 
 # cosign_rejected <cosign stderr>: status 0 only when cosign refused the signing
-# material, never on a transport error. The second shape comes from an image
-# whose provenance bundle, signed with a certificate, cosign reads before the
-# .sig (docs/gotchas.md § `cosign verify --key` reads a certificate-signed
-# referrer before the `.sig`).
+# material, never on a transport error. The second shape: a certificate-signed
+# referrer read before the `.sig` fails a key verification.
 cosign_rejected() {
     local message=$1
 
@@ -476,7 +473,7 @@ tag_release_image() {
 
 # promote_verified_images: :stable onto every image that passed; exits 1 on a
 # copy that fails. It runs only once every image has: a flavour refused earlier
-# leaves no sibling promoted on its own (docs/workflow.md § The release run).
+# leaves no sibling promoted on its own.
 promote_verified_images() {
     local i
 
@@ -715,8 +712,7 @@ self_test_classify_tag() {
         fail_self_test "a failed inspect not folded into one line: ${output//$'\n'/ }"
     fi
 
-    # Known-bad: a skopeo that failed writing nothing left the line on a bare
-    # colon.
+    # Known-bad: a skopeo that fails silently still gets a named reason.
     REFUSED=$((REFUSED + 1))
 
     if output=$(classify_tag 1 '' '' sha256:aaaa 2>&1); then
@@ -1132,7 +1128,7 @@ self_test_stubbed_promotion() {
         fail_self_test "the release went on past disagreeing bases"
     fi
 
-    # Known-bad: the caller's own line followed check_labels' reason.
+    # Known-bad: release adds no line of its own after check_labels' reason.
     REFUSED=$((REFUSED + 1))
 
     if output=$( (release "${arguments[@]}" --revision "$SELF_TEST_WRONG_REVISION") 2>&1 \

@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
-# Every wheel member gets the groups of the services this image ships, docker
-# and libvirt. Root, from ublue-system-setup.service, on every boot: no state
-# file, so a user created later is picked up at the next boot. The hook only
-# adds: leaving wheel does not take docker and libvirt away.
-# A group whose /etc/group gid differs from the image's (the image fixes it,
-# usr/lib/sysusers.d/bazzite-mx-groups.conf) takes the image's number when no
-# other group holds it, and the files under /run (docker.sock, created before
-# this hook), /etc and /var/lib/libvirt with the old gid follow first, so a
-# walk cut short by a poweroff runs again. Each is walked on its own
-# filesystem; the homes and the container stores are not walked, their
-# files carrying gids of their own in the same range; a file the old gid gave
-# another group of the image moves too.
+# Every wheel member joins docker and libvirt, at every boot with no state
+# file, so a later user is picked up; leaving wheel takes nothing away.
+# A group whose /etc/group gid differs from the image's (sysusers.d) takes the
+# image's when no other group holds it. The files under /run (docker.sock
+# predates this hook), /etc and /var/lib/libvirt with the old gid follow first,
+# so a walk cut short runs again; a file of another group on that gid moves
+# too. Homes and container stores are not walked: their gids are their own.
 #
 # Usage: 10-bazzite-mx-groups.sh        (root; ublue-system-setup runs it)
 #   BAZZITE_MX_GROUPS_PREFIX=<dir> names the tree the smoke test builds

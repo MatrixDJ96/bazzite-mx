@@ -4,9 +4,7 @@
 # intact, and the self-tests of migrate and 70-justfile.sh run; then the
 # recipes that print more after their call print it only when the call
 # succeeded, run as nobody against stubs. The helpers' own cases live in
-# their tests and self-tests (docs/conventions.md § Positive control), their
-# files are proven in place by tests/01-system-files.sh; what needs a booted
-# host is proven there.
+# their tests and self-tests, their files in tests/01-system-files.sh.
 #
 # Usage: run by tests/run.sh inside the image (offline, on the cleaned tree).
 # Output: one `OK: <what>` or `FAIL: <what>` line per check, on stdout.
@@ -144,16 +142,12 @@ check_help() {
 }
 
 # --- a failed call is the recipe's status -------------------------------------
-# setup-msi enable and setup-dev install print a `Done.` line after their call,
-# setup-panels prints what plasmashell answered, setup-sunshine enable and
-# disable report the service and its status reads the unit: the recipe runs as
-# nobody (the recipes refuse root) with stubs of sudo, mise, gdbus, systemctl
-# and getcap first on PATH: under STUB_FAILS the first four refuse and getcap
-# prints no capability, so the line and the status can be read in the build.
-# Known-bad: the recipes printed `Done.` and exited 0 after a helper that had
-# printed `ERROR:` and exited 1; setup-panels exited 0 after a failed gdbus
-# call, the pipe into sed hiding its status; setup-sunshine reported the
-# service enabled after a systemctl that had refused.
+# The recipes run as nobody (they refuse root) with stubs of sudo, mise, gdbus,
+# systemctl and getcap first on PATH; under STUB_FAILS the first four refuse
+# and getcap prints no capability. Known-bad: `Done.` and exit 0 after a
+# helper's `ERROR:` and exit 1; setup-panels exited 0 after a failed gdbus, the
+# pipe into sed hiding its status; setup-sunshine reported the service enabled
+# after a refused systemctl.
 
 fixture_recipe_stubs() {
     local dir=$1
@@ -360,13 +354,10 @@ check_sunshine_enable_refuses_a_home_unit() {
     fi
 }
 
-# setup-sunshine enable limits the portal to this PC in a sunshine.conf
-# without the key, leaves a value the user set, sets the portal's
-# credentials through `sunshine --creds` when none exist, asking nothing once
-# they do, refuses two passwords that differ, and restarts the unit so a
-# running Sunshine reads the files only when it wrote one: each write alone
-# (a host enabled on an older image, a first try with a mistyped password)
-# takes the restart path, whose failure is the recipe's.
+# setup-sunshine enable limits the portal to this PC unless the user set the
+# key, sets credentials through `sunshine --creds` only when none exist,
+# refuses two passwords that differ, and restarts the unit only when it wrote
+# a file: each write alone takes the restart path, whose failure is the recipe's.
 check_sunshine_enable_limits_the_portal() {
     local dir=$1 conf=$1/home/.config/sunshine/sunshine.conf output
     local state=$1/home/.config/sunshine/sunshine_state.json
@@ -419,15 +410,11 @@ check_sunshine_enable_limits_the_portal() {
     fi
 }
 
-# setup-sunshine status: one line for the unit, the words systemctl prints
-# (the stub answers disabled, exit 1, and inactive, exit 3, as systemctl
-# does; nothing, exit 4, under STUB_FAILS, as without a bus), one for the
-# version, one for the capabilities (`none` when getcap prints none), and
-# no ~/.config/sunshine written. Known-bad: `|| echo disabled` appended a
-# second word under the one systemctl had printed, three lines for one; the
-# version came from running `sunshine --version`, which creates
-# ~/.config/sunshine before it prints (docs/gotchas.md § `sunshine --version`
-# needs a home directory); the capabilities line was blank.
+# setup-sunshine status: one line for the unit in systemctl's words, one for the
+# version, one for the capabilities (`none` when getcap prints none), and no
+# ~/.config/sunshine written. Known-bad: `|| echo disabled` added a second word
+# under systemctl's; the version ran `sunshine --version`, which writes
+# ~/.config/sunshine; the capabilities line was blank.
 check_sunshine_status_lines() {
     local dir=$1
     local output

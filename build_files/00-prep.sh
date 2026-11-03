@@ -19,9 +19,7 @@ JUST_DIR=/usr/share/ublue-os/just
 # --- the steps ----------------------------------------------------------------
 
 # The backup is put back by 95-clean-stage.sh with a rename, so the file the
-# image ships sits on a fresh inode. timeout=60 doubles dnf5's 30 s wait for a
-# connection against COPR and mirror flakes, as ublue-os/aurora's
-# build_scripts/shared/build-prep.sh does.
+# image ships sits on a fresh inode. timeout=60 rides out COPR and mirror flakes.
 keep_dnf_cache() {
     cp /etc/dnf/dnf.conf "$BUILD_TMP/dnf.conf.base"
     dnf5 config-manager setopt keepcache=1 timeout=60
@@ -80,9 +78,8 @@ record_base_module_deps() {
     local snapshot=$BUILD_STATE/modules.base.dep.gz
     local deps=(/usr/lib/modules/*/modules.dep)
 
-    # -n: the base normalises this file's mtime to a value gzip cannot put in
-    # its header, and the warning is exit 2, which set -e takes for a failure.
-    # Dropping name and mtime also makes the record reproducible.
+    # -n: the base's normalised mtime does not fit gzip's header, and the
+    # warning is exit 2, which set -e takes for a failure.
     gzip -nc "${deps[0]}" > "$snapshot"
 
     log "prep: $(wc -l < "${deps[0]}") base module dependency lines recorded"

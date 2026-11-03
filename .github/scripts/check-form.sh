@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# Checks the form rules of docs/conventions.md § Bash → Form on shell files: the
-# line width, six control-flow shapes the rules ban and four failures (a pipe
-# into grep -q, a || echo fallback inside $( ), a pipeline assigned bare, a $( )
-# inside $(( ))).
-#
-# The edit hook runs it on every shell file an edit touches; the lint job runs
-# the self-test, then the check over the whole shell catalogue.
+# Checks the repository's form rules on shell files: the line width, six
+# control-flow shapes the rules ban and four failures (a pipe into grep -q, a ||
+# echo fallback inside $( ), a pipeline assigned bare, a $( ) inside $(( ))).
 #
 # Usage: check-form.sh <file>...
 #          <file>  a shell file to check
@@ -20,20 +16,16 @@ LITERAL_MARKER='# form: literal$'
 
 # --- the rules ----------------------------------------------------------------
 #
-# Each rule is a name and an extended regex over one code line. Comment lines
-# are skipped for the shape rules and counted for the width rule. Lines that
-# open or continue a condition (`if`, `elif`, `while`, `until`, a leading `&&`
-# or `||`) may combine `&&` and `||`: that is a boolean, not flow. A line ending
-# in `# form: literal` holds a banned shape as data (a pattern, a test fixture)
-# and is skipped by the shape rules. A line ending in a backslash (an odd number
-# of them: `\\` is a literal backslash) is joined with the next before the shape
-# rules read it, so a shape spread over a continuation is caught at its first
-# line; a comment or a literal line ends the join, and a file ending inside one
-# is checked as it stands. A pipeline assigned passes with `|| true` on the
-# logical line or when it opens a condition (`if ! var=$(grep …); then`). A
-# `$( )` spread over lines without backslashes is read line by line, so a
-# pipeline assigned across them (`var=$({` … `} | sort -u)`) passes unseen, and
-# so does one whose first command holds a `)` (a group in a regex).
+# Each rule is a name and an extended regex over one code line; comment lines
+# count for the width rule only. A line opening or continuing a condition (`if`,
+# `elif`, `while`, `until`, a leading `&&` or `||`) may combine `&&` and `||`: a
+# boolean, not flow. A line ending in `# form: literal` holds a banned shape as
+# data and skips the shape rules. A line ending in an odd number of backslashes
+# is joined with the next, so a continued shape is caught at its first line; a
+# comment or a literal line ends the join. An assigned pipeline passes with
+# `|| true` or when it opens a condition. Unseen: a pipeline assigned across a
+# `$( )` spread over lines without backslashes, or one whose first command
+# holds a `)`.
 
 RULE_NAMES=(
     "a trailing || used as control flow: write if ! …; then … fi"
@@ -284,8 +276,7 @@ self_test() {
         self_test_failed "an escaped backslash was read as a continuation:" "$output"
     fi
 
-    # Known-bad: the literal marker matched any trailing comment, so a banned
-    # shape with a plain comment after it passed.
+    # Known-bad: a plain trailing comment is not the literal marker.
     printf '#!/usr/bin/env bash\n%s # a plain comment\n' "${BAD_LINES[2]}" > "$dir/commented.sh"
     output=$(check_files "$dir/commented.sh" || true)
 

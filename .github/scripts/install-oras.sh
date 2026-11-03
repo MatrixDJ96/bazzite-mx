@@ -1,25 +1,21 @@
 #!/usr/bin/env bash
-# Installs the ORAS CLI from its own GitHub release: the tarball and the
-# release's checksums file are downloaded, the tarball is refused unless its
-# sha256 is the one the checksums file lists, and the oras binary is extracted
-# into <dir>.
-#
-# It stands in for the setup-oras action (docs/gotchas.md § `setup-oras`
-# installs only the ORAS versions embedded in its own release).
+# Installs the oras binary from its GitHub release into <dir>, refusing a
+# tarball whose sha256 is not the one the release's checksums file lists, in
+# place of setup-oras, which installs only the ORAS versions in the list shipped
+# with the action.
 #
 # Usage: install-oras.sh <version> <dir>
 #          <version>  the ORAS release, X.Y.Z without the leading v
 #          <dir>      where the oras binary lands, created when missing
 #        install-oras.sh --self-test
 # Environment:
-#   FIXTURE_DIR  a directory holding the two release files, which stands in for
-#                the download; the self-test uses it
+#   FIXTURE_DIR  a directory holding the two release files in place of the
+#                download (the self-test)
 # Output: `checksum ok: <tarball>`, then
 #   `install-oras ok: <oras version> in <dir>`, on stdout.
-# Exit status: 0 installed; 1 on every refusal, the reason on stderr as
-#   `install-oras: …`: an argument refused, a download failed, the checksums
-#   file has no line for the tarball, the sha256 differs, or the tarball is not
-#   a tarball or holds no oras binary.
+# Exit status: 0 installed; 1 on a bad argument, a failed download, a missing or
+#   different checksum, or a tarball without the oras binary, the reason on
+#   stderr as `install-oras: …`.
 set -euo pipefail
 
 # shellcheck source=lib.sh
@@ -96,9 +92,7 @@ verify_tarball() {
 
 # --- the install --------------------------------------------------------------
 
-# install_oras <version> <dir>: download, verify and extract the oras binary
-# into <dir>; exits 1 with the reason when a download fails or the checksum or
-# the tarball is refused.
+# install_oras <version> <dir>: exits 1 with the reason on any refusal.
 install_oras() {
     local version=$1
     local dir=$2
@@ -116,8 +110,7 @@ install_oras() {
         exit_with_error "no oras binary in the tarball"
     fi
 
-    # `oras version` opens with `Version:<padding><X.Y.Z>`; the rest is Go, OS
-    # and commit lines the log does not need.
+    # `oras version` opens with `Version:<padding><X.Y.Z>`.
     installed=$("$dir/oras" version)
     installed=${installed%%$'\n'*}
     installed=${installed##* }

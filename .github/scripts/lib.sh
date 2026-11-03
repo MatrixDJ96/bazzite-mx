@@ -48,10 +48,8 @@ require_option_value() {
     fi
 }
 
-# fail_self_test <message>: `<script>: self-test: <message>`, exit 1. The
-# self-test of every script that sources this file reports a failed check with
-# it; most count in REFUSED the known-bad inputs they refused, for the closing
-# line.
+# fail_self_test <message>: `<script>: self-test: <message>`, exit 1. REFUSED
+# counts the known-bad inputs a self-test refused, for its closing line.
 fail_self_test() {
     exit_with_error "self-test: $*"
 }
@@ -69,8 +67,7 @@ emit() {
 
 # --- flavours and images ------------------------------------------------------
 
-# image_of <flavour>: the image built on that base; the one map from a flavour
-# to its image, an unknown flavour refused.
+# image_of <flavour>: the image built on that base, an unknown flavour refused.
 image_of() {
     local flavour=$1
 
@@ -106,9 +103,8 @@ read_env() {
 
 # --- registry errors ----------------------------------------------------------
 
-# absent_error <skopeo stderr>: status 0 for the only two errors that mean the
-# image is not there, a tag that does not exist and a package never published.
-# Anything else is a failure.
+# absent_error <skopeo stderr>: status 0 only for a missing tag or a package
+# never published; anything else is a failure.
 absent_error() {
     local message=$1
 

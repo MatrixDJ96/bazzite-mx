@@ -1,28 +1,24 @@
 #!/usr/bin/env bash
 # Runs the local pre-flight: one flavour built with the recipe CI runs, judged
-# on the build's own exit status and on the scripts' own output, then probed
-# with check-image.sh. It is the one entry point the /preflight command calls.
+# on the build's exit status and the scripts' own output, then probed with
+# check-image.sh.
 #
 # Usage: preflight-build.sh [<flavour>] [--no-cache]
 #          <flavour>   bazzite (default), bazzite-nvidia-open or bazzite-nvidia
-#          --no-cache  rebuild every layer; a changed script under build_files/
-#                      or system_files/ needs it, the layer cache not seeing a
-#                      bind mount (docs/gotchas.md § A local pre-flight can
-#                      exit 0 without running a changed build script)
+#          --no-cache  rebuild every layer, needed after a change under
+#                      build_files/ or system_files/, which a cached build skips
+#                      while still exiting 0
 #        preflight-build.sh --self-test
-# Output: every name carries the flavour's image, so two flavours coexist:
-#   <image>-base.env, <image>-labels.txt and <image>-preflight.log in /var/tmp
-#   (/tmp is a tmpfs on the hosts and the log has to outlive a reboot) and the
-#   image localhost/<image>:preflight, <image> being bazzite-mx,
-#   bazzite-mx-nvidia-open or bazzite-mx-nvidia. On stdout the build's log,
-#   `build ok: N scripts ran, N tests passed, exit 0`, the lines of
-#   check-image.sh and the closing
+# Output: <image>-base.env, <image>-labels.txt and <image>-preflight.log in
+#   /var/tmp (the log outlives a reboot, /tmp is a tmpfs) and the image
+#   localhost/<image>:preflight, <image> being the flavour's image name. On
+#   stdout the build's log, `build ok: N scripts ran, N tests passed, exit 0`,
+#   the lines of check-image.sh and the closing
 #   `preflight ok: <image> <version> <id> (<N> GiB)`.
-# Exit status: 0 image built and probed; 1 when an argument is refused, the
-#   build fails, the log lacks the scripts' own output or holds a `FAIL:` line,
-#   the reason on stderr as `preflight-build: …`; when resolve-base.sh or
-#   check-image.sh refuses, its own status and its own `resolve-base: …` or
-#   `check-image: …` line.
+# Exit status: 0 image built and probed; 1 on a refused argument, a failed
+#   build, a log lacking the scripts' output or holding a `FAIL:` line, the
+#   reason on stderr as `preflight-build: …`; a refusal of resolve-base.sh or
+#   check-image.sh exits with its own status and line.
 set -euo pipefail
 
 # shellcheck source=lib.sh
@@ -70,9 +66,8 @@ parse_args() {
     fi
 }
 
-# set_output_names <flavour>: the coords, the labels, the log and the tag, each
-# named after the flavour's own image, so a pre-flight of one flavour never
-# overwrites another's log nor re-tags its image.
+# set_output_names <flavour>: named after the flavour's image, so one flavour's
+# pre-flight never overwrites another's log nor re-tags its image.
 set_output_names() {
     local image
 
@@ -86,10 +81,9 @@ set_output_names() {
 # --- the verdict on the log ---------------------------------------------------
 
 # judge_log <log>: status 0 with `build ok: …` when the build exited 0 and the
-# log carries the scripts' own closing lines and no `FAIL:` line. buildah keys a
-# RUN on its command string, never on a bind mount's content, so a cached run
-# exits 0 without running anything: the proof that the scripts ran is their
-# output, and a log without it is refused as a cached build.
+# log carries the scripts' closing lines and no `FAIL:` line; a log without them
+# is a cached build, and a local pre-flight can exit 0 without running a changed
+# build script.
 judge_log() {
     local log=$1
     local status scripts_ran tests_passed fail_lines
@@ -165,8 +159,7 @@ run_build() {
 
     mapfile -t label_args < <(sed 's/^/--label=/' "$LABELS_FILE")
 
-    # The build's exit status is read from PIPESTATUS, not tee's, and a failed
-    # build must reach the BUILD_EXIT line instead of stopping the script here.
+    # A failed build must still reach the BUILD_EXIT line.
     set +e
     podman build "${build_args[@]}" \
         --build-arg BASE_IMAGE="$base_image" \
@@ -231,8 +224,7 @@ self_test_arguments() {
         fail_self_test "'--no-cache' not read"
     fi
 
-    # Known-bad: every flavour wrote bazzite-mx-preflight.log and re-tagged
-    # localhost/bazzite-mx:preflight, so one pre-flight erased the other's.
+    # Known-bad: one log and one tag for every flavour.
     set_output_names bazzite
     plain_log=$LOG_FILE
     set_output_names bazzite-nvidia

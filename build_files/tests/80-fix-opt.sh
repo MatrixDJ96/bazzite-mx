@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test of 80-fix-opt.sh: every tmpfiles line pointing at a directory
 # that is there with its user.component xattr, applied on a fixture root, and
-# 1Password's binaries with the modes and groups its %post set. That /var/opt
-# is gone is tests/95-clean-stage.sh's subject, which fails on the directory
-# existing at all.
+# 1Password's binaries with the modes and groups its %post set.
+# tests/95-clean-stage.sh owns /var/opt being gone.
 #
 # Usage: run by tests/run.sh inside the image (offline, on the cleaned tree).
 # Output: one `OK: <what>` or `FAIL: <what>` line per check, on stdout.

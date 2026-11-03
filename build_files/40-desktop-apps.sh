@@ -22,10 +22,8 @@ POLKIT_POLICY=/usr/share/polkit-1/actions/com.1password.1Password.policy
 BAZZITE_FIREFOX_PREFS=/usr/share/ublue-os/firefox-config/01-bazzite-global.js
 FIREFOX_PREFS_DIR=/usr/lib64/firefox/browser/defaults/preferences
 
-# Above 1000, which the application requires (docs/gotchas.md § The 1Password
-# app rejects a BrowserSupport whose group id is below 1000), and far from
-# where useradd allocates: 31001 is NixOS's id for onepassword, 31002 the next
-# one, which NixOS gives onepassword-cli.
+# Above 1000, since the 1Password app rejects a BrowserSupport whose group id is
+# below 1000, and far from where useradd allocates.
 ONEPASSWORD_GID=31001
 ONEPASSWORD_MCP_GID=31002
 
@@ -43,8 +41,8 @@ install_firefox_and_gparted() {
 }
 
 # The package unpacks under /opt, a link to var/opt that a build lacks; the
-# %post rewrites the .repo with enabled=1, so the vendored copy goes back on
-# a fresh inode (docs/conventions.md § Build scripts).
+# %post rewrites the .repo with enabled=1, so the vendored copy goes back, on a
+# fresh inode, before the repository gate compares it byte for byte.
 install_onepassword() {
     assert_key_fingerprint /etc/pki/rpm-gpg/RPM-GPG-KEY-1password
 

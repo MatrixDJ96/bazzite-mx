@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# The base's Flatpak filter. bazzite-flatpak-manager sets the blocklist as
-# Flathub's filter (`flatpak remote-modify --filter`) when its version or the
-# image name changes, and the remote keeps the file's path, so a `deny <ref>`
-# line keeps the Flatpak twin of a shipped RPM out of Discover and Bazaar.
-# Sourced by lib/env.sh.
+# The base's Flatpak filter: Flathub's remote reads the blocklist by path, so
+# a `deny <ref>` line keeps the Flatpak twin of a shipped RPM out of Discover
+# and Bazaar. Sourced by lib/env.sh.
 
 FLATPAK_BLOCKLIST=/usr/share/ublue-os/flatpak-blocklist
 

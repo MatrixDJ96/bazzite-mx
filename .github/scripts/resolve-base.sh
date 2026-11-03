@@ -4,9 +4,8 @@
 # empty label fails the build instead of defaulting.
 #
 # Usage: resolve-base.sh <flavour>
-#          <flavour>  bazzite, bazzite-nvidia-open or bazzite-nvidia; its
-#                     :stable manifest is read with skopeo. Only the first
-#                     argument is read, anything after it is ignored
+#          <flavour>  bazzite, bazzite-nvidia-open or bazzite-nvidia, whose
+#                     :stable manifest is read; later arguments are ignored
 #        resolve-base.sh --digests
 #          base_digest_<flavour> for the three flavours, read once for the
 #          release run so the gate can hold the build jobs to that reading
@@ -15,11 +14,9 @@
 #   it: image_name, base_name, base_image (name@digest), base_digest,
 #   base_version, kernel_version, fedora_version; for --digests one
 #   base_digest_<flavour> line per flavour.
-# Exit status: 0 coordinates written; 1 on a bad argument, or when the manifest
-#   cannot be read or lacks the digest, the ostree.linux label or the version
-#   label, the reason on stderr as `resolve-base: …`. An unknown flavour is
-#   refused by the registry, whose reason the line carries, or by the flavour
-#   map when upstream publishes it.
+# Exit status: 0 coordinates written; 1 on a bad argument, an unknown flavour, or
+#   a manifest unreadable or lacking the digest, the ostree.linux or the version
+#   label, the reason on stderr as `resolve-base: …`.
 set -euo pipefail
 
 # shellcheck source=lib.sh
@@ -136,9 +133,8 @@ report() {
     emit "$coords"
 }
 
-# report_digests: the three bases inspected, their keyed digests emitted;
-# exits 1 on a base it cannot inspect or whose manifest does not resolve (no
-# digest, ostree.linux or version label).
+# report_digests: the three bases' keyed digests emitted; exits 1 on a base
+# that cannot be inspected or does not resolve.
 report_digests() {
     local flavour digests manifest
     local -a manifests=()

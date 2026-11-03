@@ -17,11 +17,9 @@ LIBVIRTD_SETUP=/usr/lib/systemd/system/bazzite-libvirtd-setup.service
 
 # --- helpers ------------------------------------------------------------------
 
-# Prints every installed mesa-* package but mesa-demos, one per line, sorted;
-# status 1 when rpm cannot read the database. No other mesa-* package is a
-# value, not an error: grep matching nothing would fail the pipeline and end
-# the build without a line. An rpm that cannot answer is not a host without
-# mesa: the comparison would find no change on two lists it never read.
+# Every installed mesa-* package but mesa-demos, sorted; none is an empty
+# list, not an error. Status 1 when rpm cannot read the database, or the
+# comparison would find no change on two lists it never read.
 installed_mesa_packages() {
     local installed
 

@@ -33,19 +33,17 @@ ROOT=${ROOT:-}
 MODULES_LOAD_FILE=$ROOT$MSI_MODULES_LOAD
 DMI_VENDOR_FILE=${DMI_VENDOR_FILE:-/sys/class/dmi/id/sys_vendor}
 
-# Upstream installs under /usr, which is the image here, so everything moves
-# to /usr/local and /etc: dbus-broker's launcher searches
-# /usr/local/share/dbus-1/system-services and /etc/dbus-1/system.d is an
-# <includedir> of system.conf. The helper goes to /usr/local/bin because
-# SELinux labels it bin_t, while /usr/local/libexec has no file_contexts
-# entry and falls to usr_t. Privilege model is upstream's: D-Bus activates
-# the helper as root and every local user may talk to it, no polkit.
+# /usr is the image, so everything goes to /usr/local and /etc: dbus-broker's
+# launcher searches /usr/local/share/dbus-1/system-services and
+# /etc/dbus-1/system.d is an <includedir> of system.conf. The helper goes to
+# /usr/local/bin, labelled bin_t; /usr/local/libexec falls to usr_t. D-Bus
+# activates the helper as root and every local user may talk to it, no polkit.
 PREFIX=/usr/local
 DBUS_CONF_DIR=/etc/dbus-1/system.d
 VERSION_FILE=$PREFIX/share/mcontrolcenter/version
 DBUS_NAME=mcontrolcenter.helper
 
-# What the tarball must carry under <top>/app/ (upstream's scripts/install.sh).
+# What the tarball must carry under <top>/app/.
 APP_FILES=(
     mcontrolcenter
     mcontrolcenter-helper
@@ -178,11 +176,9 @@ rewrite_activation_file() {
 }
 
 # install_file <mode> <source> <destination under ROOT>: one file, or the
-# command stops with its own reason. install's diagnostic is silenced and
-# named again in the `ERROR:` line the smoke test reads: the tool's is
-# localised and reaches the log unprefixed. The files already written stay
-# (the version file comes last, so status reads a half install as none) and
-# disable removes them.
+# command stops with an `ERROR:` line of its own (install's is localised and
+# unprefixed). Files already written stay for disable to remove; the version
+# file comes last, so status reads a half install as none.
 install_file() {
     local mode=$1 source=$2 destination=$3
 
@@ -259,10 +255,8 @@ load_modules_now() {
     done
 }
 
-# One line per module, the outcome each time: a module another process holds
-# (MControlCenter's D-Bus helper keeps the EC open) stays loaded until the
-# next boot, and one that was never loaded says so instead of passing for
-# unloaded.
+# One line per module: one held open (MControlCenter's D-Bus helper keeps the
+# EC open) stays loaded until the next boot; one never loaded says so.
 unload_modules() {
     local module
 

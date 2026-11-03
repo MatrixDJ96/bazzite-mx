@@ -9,12 +9,9 @@
 #          .tool_input.file_path, a shell script when it ends in .sh or opens
 #          with the repo's shebang (the libexec helpers carry no extension)
 # Output: on stderr, `lint findings in <file>:` and one block per linter.
-# Exit status: 2 with findings, which Claude Code shows to the agent; 0 in
-#   every other case, every command that may fail guarded under set -u alone.
-#   PostToolUse runs after the edit, so no exit status blocks it. A missing
-#   tool is skipped silently, by design: without jq nothing is linted,
-#   without shellcheck no ShellCheck block, without both shfmt 3.7 and
-#   podman no shfmt block.
+# Exit status: 2 with findings, which Claude Code shows to the agent (the edit
+#   already happened); 0 otherwise, every command that may fail guarded under
+#   set -u alone. A missing tool skips its linter silently, jq every linter.
 set -u
 
 SHFMT_FLAGS=(--indent 4 --case-indent --binary-next-line --space-redirects)
@@ -72,9 +69,8 @@ shfmt_version() {
     printf '%s' "${version#v}"
 }
 
-# shfmt_findings <file>: shfmt's diff with the CI flags. CI runs Fedora 44's
-# shfmt, so the host binary is used only when it is the same minor, otherwise
-# the same container CI uses; nothing when neither route is available.
+# shfmt_findings <file>: shfmt's diff with the CI flags, from the host binary
+# only when it is CI's minor, else from CI's container; nothing when neither.
 shfmt_findings() {
     local file=$1
     local dir name in_container
@@ -94,9 +90,8 @@ shfmt_findings() {
     fi
 }
 
-# form_findings <file>: the findings of check-form.sh, the owner of the form
-# rules of docs/conventions.md § Bash → Form; nothing when the file passes
-# (its `form ok` line stays out of the findings).
+# form_findings <file>: check-form.sh's findings; nothing, not its `form ok`
+# line, when the file passes.
 form_findings() {
     local file=$1
     local check_form output

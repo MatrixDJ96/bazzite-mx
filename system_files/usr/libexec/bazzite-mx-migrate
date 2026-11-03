@@ -25,8 +25,8 @@
 #   the backup, the ntfsplus kernel arguments deleted from the pending
 #   deployment (step 7).
 # Output: the self-test reads the plan's step lines and its `plan: ready …`
-#   line, docs/migration.md the step numbers and the messages it quotes; a
-#   line either cites changes only with them.
+#   line, and the user docs quote the step numbers and the messages; a line
+#   either cites changes only with them.
 set -euo pipefail
 
 # shellcheck source=../lib/bazzite-mx/host.sh
@@ -36,13 +36,11 @@ SIGNED="ostree-image-signed:docker://$VENDOR_SCOPE"
 UNSIGNED="ostree-unverified-registry:$VENDOR_SCOPE"
 BACKUP_ROOT=/var/tmp/bazzite-mx-migrate
 
-# Script level, not a local of cmd_apply: the EXIT trap runs after cmd_apply
-# has returned, where a local is unbound under set -u and the trap would die
-# with uupd.timer left stopped (docs/gotchas.md § An EXIT trap cannot read a
-# `local` of the function that armed it). Step 2 sets it in the main shell:
-# called as `$(step_2 …)` it would set it in a subshell and the timer would
-# stay stopped (docs/gotchas.md § A step run in a command substitution sets
-# its flags in a subshell).
+# Script level, not a local of cmd_apply: an EXIT trap cannot read a local of
+# the function that armed it, and this one runs after cmd_apply returns. Set by
+# step 2 in the main shell, never in `$(…)`: a step run in a command
+# substitution sets its flags in a subshell. Either way uupd.timer would stay
+# stopped.
 TIMER_WAS_ACTIVE=0
 
 # The backup directory of this run, empty until a step first changes a file.
@@ -374,18 +372,16 @@ check_preconditions() {
 
 # --- the apply steps ----------------------------------------------------------
 
-# Every step but 2 and 8 prints `step N: …` first, then asks; a declined 3, 4
-# or 5 aborts, a declined 1, 6 or 7 only skips (docs/migration.md).
+# Every step but 2 and 8 prints `step N: …` first, then asks; a declined 3, 4 or
+# 5 aborts, a declined 1, 6 or 7 only skips.
 
 new_backup_directory() {
     local timestamp
 
-    # The root has a fixed name under a world-writable sticky directory, so a
-    # second account can own it before the first apply and then rename the
-    # timestamped directory away, leaving its own files under the path the
-    # user is told to restore from. install -d takes a planted root back but
-    # keeps its content: a symlink planted inside under a guessed timestamp is
-    # an existing entry, which mkdir without -p refuses instead of following.
+    # A fixed name under sticky /var/tmp: another account can plant the root
+    # and swap the backup the user restores from. install -d takes the root
+    # back; a symlink planted at a guessed timestamp is refused by mkdir
+    # without -p instead of followed.
     if ! install -d -m 0700 -o root -g root "$BACKUP_ROOT" 2> /dev/null; then
         exit_with_error "cannot create $BACKUP_ROOT; $(describe_what_the_run_changed)"
     fi
@@ -507,13 +503,11 @@ step_5_rebase() {
 }
 
 # write_rewritten_fstab <rewritten>: refuses a table that adds a findmnt
-# --verify error to the current one (nothing written then), otherwise copies
-# the current one into the backup and installs the new one, reloads systemd
-# and prints the verdict, pre-existing errors counted, not fatal. A
-# `daemon-reload` that fails after the write leaves the table installed, the
-# ERROR naming the reload to run by hand. The comparison (host.sh) is trusted
-# only once findmnt has answered on both tables: an empty error set is not a
-# clean one.
+# --verify error to the current one, or one findmnt gives no verdict on
+# (nothing written then); otherwise backs up the current one, installs the new
+# one, reloads systemd and prints the verdict, pre-existing errors not fatal. A
+# failed `daemon-reload` leaves the table installed, the ERROR naming the
+# reload to run by hand.
 write_rewritten_fstab() {
     local rewritten=$1
     local added kept
@@ -800,9 +794,8 @@ FSTAB
 
 # Every `ntfs` row without an errors= option gains errors=remount-ro, the type
 # possibly ending the row; the rest passes through: comments (a commented-out
-# ntfs row), other types, ntfs rows with an errors= value of their own, a `#`
-# inside a label (docs/gotchas.md § A `#` inside an fstab field is not a
-# comment).
+# ntfs row), other types, ntfs rows with an errors= value of their own, a label
+# holding a `#`: a `#` inside an fstab field is not a comment.
 self_test_fstab_rewrite() {
     local dir=$1
 
@@ -836,12 +829,11 @@ self_test_fstab_rewrite() {
     fi
 }
 
-# Known-bad 6: the verification compares error sets. A stale nofail row is an
-# error before and after the rewrite (docs/gotchas.md § `findmnt --verify`
-# reports an unplugged `nofail` volume as an error), so the rewrite adds
-# nothing; a row on a mount point that does not exist adds one and is refused;
-# a 40-row table keeps every error line on its mount point; a findmnt without
-# a verdict is refused.
+# Known-bad 6: the verification compares error sets. `findmnt --verify` reports
+# an unplugged `nofail` volume as an error before and after the rewrite, so the
+# rewrite adds nothing; a row on a mount point that does not exist adds one and
+# is refused; a 40-row table keeps every error line on its mount point; a
+# findmnt without a verdict is refused.
 self_test_fstab_verify_compares_errors() {
     local dir=$1
     local added row

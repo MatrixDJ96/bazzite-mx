@@ -92,8 +92,8 @@ run_hook() {
     BAZZITE_MX_GROUPS_PREFIX=$fixture bash "$GROUPS_HOOK" 2>&1
 }
 
-# The groups the image fixes, on one line: the `g` lines of the sysusers file
-# the hook's header names, a record independent of the hook.
+# The groups the image fixes, on one line: the `g` lines of
+# /usr/lib/sysusers.d/bazzite-mx-groups.conf, a record independent of the hook.
 groups_the_image_fixes() {
     awk '$1 == "g" { printf "%s%s", sep, $2; sep = " " }' \
         /usr/lib/sysusers.d/bazzite-mx-groups.conf 2> /dev/null

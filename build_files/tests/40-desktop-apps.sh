@@ -85,7 +85,7 @@ check_onepassword_repo() {
 }
 
 # The %post renders the owner list from /etc/passwd, so an empty one is the
-# right state in an image (docs/divergences.md).
+# right state in an image.
 check_polkit_policy() {
     local action missing=() empty_owners named_users
 
@@ -119,9 +119,9 @@ check_polkit_policy() {
     fi
 }
 
-# The gids are fixed and above 1000 because the application rejects a lower
-# one (docs/gotchas.md § The 1Password app rejects a BrowserSupport whose group
-# id is below 1000); tests/80-fix-opt.sh ties the setgid binaries to them.
+# The gids are fixed and above 1000: the 1Password app rejects a BrowserSupport
+# whose group id is below 1000. tests/80-fix-opt.sh ties the setgid binaries to
+# them.
 check_groups() {
     local spec group wanted_gid gid in_usr
 

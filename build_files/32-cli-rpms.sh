@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Command-line tools from Fedora, none of them in the base. Fedora's shfmt is
 # the release CI and the edit hook format with, so the image, the hook and CI
-# agree on the formatter (docs/conventions.md).
+# agree on the formatter.
 #
 # Usage: run by build.sh; no arguments.
 # Writes: the packages listed below.

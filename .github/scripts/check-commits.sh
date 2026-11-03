@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
-# Checks the commit-message rules of docs/conventions.md § Commits on every
-# commit reachable from a revision, merges excepted (a pull request's checkout
-# is GitHub's synthetic merge).
-#
-# The rules: the Conventional Commits subject, its width and no trailing period,
-# the blank line before an optional body and the absence of trailers. The lint
-# job runs the self-test, then the check over the whole history of the pushed
-# ref.
+# Checks the repository's commit-message rules (subject shape, width, no
+# trailing period, a blank line before the body, no trailer) on every commit
+# reachable from a revision, merges excepted (a pull request's checkout is
+# GitHub's synthetic merge).
 #
 # Usage: check-commits.sh [<rev>]
 #          <rev>  every commit reachable from it is checked; HEAD when omitted
@@ -18,16 +14,14 @@ set -euo pipefail
 
 MAX_COLUMNS=72
 SUBJECT_SHAPE='^(build|chore|ci|docs|feat|fix|refactor|test)(\([a-z0-9-]+\))?: [^ ]'
-# The trailer keys git, Gerrit and the agents' clients add; matched on the
-# lowercased line, so prose starting with a hyphenated word passes.
+# Known keys only, on the lowercased line: prose opening with a hyphenated word passes.
 TRAILER_SHAPE='^(signed-off-by|co-authored-by|co-developed-by|reviewed-by|acked-by|tested-by'
 TRAILER_SHAPE+='|reported-by|suggested-by|helped-by|change-id|claude-session|generated-by): '
 
 # --- one message --------------------------------------------------------------
 
 # check_message <sha> <message file>: findings on stdout, status 1 when there is
-# at least one. The rules, in the order they print: subject shape, subject width
-# and trailing period, the blank line after the subject, no trailer line.
+# at least one.
 check_message() {
     local sha=$1
     local file=$2
@@ -109,10 +103,10 @@ check_revision() {
 
 # --- self-test ----------------------------------------------------------------
 #
-# In a throwaway repository: 5 commits and a merge pass, one with the subject
-# alone and one with a body line over the subject's width; a revision git cannot
-# read fails, its empty listing being no clean history; then one commit per
-# rule, each failing the check, caught by its own rule and by no other.
+# In a throwaway repository: 5 commits and a merge pass, one subject-only and
+# one with a body line wider than a subject may be; an unreadable revision fails,
+# its empty listing being no clean history; each rule's commit is caught by its
+# own rule and no other.
 
 self_test_failed() {
     echo "check-commits: self-test: $*" >&2

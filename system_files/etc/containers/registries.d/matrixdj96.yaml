@@ -1,8 +1,7 @@
-# Sigstore signatures for our images live next to the image on GHCR, as the
-# base's own ublue-os.yaml declares for its scope. The most specific scope
-# wins (containers-registries.d(5)), so this file leaves that entry alone.
-# Read by podman, skopeo and bootc when policy.json asks for a sigstoreSigned
-# image of this scope (11-image-signing.sh writes that policy).
+# Sigstore signatures for our images live next to the image on GHCR. The most
+# specific scope wins (containers-registries.d(5)), so the base's ublue-os.yaml
+# entry stays untouched. Read when policy.json (11-image-signing.sh) asks for a
+# sigstoreSigned image of this scope.
 
 docker:
   ghcr.io/matrixdj96:

@@ -66,9 +66,9 @@ sha256_of() {
 # --- the feed and the installed tree ------------------------------------------
 
 # installed_build: the build at APP_DIR from the tarball's own bin/build.txt
-# (first line, no whitespace), whoever unpacked it there; empty when there is
-# no runnable Toolbox (docs/gotchas.md § A private marker does not identify
-# an installation the recipe did not make).
+# (first line, no whitespace), whoever unpacked it there, since a private marker
+# does not identify an installation the recipe did not make; empty when there is
+# no runnable Toolbox.
 installed_build() {
     if [ ! -x "$APP_DIR/bin/jetbrains-toolbox" ]; then
         return 0

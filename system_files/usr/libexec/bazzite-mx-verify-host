@@ -1,20 +1,17 @@
 #!/usr/bin/env bash
-# Is this host where the image expects it? The checks behind `ujust
-# verify-host`: the deployment bootc-compatible, the origin signed and on
-# `stable`, nothing layered, the image's signing policy in force, the MSI
-# modules on an MSI host, the flavour matching the GPU, the NTFS rows of fstab
-# (ntfs with an errors= option, or ntfs3) and mounted, no residue of an earlier
-# setup, the Firefox Flatpak reported (the system scope and the invoking
-# user's), the .repo files the image adds to the base as it ships them.
+# The checks behind `ujust verify-host`: the deployment bootc-compatible, the
+# origin signed and on `stable`, nothing layered, the signing policy in force,
+# the MSI modules on an MSI host, the flavour matching the GPU, the NTFS rows
+# of fstab right and mounted, no residue of an earlier setup, the Firefox
+# Flatpak reported, the image's own .repo files as it ships them.
 #
 # Usage: bazzite-mx-verify-host        (root: bootc status needs it; the recipe
 #                                       runs it through sudo)
 #   FIXTURE=<dir>: files read under <dir>, command outputs under <dir>/cmd/
 #   (the smoke test; host.sh routes the shared ones); no root needed.
 # Output: one `OK:`, `FAIL:`, `SKIP:` or `INFO:` line per check, then
-#   `verify-host: every check passed` or `verify-host: FAIL lines above`.
-#   docs/migration.md maps the FAIL lines to their fix: a line it cites stays
-#   as it is.
+#   `verify-host: every check passed` or `verify-host: FAIL lines above`. The
+#   user docs map the FAIL lines to their fix: a line they cite stays as it is.
 # Exit status: 0 every check passed; 1 at least one FAIL, or a findfs that
 #   could not answer (its `ERROR: …` on stderr, `set -e` ending the run); 2 the
 #   host could not be read (not root, not a bazzite-mx image, no booted
@@ -266,9 +263,7 @@ check_signing_policy() {
 # --- 5. MSI -------------------------------------------------------------------
 
 # The modules on an MSI host that opted in, and no modules-load file of the
-# host's own. setup-msi is a per-host opt-in: a host that ran
-# `setup-msi disable` is a host that chose to go without the modules, and a
-# FAIL there would advise undoing that choice at every run.
+# host's own. No FAIL without the opt-in: `setup-msi disable` is a choice.
 check_msi_modules() {
     local vendor module residue
 
@@ -342,12 +337,9 @@ check_gpu_matches_flavour() {
 # --- 7. NTFS ------------------------------------------------------------------
 
 # check_fstab_row <source> <target> <type> <options>: the row on ntfs (with an
-# errors= option) or ntfs3, and the volume mounted with it. Not mounted is what
-# the row asks for when it carries noauto, and a row with x-systemd.automount
-# carries autofs at its target until the first access; a volume whose device is
-# absent (an external disk unplugged) is a failure only when the row lacks
-# nofail: with it the boot went on without the volume, as the row asks. Fields
-# are read as fstab(5) writes them (unescape_fstab_field, host.sh).
+# errors= option) or ntfs3, and the volume mounted with it. A noauto row may be
+# unmounted, an x-systemd.automount one shows autofs until the first access,
+# and an absent device fails only a row without nofail.
 check_fstab_row() {
     local source=$1
     local target
@@ -364,7 +356,7 @@ check_fstab_row() {
     fi
 
     # Under errors=continue, NTFSPLUS's default, a dirty or hibernated volume
-    # mounts writable (docs/divergences.md § NTFSPLUS on every flavour).
+    # mounts writable.
     if [ "$type" = ntfs ] && [[ $options != *,errors=* ]]; then
         report_fail "fstab: $target is ntfs without errors=remount-ro" \
             "(ujust migrate adds it)"
@@ -494,10 +486,9 @@ check_flatpaks() {
 
 # --- 9. the image's repositories ----------------------------------------------
 
-# A .repo the build added over the base (00-prep.sh's snapshot names the
-# base's) and the host edited is carried over the image's copy at every
-# deployment by ostree's /etc merge, so it never follows the image again; one
-# the host deleted stays deleted, its choice.
+# A .repo the build added over the base and the host edited survives every
+# deployment through ostree's /etc merge, never following the image again;
+# one the host deleted stays deleted, its choice.
 check_image_repos() {
     local base_names image_repo name edited=0
 
