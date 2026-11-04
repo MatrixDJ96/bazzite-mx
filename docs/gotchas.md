@@ -21,8 +21,8 @@ automount over autofs · root's flatpak list · SBOM media type · image-info.js
 · # inside an fstab field · 2> /dev/null on a failed redirection · recipe description line ·
 cosign 3.1.3 bundle flag · vendor build-log warnings · no BTF from kernel-devel · arithmetic
 error escapes set -e · scriptlet rewrote a .pyc · anonymous GHCR 403 · sysusers m line on a base
-group · groupmod and a /usr/lib/passwd user · foreground booster before KWin ·
-DHCP option 121 without a default route.
+group · groupmod and a /usr/lib/passwd user · foreground booster before KWin · DHCP option 121
+without a default route · /etc stamped at a RUN's commit.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -118,8 +118,10 @@ too. `55-ntfsplus.sh`, its test and `check-image.sh` read `--show-depends`.
 
 Without `--label`, the new image carries every label of its `FROM`: a pre-flight image called
 itself `Bazzite`, vendor `Universal Blue`, revision the base's commit (measured 2026-09-02).
-`image-labels.sh` restates every label on every build, and the same file is passed again to
-`build-chunked-oci`, which inherits no config either.
+`image-labels.sh` restates every label it sets on every build, and the same file is passed again
+to chunkah beside the built image's config. The base's `quay.expires-after` and
+`rpmostree.inputhash` pass through and buildah stamps its own `io.buildah.version`, as
+`ghcr.io/ublue-os/bazzite:stable` carries them too (measured 2026-11-05).
 
 ## A networked RUN leaves `/run/systemd/resolve/stub-resolv.conf` in the image
 
@@ -702,3 +704,14 @@ no default route; the journal says
 Measured 2026-11-04 on the hub's wired link after the rebase to 45.20261104; fixed on the DHCP
 server by adding `0.0.0.0/0` to option 121. The image changes nothing: the fix belongs to the
 server, or to the host's connection profile (`ipv4.routes`).
+
+## Committing a RUN that added entries under `/etc` stamps `/etc`
+
+A RUN from the base that installs a package (`dnf5 install cowsay`) and then sets every file
+under `/usr`, `/etc` and `/opt` to the epoch reads `/etc` at the epoch inside the RUN, yet the
+committed layer carries `/etc` (and `/`) at the moment of the commit; a RUN that only resets
+leaves `/etc` at the epoch (measured 2026-11-05, rootless podman 6.1.3, buildah 1.45.1). The
+build RUN ends with the reset of `95-clean-stage.sh` and so ships a stamped `/etc`, and every
+rpm query of a later RUN rewrites `rpmdb.sqlite-shm`: the last RUN of the Containerfile resets
+them again after `rpm -V`, as `ublue-os/bazzite` resets in `finalize.sh`, a RUN after
+`build.sh`'s, and `check-image.sh` refuses an image with a file off the epoch.

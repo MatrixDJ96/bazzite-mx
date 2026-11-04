@@ -56,8 +56,11 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --network=none \
     /ctx/build_files/tests/run.sh
 
-# The last gate, offline.
+# The last gate, offline. The second epoch pass: committing a RUN that added
+# entries under /etc stamps /etc, and every rpm query rewrites the rpmdb index.
 RUN --mount=type=tmpfs,target=/run \
     --network=none \
     rpm -V --nomtime python3-setuptools \
+    && find /usr /etc /opt -newermt '1970-01-01T00:00:00Z' \
+        -exec touch -h -a -m -d '1970-01-01T00:00:00Z' {} + \
     && bootc container lint --fatal-warnings --no-truncate

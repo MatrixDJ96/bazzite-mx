@@ -425,14 +425,14 @@ Neither shape holds a counter, so neither is found by grepping for one.
 
 Where each one runs:
 
-| Self-test                                                 | Where it runs                                                                                                                                             |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.github/scripts/*.sh`                                    | `lint` job, `build.yml`                                                                                                                                   |
-| `check-form.sh`                                           | `lint` job, `build.yml`, which then runs the check itself over the whole shell catalogue; `.claude/hooks/lint-edit.sh` runs it on every edited shell file |
-| `kmods/build-kmods.sh`                                    | kmod-builder stage, before the real build                                                                                                                 |
-| `70-justfile.sh`, `80-fix-opt.sh`, `90-validate-repos.sh` | the test RUN, called by their paired test                                                                                                                 |
-| `bazzite-mx-migrate`                                      | the test RUN, called by `tests/70-justfile.sh`; its cases live here, so it has no file under `tests/helpers/`                                             |
-| `tests/run.sh`                                            | `lint` job, `build.yml`, after the CI scripts                                                                                                             |
+| Self-test                                                                           | Where it runs                                                                                                                                             |
+| ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.github/scripts/*.sh`                                                              | `lint` job, `build.yml`                                                                                                                                   |
+| `check-form.sh`                                                                     | `lint` job, `build.yml`, which then runs the check itself over the whole shell catalogue; `.claude/hooks/lint-edit.sh` runs it on every edited shell file |
+| `kmods/build-kmods.sh`                                                              | kmod-builder stage, before the real build                                                                                                                 |
+| `70-justfile.sh`, `80-fix-opt.sh`, `85-chunk-components.sh`, `90-validate-repos.sh` | the test RUN, called by their paired test                                                                                                                 |
+| `bazzite-mx-migrate`                                                                | the test RUN, called by `tests/70-justfile.sh`; its cases live here, so it has no file under `tests/helpers/`                                             |
+| `tests/run.sh`                                                                      | `lint` job, `build.yml`, after the CI scripts                                                                                                             |
 
 ## CI
 
@@ -468,9 +468,9 @@ Where each one runs:
   input (`rechunk`, then `publish`), never a second copy of the steps.
 - Every check CI runs on an image is a script under `.github/scripts/` with a `--self-test` the
   `lint` job runs; the workflow calls the script and does not restate the checks.
-- One labels file per build (`image-labels.sh`), passed to `podman build` and again to the
-  chunked compose: a composed image inherits no config, and a `podman build` without labels
-  keeps the base's ([`gotchas.md`](gotchas.md) § `podman build` keeps the base's labels).
+- One labels file per build (`image-labels.sh`), passed to `podman build` and again to chunkah
+  with the built image's config: a `podman build` without labels keeps the base's
+  ([`gotchas.md`](gotchas.md) § `podman build` keeps the base's labels).
 - Values an expression computes reach a step through `env:`, never inline in `run:`: an input or
   a label carrying a quote would break the script (GitHub docs, "Secure use reference", "Use an
   intermediate environment variable").
@@ -495,8 +495,8 @@ Where each one runs:
   tags that move: `:staging` at every release run's push, `:stable` only through the gate or
   `promote.yml`.
 - Binaries the workflows install take their version from an input or an env var
-  (`cosign-release`, `syft-version`, `ORAS_VERSION`), never "latest", and `refresh-pins.sh`
-  reads exactly those three names.
+  (`cosign-release`, `syft-version`, `ORAS_VERSION`, `CHUNKAH_VERSION`), never "latest", and
+  `refresh-pins.sh` reads exactly those four names.
 - Retries are loops in the step or the tool's own flag (`skopeo inspect --retry-times 3`),
   never an action: one pin fewer for a `for` loop.
 - A cron's minute sits off `:00`, because the `schedule` event is delayed at the start of every

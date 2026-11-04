@@ -31,7 +31,8 @@ WORKFLOWS=${WORKFLOWS:-.github/workflows}
 FIXTURE_DIR=${FIXTURE_DIR:-}
 
 # The binaries the workflows install: <workflow key>=<owner/repo of the binary>.
-BINARIES="cosign-release=sigstore/cosign syft-version=anchore/syft ORAS_VERSION=oras-project/oras"
+BINARIES="cosign-release=sigstore/cosign syft-version=anchore/syft ORAS_VERSION=oras-project/oras
+CHUNKAH_VERSION=coreos/chunkah"
 
 PINNED_USES='uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(/[A-Za-z0-9_./-]+)?@[0-9a-f]{40}( *# *[^ ]+)?'
 

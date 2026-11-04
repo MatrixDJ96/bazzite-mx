@@ -17,7 +17,7 @@ Containerfile
   image         FROM ${BASE_IMAGE}
     RUN /ctx/build_files/build.sh                  mounts: /kmods (from kmod-builder), /var/cache and /var/log (cache), /run and /tmp (tmpfs)
     RUN /ctx/build_files/tests/run.sh              offline; tmpfs on /run, /tmp, /var/log, /var/cache
-    RUN rpm -V --nomtime python3-setuptools && bootc container lint …    offline; tmpfs on /run
+    RUN rpm -V --nomtime python3-setuptools && epoch pass && bootc container lint …    offline; tmpfs on /run
 ```
 
 The staged modules are bound at `/kmods`, a root-level mount point buildah removes after the
@@ -40,7 +40,7 @@ Each script owns one artefact and ships a `--self-test`.
 | `lib.sh`                                          | coordinates, `exit_with_error`/`print_error`, `require_option_value`, `emit`, `read_env`, `image_of`, `absent_error`, `TAG_SHAPE`, `fail_self_test`; sourced by all but `check-form.sh` and `check-commits.sh`                                       |
 | `resolve-base.sh <flavour> \| --digests`          | the base's digest, version and kernel, and the image name; the three digests keyed by flavour                                                                                                                                                        |
 | `image-labels.sh <coords> <tag> <rev>`            | the labels file; the coordinates as `resolve-base.sh` wrote them                                                                                                                                                                                     |
-| `check-image.sh <image> <labels>`                 | the probe of a built image: labels, `/run` and `/tmp`, lint, packages, modules, the route of the type `ntfs`, `image-info.json`; `--no-probe` the first two alone                                                                                    |
+| `check-image.sh <image> <labels>`                 | the probe of a built image: labels, `/run` and `/tmp`, the mtimes, lint, packages, modules, the route of the type `ntfs`, `image-info.json`; `--no-probe` the first three alone                                                                      |
 | `release-tag.sh <coords> \| --tag <tag> <coords>` | the release tag, `.N` one past the day's highest taken suffix, never a gap; a forced tag, refused when malformed, on another Fedora or taken                                                                                                         |
 | `gate-release.sh release\|promote`                | verify by digest, write `:<tag>`, promote `:stable`                                                                                                                                                                                                  |
 | `changelog.sh release\|packages`                  | the release notes, the release title and its `packages.json`; one image's packages file                                                                                                                                                              |
@@ -83,6 +83,7 @@ Each script owns one artefact and ships a `--self-test`.
 | `55-ntfsplus.sh`          | NTFSPLUS as the type `ntfs`: the alias, the generic `mount.ntfs` helpers removed, and on a kernel whose `ntfs3` claims the type the routing file |
 | `70-justfile.sh`          | the ujust recipes: drift guard, overrides, import, format check                                                                                  |
 | `80-fix-opt.sh`           | `/var/opt/<name>` moves to `/usr/lib/opt/<name>` with a tmpfiles line                                                                            |
+| `85-chunk-components.sh`  | the chunkah component and update interval of every file the build adds outside an RPM                                                            |
 | `90-validate-repos.sh`    | the repository gate, run after the last install                                                                                                  |
 | `95-clean-stage.sh`       | the tree bootc lint and the rechunk expect                                                                                                       |
 | `tests/run.sh`            | the test runner and the pairing guard                                                                                                            |
@@ -132,9 +133,12 @@ One tree, copied over `/` by `01-system-files.sh`.
    repository, the enabled set read from `dnf5 repolist` itself, and no modified base
    repository.
 2. `tests/run.sh`: every feature's smoke test on the cleaned tree, offline.
-3. `rpm -V --nomtime python3-setuptools`, then `bootc container lint --fatal-warnings`: the
-   last word, offline; `rpm -V` sees a packaged `.pyc` the build or the test RUN rewrote
-   ([`gotchas.md`](gotchas.md) § A scriptlet rewrote a packaged `.pyc`).
+3. `rpm -V --nomtime python3-setuptools`, every file under `/usr`, `/etc` and `/opt` back at the
+   epoch, then `bootc container lint --fatal-warnings`: the last word, offline; `rpm -V` sees a
+   packaged `.pyc` the build or the test RUN rewrote ([`gotchas.md`](gotchas.md) § A scriptlet
+   rewrote a packaged `.pyc`), and the epoch pass undoes the `/etc` the build RUN's commit and
+   the rpmdb index `rpm -V` stamped
+   ([`gotchas.md`](gotchas.md) § Committing a RUN that added entries under `/etc` stamps `/etc`).
 
 Every gate is proven on a known-bad input before it counts ([`conventions.md`](conventions.md)
 § Positive control).

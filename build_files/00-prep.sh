@@ -19,10 +19,15 @@ JUST_DIR=/usr/share/ublue-os/just
 
 # --- the steps ----------------------------------------------------------------
 
-# The backup is put back by 95-clean-stage.sh with a rename, so the file the
-# image ships sits on a fresh inode. timeout=60 rides out COPR and mirror flakes.
+# The backup, its user xattrs (the base's chunkah component) with it, is put
+# back by 95-clean-stage.sh with a rename, so the file the image ships sits on a
+# fresh inode; --preserve=xattr fails, the RUN's tmpfs refusing security.selinux.
+# timeout=60 rides out COPR and mirror flakes.
 keep_dnf_cache() {
     cp /etc/dnf/dnf.conf "$BUILD_TMP/dnf.conf.base"
+    getfattr --absolute-names -d -m '^user\.' /etc/dnf/dnf.conf \
+        | sed "s|^# file: .*|# file: $BUILD_TMP/dnf.conf.base|" \
+        | setfattr -h -P --restore=-
     dnf5 config-manager setopt keepcache=1 timeout=60
 
     if ! grep -q '^keepcache=1' /etc/dnf/dnf.conf; then

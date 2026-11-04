@@ -16,7 +16,7 @@ on:
         default: ""
       rechunk:
         description: >-
-          Compose the chunked image, probe it and prove the signing key (main profile)
+          Chunk the image, probe it and prove the signing key (main profile)
         type: boolean
         default: false
       publish:
@@ -113,34 +113,53 @@ jobs:
 
           ./.github/scripts/check-image.sh "${probe_args[@]}" "$IMAGE" "$RUNNER_TEMP/labels.txt"
 
-      # The df line records the disk left before the pull, the figure a run that
-      # dies on ENOSPC needs.
-      - name: Compose Chunked Image
+      - name: Install Cosign
+        if: inputs.rechunk
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.4
+
+      # A base carrying ostree.commit or ostree.final-diffid would pass them on, stale.
+      - name: Chunk Image
         if: inputs.rechunk
         id: rechunk
+        env:
+          CHUNKAH_VERSION: v0.7.1
         run: |
           set -euo pipefail
+          chunkah=quay.io/coreos/chunkah:$CHUNKAH_VERSION
           out=$(mktemp -d "$RUNNER_TEMP/rechunk-XXXXXX")
           mapfile -t label_args < <(sed 's/^/--label=/' "$RUNNER_TEMP/labels.txt")
 
-          podman run --rm --pull=never --privileged \
-            --mount=type=image,src="$IMAGE",target=/rpm-ostree \
-            --volume "$out:/run/out:Z" \
-            --entrypoint /usr/bin/rpm-ostree \
-            "$IMAGE" \
-            compose build-chunked-oci \
-            --bootc \
-            --max-layers 127 \
-            --format-version 2 \
-            "${label_args[@]}" \
-            --rootfs /rpm-ostree \
-            --output oci-archive:/run/out/chunked.oci
+          podman pull -q "$chunkah" > /dev/null
+          chunkah=$(podman image inspect --format '{{index .RepoDigests 0}}' "$chunkah")
+          cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp '^https://github\.com/coreos/chunkah/' \
+            "$chunkah" > /dev/null
+          echo "chunkah verified: $chunkah"
 
-          podman rmi -f "$IMAGE"
+          podman image inspect "$IMAGE" > "$out/config.json"
+          podman run --rm --pull=never \
+            --mount=type=image,src="$IMAGE",target=/chunkah \
+            --volume "$out/config.json:/chunkah-config.json:ro,Z" \
+            --volume "$out:/run/out:Z" \
+            "$chunkah" \
+            build \
+            --max-layers 256 \
+            --prune /sysroot/ \
+            "${label_args[@]}" \
+            --label ostree.commit- \
+            --label ostree.final-diffid- \
+            --config /chunkah-config.json \
+            --output oci:/run/out/chunked
+
+          podman rmi -f "$IMAGE" "$chunkah"
           podman image prune -af > /dev/null
+          # The figure a run that dies on ENOSPC needs.
           df -h --output=size,used,avail,target / | tail -n1 | sed 's/^/disk before pull: /'
 
-          chunked=$(podman pull "oci-archive:$out/chunked.oci")
+          chunked=$(podman pull -q "oci:$out/chunked")
           rm -rf "$out"
 
           podman tag "$chunked" "$IMAGE-chunked"
@@ -151,12 +170,6 @@ jobs:
         env:
           CHUNKED: ${{ steps.rechunk.outputs.image }}
         run: ./.github/scripts/check-image.sh "$CHUNKED" "$RUNNER_TEMP/labels.txt"
-
-      - name: Install Cosign
-        if: inputs.rechunk
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-        with:
-          cosign-release: v3.1.4
 
       # A SIGNING_SECRET whose public half is not cosign.pub would sign images
       # no host accepts.
@@ -250,7 +263,8 @@ jobs:
         run: |
           set -euo pipefail
           push() {
-            podman push --digestfile "$RUNNER_TEMP/digest" "$CHUNKED" "docker://$STAGING"
+            podman push --compression-format=zstd --compression-level=3 \
+              --digestfile "$RUNNER_TEMP/digest" "$CHUNKED" "docker://$STAGING"
           }
 
           for attempt in 1 2 3; do

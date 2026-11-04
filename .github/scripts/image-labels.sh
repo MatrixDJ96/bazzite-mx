@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Prints the labels an image carries, as KEY=value lines. Both the build and the
-# compose step read them: a `podman build` without labels keeps the base's, and
-# a composed image inherits none.
+# Prints the labels an image carries, as KEY=value lines. Both the build and
+# chunkah read them: a `podman build` without labels keeps the base's.
 #
 # Usage: image-labels.sh <coords-file> <release-tag> <revision>
 #          <coords-file>  the KEY=value output of resolve-base.sh

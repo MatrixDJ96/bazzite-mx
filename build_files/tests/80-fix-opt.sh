@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test of 80-fix-opt.sh: every tmpfiles line pointing at a directory
-# that is there with its user.component xattr, applied on a fixture root, and
+# that is there with a user.component xattr, applied on a fixture root, and
 # 1Password's binaries with the modes and groups its %post set.
 # tests/95-clean-stage.sh owns /var/opt being gone.
 #
@@ -34,11 +34,11 @@ check_tmpfiles_lines() {
             echo "FAIL: $CONF: $link -> $target, target missing"
         fi
 
-        if [ "$(getfattr --only-values -n user.component "$target" 2> /dev/null)" \
-            = "$(basename "$target")" ]; then
-            echo "OK: $target has its own layer (user.component)"
+        # 85-chunk-components.sh may rename a component this script set.
+        if [ -n "$(getfattr --only-values -n user.component "$target" 2> /dev/null)" ]; then
+            echo "OK: $target has a user.component xattr"
         else
-            echo "FAIL: $target lacks user.component=$(basename "$target")"
+            echo "FAIL: $target lacks a user.component xattr"
         fi
     done <<< "$rules"
 }

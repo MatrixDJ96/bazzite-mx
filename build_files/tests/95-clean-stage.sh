@@ -2,7 +2,8 @@
 # Smoke test of 95-clean-stage.sh, what clean-stage left: /var holding only
 # cache, log and tmp, /var/tmp 1777, /etc down to root and wheel without its
 # lock files, every sysusers member line resolving, the rpmdb hardlinked,
-# dnf's history gone, versionlock and Flathub untouched.
+# dnf's history gone, every file under /usr, /etc and /opt at the epoch,
+# versionlock and Flathub untouched.
 #
 # Usage: run by tests/run.sh inside the image (offline, on the cleaned tree).
 # Output: one `OK: <what>` or `FAIL: <what>` line per check, on stdout.
@@ -17,6 +18,25 @@ LOCK_FILES=(/etc/passwd- /etc/group- /etc/shadow- /etc/gshadow- /etc/subuid- /et
 RPMDB=/usr/share/rpm/rpmdb.sqlite
 BASE_DB=/usr/lib/sysimage/rpm-ostree-base-db/rpmdb.sqlite
 DNF_HISTORY=/usr/lib/sysimage/libdnf5
+
+# --- timestamps ---------------------------------------------------------------
+
+# Seen from a RUN: the files podman binds, /etc the build RUN's commit stamped and
+# the sqlite index every rpm query rewrites; the last RUN resets the latter two.
+check_mtimes() {
+    local newer
+
+    newer=$(find /usr /etc /opt -newermt '1970-01-01T00:00:00Z' \
+        ! -path /etc ! -path /etc/hosts ! -path /etc/hostname ! -path /etc/resolv.conf \
+        ! -path '/usr/share/rpm/rpmdb.sqlite-*' -print \
+        | head -n 3 || true)
+
+    if [ -z "$newer" ]; then
+        echo "OK: every file under /usr, /etc and /opt at the epoch"
+    else
+        echo "FAIL: newer than the epoch: ${newer//$'\n'/ }"
+    fi
+}
 
 # --- /var ---------------------------------------------------------------------
 
@@ -131,6 +151,7 @@ check_package_databases() {
 
 # --- main ---------------------------------------------------------------------
 
+check_mtimes
 check_var
 check_accounts
 check_package_databases

@@ -59,8 +59,8 @@ podman run --rm -v "$PWD:/repo:ro,z" -w /repo quay.io/fedora/fedora:44 \
 probe and one smoke test by hand, on the labels it stamped:
 
 ```bash
-# probe a built image: labels, /run and /tmp, lint, packages, modules, the route of the type
-# ntfs, image-info.json
+# probe a built image: labels, /run and /tmp, the mtimes, lint, packages, modules, the route
+# of the type ntfs, image-info.json
 ./.github/scripts/check-image.sh localhost/bazzite-mx:preflight /var/tmp/bazzite-mx-labels.txt
 # one smoke test in the built image the way the build runs it, the tree mounted at /ctx; add
 # -v <changed copy>:/usr/libexec/bazzite-mx-<name>:ro,z to lesion a helper (mode 755)
@@ -84,7 +84,7 @@ release.yml   workflow_dispatch: reason (becomes the run name), promote_stable (
               free (release-tag.sh --tag)
               -> resolve-base.sh --digests: the three bases read once, base_digest_<flavour>
   build       reusable-build.yml with release_tag, rechunk and publish; one job per flavour:
-                build -> check-image.sh --no-probe -> compose the chunked image -> check-image.sh
+                build -> check-image.sh --no-probe -> chunk it with chunkah -> check-image.sh
                 -> prove the signing key
                 -> SBOM (syft on a buildah mount) -> packages-<image>.json from it
                 (changelog.sh packages), uploaded as an artifact -> push :staging -> digest
@@ -220,13 +220,13 @@ refreshes them by hand:
 Every lookup goes through `gh api`, which wants a login (`gh auth login` or `GH_TOKEN`) even
 for public data: without one every row reads `UNKNOWN`.
 
-| Class      | Item                                                             | Verdicts                    |
-| ---------- | ---------------------------------------------------------------- | --------------------------- |
-| `action`   | each `uses: owner/repo[/path]@<sha> # <version>`                 | `OK`, `STALE`, `UNKNOWN`    |
-| `binary`   | `cosign-release`, `syft-version`, `ORAS_VERSION`                 | `OK`, `STALE`, `UNKNOWN`    |
-| `runner`   | each `runs-on:` label against the `actions/runner-images` README | `OK`, `STALE`, `UNKNOWN`    |
-| `workflow` | the state of every workflow of the repository                    | `OK`, `DISABLED`, `UNKNOWN` |
-| `issue`    | every `owner/repo#N` cited in a workflow comment                 | `OK`, `CLOSED`, `UNKNOWN`   |
+| Class      | Item                                                                | Verdicts                    |
+| ---------- | ------------------------------------------------------------------- | --------------------------- |
+| `action`   | each `uses: owner/repo[/path]@<sha> # <version>`                    | `OK`, `STALE`, `UNKNOWN`    |
+| `binary`   | `cosign-release`, `syft-version`, `ORAS_VERSION`, `CHUNKAH_VERSION` | `OK`, `STALE`, `UNKNOWN`    |
+| `runner`   | each `runs-on:` label against the `actions/runner-images` README    | `OK`, `STALE`, `UNKNOWN`    |
+| `workflow` | the state of every workflow of the repository                       | `OK`, `DISABLED`, `UNKNOWN` |
+| `issue`    | every `owner/repo#N` cited in a workflow comment                    | `OK`, `CLOSED`, `UNKNOWN`   |
 
 `UNKNOWN` means the answer the row needed was not readable (no release for an `action` or a
 `binary`, no runner README, no workflow list, no issue) and is never taken for `OK`. `--apply`

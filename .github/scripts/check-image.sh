@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Probes the image that will ship, on the artefact itself: the labels the build
-# stamped, /run and /tmp empty, bootc's own lint, the probe packages, the
-# out-of-tree kernel modules for the image's kernel, the route of the type ntfs
-# and image-info.json.
+# stamped, /run and /tmp empty, /usr, /etc and /opt at the epoch, bootc's own
+# lint, the probe packages, the out-of-tree kernel modules for the image's
+# kernel, the route of the type ntfs and image-info.json.
 #
 # Unlike the in-build smoke tests, it sees what a host would pull, labels
 # included. image-name and image-ref are held against the title label; both
@@ -10,15 +10,16 @@
 # 10-image-info.sh, not a wrong resolution.
 #
 # Usage: check-image.sh [--no-probe] <image> <labels-file>
-#          --no-probe     the labels and /run and /tmp alone, for an image a
-#                         later compose replaces and the full check then reads
+#          --no-probe     the labels, /run and /tmp and the mtimes alone, for
+#                         an image the chunked one replaces and the full check
+#                         then reads
 #          <image>        a reference in the local containers-storage
 #          <labels-file>  the image-labels.sh KEY=value lines the build stamped
 #        check-image.sh --self-test
-# Output: `labels ok: N labels match`, `run and tmp ok: empty in the image`, the
-#   probe's own lines unless --no-probe, then `check-image ok: <image>`. The
-#   first refusal is a `check-image: …` line on stderr, the leftovers under /run
-#   and /tmp listed below it.
+# Output: `labels ok: N labels match`, `run and tmp ok: empty in the image`,
+#   `mtimes ok: …`, the probe's own lines unless --no-probe, then
+#   `check-image ok: <image>`. The first refusal is a `check-image: …` line on
+#   stderr, the leftovers under /run and /tmp or the stamped files listed below.
 # Exit status: 0 the image passes every check; 1 on the first check failed or a
 #   bad argument; podman's own status when the image is not known.
 set -euo pipefail
@@ -167,25 +168,39 @@ EOF
 
 # --- the image ----------------------------------------------------------------
 
-# check_run_and_tmp_empty <image>: nothing under /run or /tmp, or exit 1. Read
-# on the mounted image: podman populates /run inside a container. The inner
-# shell keeps find's status and unmounts on both paths, so an unreadable
-# directory is a refusal with a reason and never leaves the image mounted.
-check_run_and_tmp_empty() {
-    local image=$1
-    local leftovers
+# image_find <image> <dirs> <find arguments>...: what find prints under the
+# space-separated <dirs> of the mounted image, from its root. Read on the
+# mounted image: podman populates /run inside a container. The inner shell
+# keeps find's status and unmounts on both paths, so an unreadable directory
+# fails with its reason and never leaves the image mounted.
+image_find() {
+    podman unshare bash -euo pipefail -c '
+        image=$1
+        mnt=$(podman image mount "$image")
+        paths=()
 
-    if ! leftovers=$(podman unshare bash -euo pipefail -c '
-        mnt=$(podman image mount "$1")
+        for dir in $2; do
+            paths+=("$mnt/$dir")
+        done
 
-        if find "$mnt/run" "$mnt/tmp" -mindepth 1 | sed "s|^$mnt||"; then
+        shift 2
+
+        if find "${paths[@]}" "$@" | sed "s|^$mnt||"; then
             status=0
         else
             status=$?
         fi
 
-        podman image umount "$1" > /dev/null
-        exit $status' _ "$image" 2>&1); then
+        podman image umount "$image" > /dev/null
+        exit $status' _ "$@" 2>&1
+}
+
+# check_run_and_tmp_empty <image>: nothing under /run or /tmp, or exit 1.
+check_run_and_tmp_empty() {
+    local image=$1
+    local leftovers
+
+    if ! leftovers=$(image_find "$image" "run tmp" -mindepth 1); then
         exit_with_error "cannot read /run and /tmp of $image: ${leftovers//$'\n'/ }"
     fi
 
@@ -196,6 +211,25 @@ check_run_and_tmp_empty() {
     fi
 
     echo "run and tmp ok: empty in the image"
+}
+
+# check_mtimes <image>: every file under /usr, /etc and /opt at the epoch, or
+# exit 1: one stamped file changes chunkah's layer at every build.
+check_mtimes() {
+    local image=$1
+    local newer
+
+    if ! newer=$(image_find "$image" "usr etc opt" -newermt '1970-01-01T00:00:00Z'); then
+        exit_with_error "cannot read /usr, /etc and /opt of $image: ${newer//$'\n'/ }"
+    fi
+
+    if [ -n "$newer" ]; then
+        echo "check-image: files newer than the epoch in the image:" >&2
+        sed 's/^/  /' <<< "$newer" >&2
+        exit 1
+    fi
+
+    echo "mtimes ok: /usr, /etc and /opt at the epoch"
 }
 
 # run_probe <image> <kernel> <version> <title>: PROBE inside the image, offline,
@@ -216,7 +250,7 @@ run_probe() {
 }
 
 # check_image <image> <labels file> [no-probe]: the labels, the empty /run and
-# /tmp, then the probe unless no-probe; stops at the first failure.
+# /tmp, the mtimes, then the probe unless no-probe; stops at the first failure.
 check_image() {
     local image=$1
     local file=$2
@@ -234,6 +268,7 @@ check_image() {
     title=$(sed -n 's/^org\.opencontainers\.image\.title=//p' "$file")
 
     check_run_and_tmp_empty "$image"
+    check_mtimes "$image"
 
     if [ "$mode" != no-probe ]; then
         run_probe "$image" "$kernel" "$version" "$title"
@@ -289,14 +324,17 @@ EOF
 }
 
 # self_test_run_and_tmp <dir>: on a podman stub, check_image passes a clean
-# tree with its three checks' lines and unmounts, and stops on missing labels
-# and on a failed probe; a file left under each directory is listed; a tree
-# missing both is one refusal line and is still unmounted.
+# tree with its four checks' lines and unmounts that image, and stops on missing
+# labels and on a failed probe; a file left under /run and /tmp is listed, a
+# stamped /etc refused; a tree missing both is one refusal line and is still
+# unmounted.
 self_test_run_and_tmp() {
     local dir=$1
     local output labels line
 
-    mkdir -p "$dir/bin" "$dir/image/run" "$dir/image/tmp"
+    mkdir -p "$dir/bin" "$dir/image/run" "$dir/image/tmp" "$dir/image/usr" "$dir/image/etc" \
+        "$dir/image/opt"
+    touch -d '1970-01-01T00:00:00Z' "$dir/image/usr" "$dir/image/etc" "$dir/image/opt"
     cat > "$dir/bin/podman" << 'EOF'
 #!/usr/bin/env bash
 case "$1 $2" in
@@ -308,7 +346,7 @@ case "$1 $2" in
         echo "$STUB_IMAGE_TREE"
         ;;
     "image umount")
-        echo umounted >> "$STUB_UMOUNT_LOG"
+        echo "umounted $3" >> "$STUB_UMOUNT_LOG"
         ;;
     "image inspect")
         echo "$STUB_LABELS"
@@ -336,14 +374,14 @@ EOF
         fail_self_test "check_image refused the good image: ${output//$'\n'/ }"
     fi
 
-    for line in "labels ok: 4 labels match" "run and tmp ok" "probe ran"; do
+    for line in "labels ok: 4 labels match" "run and tmp ok" "mtimes ok" "probe ran"; do
         if ! grep -q "^$line" <<< "$output"; then
             fail_self_test "check_image ran without '$line': ${output//$'\n'/ }"
         fi
     done
 
-    if [ ! -s "$STUB_UMOUNT_LOG" ]; then
-        fail_self_test "the probe left the image mounted"
+    if grep -vqx 'umounted stub:latest' "$STUB_UMOUNT_LOG" || [ ! -s "$STUB_UMOUNT_LOG" ]; then
+        fail_self_test "the probe left the image mounted: $(< "$STUB_UMOUNT_LOG")"
     fi
 
     if ! output=$(PATH="$dir/bin:$PATH" STUB_LABELS=$labels STUB_PROBE_STATUS=1 \
@@ -378,6 +416,15 @@ EOF
         fail_self_test "the files left under /run and /tmp not listed: ${output//$'\n'/ }"
     fi
 
+    touch "$dir/image/etc"
+    REFUSED=$((REFUSED + 1))
+
+    if output=$(PATH="$dir/bin:$PATH" check_mtimes stub:latest 2>&1) \
+        || ! grep -qx '  /etc' <<< "$output"; then
+        fail_self_test "an image with a stamped /etc passed or did not list it:" \
+            "${output//$'\n'/ }"
+    fi
+
     rm "$dir/image/run/leftover" "$dir/image/tmp/leftover"
     rmdir "$dir/image/run" "$dir/image/tmp"
     : > "$STUB_UMOUNT_LOG"
@@ -393,8 +440,8 @@ EOF
             "${output//$'\n'/ }"
     fi
 
-    if [ ! -s "$STUB_UMOUNT_LOG" ]; then
-        fail_self_test "the failed probe left the image mounted"
+    if ! grep -qx 'umounted stub:latest' "$STUB_UMOUNT_LOG"; then
+        fail_self_test "the failed probe left the image mounted: $(< "$STUB_UMOUNT_LOG")"
     fi
 
     unset STUB_IMAGE_TREE STUB_UMOUNT_LOG

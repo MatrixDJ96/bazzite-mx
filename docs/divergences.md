@@ -8,7 +8,8 @@ which files carry it; the guards themselves live in the build script and its tes
 
 Contents: three flavours · image identity · signing trust · hook framework · Docker CE ·
 virtualization · VS Code · git tools · command-line tools · mise · desktop applications ·
-Sunshine · KDE defaults · MSI laptop · NTFSPLUS · ujust recipes · the cleaned stage · CI.
+Sunshine · KDE defaults · MSI laptop · NTFSPLUS · ujust recipes · the cleaned stage · chunk
+components · CI.
 
 ## Three flavours, one recipe
 
@@ -395,11 +396,12 @@ baked into the application resolve on the host. bootc keeps `/opt` read-only and
 must be written into `/var` (bootc.dev, "Filesystem" and "Building images"); the move to
 `/usr/lib/opt` is the pattern bazzite-dx uses for an RPM's `/opt` payload
 (`bazzite-dx/build_files/50-fix-opt.sh`), rewritten so the checks run before the first move.
-Each moved directory carries the `user.component=<name>` xattr, so the chunker of the main
-profile gives it a layer of its own (coreos.github.io/rpm-ostree, "build-chunked-oci",
-"Assigning files to specific layers"): the rpmdb names the package's files under `/opt`, and
-without the xattr the directory lands in the unpackaged-content layer, which changes at every
-release.
+Each moved directory carries the `user.component=<name>` xattr, which chunkah, the chunker of
+the main profile, reads as a component of its own: the rpmdb names the package's files under
+`/opt`, and without the xattr the directory would land with the unpackaged content;
+`85-chunk-components.sh` renames 1Password's (§ Chunk components for our own files). Unlike
+rpm-ostree, chunkah "does not guarantee unique layers per xattr component"
+(github.com/coreos/chunkah, README), so a component can share a layer with others.
 
 Files: `build_files/40-desktop-apps.sh` and `build_files/80-fix-opt.sh` with their tests,
 `build_files/lib/flatpak.sh`, `system_files/etc/yum.repos.d/1password.repo`,
@@ -720,6 +722,32 @@ behind it.
 
 Files: `build_files/95-clean-stage.sh` and its test.
 
+## Chunk components for our own files
+
+chunkah lays out the main profile's image by component: a packaged file by its RPM, a path carrying
+the `user.component` xattr by that value, which wins over the rpmdb and over the xattr of a parent
+directory, and `user.update-interval` tells it how often the component changes
+(github.com/coreos/chunkah, README, "Customizing the layers"; `src/components/xattr.rs` at v0.7.1).
+Bazzite tags its own unpackaged files that way in `build_files/finalize.sh` (`assign_chunk`,
+8df8ba17, d5e29d55, d3495a95), and the base's xattrs reach our build: the hooks and recipes we add
+and the `image-info.json` we rewrite under `/usr/share/ublue-os` would ride in its `ublue-os` and
+`bazzite-just` components, and the rest of our files would carry none. `85-chunk-components.sh` tags
+every file the image adds outside an RPM with one of eight `bazzite-mx-*` components and an interval
+in Bazzite's labels; `bazzite-mx-1password`, the `/usr/lib/opt` tree otherwise in 80-fix-opt's
+`1Password` at chunkah's weekly default, is quarterly as Bazzite's unpinned `extest` and
+`jupiter-dock-updater`. The prefix keeps the names off Bazzite's, where a conflicting second
+interval for one name is an error of chunkah's. A row skips a symlink it matches, as Bazzite's
+`assign_chunk`; unlike it, which also skips a path that is gone, a row that matches nothing fails
+the build, so a rename cannot drop a file out of its component; a path a package owns gets no row,
+and the test fails such a path among its subjects. Two base files our build rewrites keep the base's
+tag, as Bazzite tags after its own edits: `00-prep.sh` backs `/etc/dnf/dnf.conf` up with its user
+xattrs, and `10-image-info.sh` puts back those of `/etc/xdg/kcm-about-distrorc` after its `sed -i`.
+Files a package's scriptlet writes (1Password's polkit policy, the MIME caches) and the `.wants/`
+links `systemctl enable` adds, on which the kernel refuses a user xattr, stay unclaimed, as in
+Bazzite.
+
+Files: `build_files/85-chunk-components.sh` and its test.
+
 ## CI: what differs from the family
 
 How a change ships is [`workflow.md`](workflow.md), and the rule behind each choice is
@@ -762,6 +790,9 @@ retag. The family is split on freeing disk: Bazzite and bazzite-dx run
 version fails on this runner ([`gotchas.md`](gotchas.md) § `ublue-os/remove-unwanted-software`
 v9 fails on `ubuntu-26.04`). The build job runs Bazzite's `jlumbroso/free-disk-space` since
 the Fedora 45 base, whose `bazzite-nvidia-open` build ran out of space once (same entry).
+Bazzite pins chunkah by digest (`build.py`, `quay.io/coreos/chunkah:latest@sha256:…`); the build
+job pulls the tag `CHUNKAH_VERSION`, which `refresh-pins.sh` reports, and verifies its signature
+first.
 
 Files: `.github/workflows/` and `.github/scripts/`, one owner per script
 ([`architecture.md`](architecture.md)).

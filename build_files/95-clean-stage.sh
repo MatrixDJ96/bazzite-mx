@@ -10,7 +10,8 @@
 # Writes: /etc/dnf/dnf.conf restored from 00-prep.sh's backup; dnf5's history
 #   removed; the accounts created in the build moved from /etc to /usr/lib,
 #   with the members packages gave to the base's own groups;
-#   the rpmdb hardlinked for rpm-ostree; /var and /boot emptied.
+#   the rpmdb hardlinked for rpm-ostree; /var and /boot emptied; every file
+#   under /usr, /etc and /opt at the epoch.
 # Exit status: 0 done; the build stops on a `FAIL: …` line.
 
 # shellcheck source=lib/env.sh
@@ -107,6 +108,13 @@ empty_build_directories() {
     chmod 1777 /var/tmp
 }
 
+# A build stamps its own time: off the epoch, chunkah's layers change at every
+# release without their content changing.
+reset_mtimes() {
+    find /usr /etc /opt -newermt '1970-01-01T00:00:00Z' \
+        -exec touch -h -a -m -d '1970-01-01T00:00:00Z' {} +
+}
+
 # --- main ---------------------------------------------------------------------
 
 restore_dnf_conf
@@ -122,5 +130,6 @@ rm -f /etc/.pwd.lock /etc/passwd- /etc/group- /etc/shadow- /etc/gshadow- /etc/su
 
 link_rpmdb
 empty_build_directories
+reset_mtimes
 
 log "clean-stage: tree ready for lint"
