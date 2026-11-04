@@ -91,6 +91,7 @@ release.yml   workflow_dispatch: reason (becomes the run name), promote_stable (
                 from --digestfile -> cosign sign by digest -> SBOM attached as a referrer
                 with oras and signed -> actions/attest (the GitHub store, not the registry)
                 -> release-<flavour>.env uploaded as an artifact
+                -> the image's size and df -h in the job's step summary, on every profile
   gate        gate-release.sh release on the three env files, image by digest:
                 labels (title, vendor, version = release_tag, revision = the run's commit)
                 -> the base the version job resolved, the one the build wrote in its env file

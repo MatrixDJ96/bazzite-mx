@@ -788,8 +788,10 @@ retag. The family is split on freeing disk: Bazzite and bazzite-dx run
 (`aurora/.github/workflows/reusable-build.yml`,
 `image-template/.github/workflows/build.yml`), the commit past the apt step whose released
 version fails on this runner ([`gotchas.md`](gotchas.md) § `ublue-os/remove-unwanted-software`
-v9 fails on `ubuntu-26.04`). The build job runs Bazzite's `jlumbroso/free-disk-space` since
-the Fedora 45 base, whose `bazzite-nvidia-open` build ran out of space once (same entry).
+v9 fails on `ubuntu-26.04`). The build job runs `jlumbroso/free-disk-space` since the Fedora
+45 base, whose `bazzite-nvidia-open` build ran out of space once, with Bazzite's options
+(e0700423; [`gotchas.md`](gotchas.md) § The Fedora 45 build can run out of disk on
+`ubuntu-26.04`).
 Bazzite pins chunkah by digest (`build.py`, `quay.io/coreos/chunkah:latest@sha256:…`); the build
 job pulls the tag `CHUNKAH_VERSION`, which `refresh-pins.sh` reports, and verifies its signature
 first.

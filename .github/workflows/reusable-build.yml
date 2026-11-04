@@ -58,8 +58,12 @@ jobs:
       IMAGE: localhost/bazzite-mx:${{ matrix.flavour }}
       RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
-      - name: Free Disk Space (Ubuntu)
+      - name: Free Disk Space
         uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6 # v2.0.0
+        with:
+          android: false
+          large-packages: false
+          docker-images: false
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,6 +87,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Build Image
+        id: build
         env:
           BASE_IMAGE: ${{ steps.base.outputs.base_image }}
           IMAGE_NAME: ${{ steps.base.outputs.image_name }}
@@ -388,3 +393,31 @@ jobs:
           path: ${{ runner.temp }}/release-${{ matrix.flavour }}.env
           if-no-files-found: error
           retention-days: 7
+
+      - name: Write Image Size Summary
+        if: >-
+          always() && (steps.rechunk.outcome == 'success'
+          || (!inputs.rechunk && steps.build.outcome == 'success'))
+        env:
+          SHIPPED: ${{ steps.rechunk.outputs.image || env.IMAGE }}
+          IMAGE_NAME: ${{ steps.base.outputs.image_name }}
+        run: |
+          set -euo pipefail
+          size=$(podman image inspect --format '{{.Size}}' "$SHIPPED")
+          {
+            echo "### Final image size (uncompressed)"
+            echo '```'
+            echo "$IMAGE_NAME: $(numfmt --to=iec-i --suffix=B "$size") ($size bytes)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write Disk Usage Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### Disk usage"
+            echo '```'
+            df -h
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

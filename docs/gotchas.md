@@ -7,18 +7,18 @@ rules themselves live in [`conventions.md`](conventions.md).
 Contents, in the order of the entries: torn writeback on 6.17-azure · just duplicate recipe ·
 ujust.sh readonly names · kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set ·
 command | grep -q · modinfo /lib/modules path · modprobe -n -v on a loaded module · podman
-build labels · stub-resolv.conf left in the image · remove-unwanted-software v9 · skopeo and
-containers-storage · workflow off the default branch · setup-oras versions · cosign verify and
-referrers · inactive package request · 1Password BrowserSupport gid · local RPM blocks the
-rebase · EXIT trap and local · private install marker · mise dotnet SDK · rollback onto a
-pruned tag · ghcr-cleanup-action patterns · kbuild fragment compiles nothing · ntfs3 claims
-fs-ntfs on 6.18 · mount -t ntfs helper · module panics at first use · NTFS drivers' modes and
-case · udisks defaults outside allow · pre-flight without the changed script · OGC kernel
-changelog · NTFSPLUS EINVAL · skel and existing accounts · KXmlGui write-back · flags in a
-command substitution · findmnt --verify on nofail · fstab row with leading whitespace ·
+build labels · stub-resolv.conf left in the image · remove-unwanted-software v9 · Fedora 45
+out of disk · skopeo and containers-storage · workflow off the default branch · setup-oras
+versions · cosign verify and referrers · inactive package request · 1Password BrowserSupport gid
+· local RPM blocks the rebase · EXIT trap and local · private install marker · mise dotnet SDK ·
+rollback onto a pruned tag · ghcr-cleanup-action patterns · kbuild fragment compiles nothing ·
+ntfs3 claims fs-ntfs on 6.18 · mount -t ntfs helper · module panics at first use · NTFS drivers'
+modes and case · udisks defaults outside allow · pre-flight without the changed script · OGC
+kernel changelog · NTFSPLUS EINVAL · skel and existing accounts · KXmlGui write-back · flags in
+a command substitution · findmnt --verify on nofail · fstab row with leading whitespace ·
 automount over autofs · root's flatpak list · SBOM media type · image-info.json vs OCI label day
-· FAIL branch before its verdict · sunshine --version home · Docker FORWARD policy and libvirt
-· # inside an fstab field · 2> /dev/null on a failed redirection · recipe description line ·
+· FAIL branch before its verdict · sunshine --version home · Docker FORWARD policy and libvirt ·
+# inside an fstab field · 2> /dev/null on a failed redirection · recipe description line ·
 cosign 3.1.3 bundle flag · vendor build-log warnings · no BTF from kernel-devel · arithmetic
 error escapes set -e · scriptlet rewrote a .pyc · anonymous GHCR 403 · sysusers m line on a base
 group · groupmod and a /usr/lib/passwd user · foreground booster before KWin · DHCP option 121
@@ -139,15 +139,16 @@ mounted image instead.
 Its apt step runs `apt-get remove -y powershell --fix-missing` and the 26.04 runner image has
 no such package: `E: Unable to locate package powershell`, exit 100, the job dead before the
 build (measured 2026-09-02). The `df` the action prints first showed 92 GB free of 145 GB on
-that runner, enough then; the action is not used. On the Fedora 45 base the
-`bazzite-nvidia-open` build died with `no space left on device` while committing the
-`build.sh` layer and passed on the rerun (run 41809966998, 2026-11-04), so the build job opens
-with `jlumbroso/free-disk-space` v2.0.0, the step `ublue-os/bazzite`'s `build.yml` runs on the
-same runner: in its run 41746267574 it saved 9.2 GiB, 88 GB free before and 97 GB after; here,
-in run 41814411965, 27 GiB, with 108 GB free before the chunked pull. Its large-packages line
-`apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel
-libgl1-mesa-dri` fails on the same missing `powershell` and leaves one warning annotation per
-job, kept so the step stays Bazzite's; the other categories still free their share.
+that runner, enough then; the action is not used.
+
+## The Fedora 45 build can run out of disk on `ubuntu-26.04`
+
+The `bazzite-nvidia-open` build died with `no space left on device` while committing the `build.sh`
+layer and passed on the rerun (measured 2026-11-04), so the build job opens with
+`jlumbroso/free-disk-space` v2.0.0 on the options of `ublue-os/bazzite`'s `build.yml` (`android`,
+`large-packages` and `docker-images` off). Ours saved 9.2 GiB in 11 to 13 s with no warning
+annotation, left 81 to 82 GiB free before the chunked pull, and a 1 s `df` sampler saw 47 to 52 GiB
+free at the lowest point of the job (main profile, measured 2026-11-05).
 
 ## `skopeo` cannot read `containers-storage:` in a runner job
 
