@@ -21,7 +21,8 @@ automount over autofs · root's flatpak list · SBOM media type · image-info.js
 · # inside an fstab field · 2> /dev/null on a failed redirection · recipe description line ·
 cosign 3.1.3 bundle flag · vendor build-log warnings · no BTF from kernel-devel · arithmetic
 error escapes set -e · scriptlet rewrote a .pyc · anonymous GHCR 403 · sysusers m line on a base
-group · groupmod and a /usr/lib/passwd user.
+group · groupmod and a /usr/lib/passwd user · foreground booster before KWin ·
+DHCP option 121 without a default route.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -672,3 +673,25 @@ image without the fixture prefix; under `--prefix` groupmod reads only the prefi
 the smoke test never saw it. `10-bazzite-mx-groups.sh` rewrites the gid field of the group's
 `/etc/group` line instead, and `tests/21-container-runtime.sh` requires a user on the old gid to
 keep it.
+
+## The foreground booster can start before KWin and abort once
+
+`plasma-foreground-booster.service` (Terra's `plasma-foreground-booster-dmemcg`, source
+`pixelcluster/kcgroups`) is wanted by `plasma-workspace.target` with no `After=` on
+`plasma-kwin_wayland.service`. On the hub's first boot of 45.20261104 it started at 20.479 s,
+KWin at 20.521 s: `foreground_booster` found no Wayland display, aborted with a core dump, and
+its `Restart=on-failure` brought it up on the second try. On 44 it lost no race: started at
+25.5 s on the hub, after KWin on three boots of `ldesktop-matrix`. Measured 2026-11-04. The
+image leaves the base's unit as it is; each release test reads the user journal for the abort.
+
+## NetworkManager 1.58 drops the DHCP router when option 121 has no default route
+
+Since 1.58 the internal DHCPv4 client ignores option 3 (Router) when the lease carries option
+121 (Classless Static Route), as RFC 3442 asks (NetworkManager's NEWS). A server that sends
+option 121 without a `0.0.0.0/0` entry leaves the link with its address and static routes but
+no default route; the journal says
+`rfc3442_classless_static_routes (option 121) is present but has no default route`. On Fedora
+44, NetworkManager 1.56 still installed the option-3 gateway.
+Measured 2026-11-04 on the hub's wired link after the rebase to 45.20261104; fixed on the DHCP
+server by adding `0.0.0.0/0` to option 121. The image changes nothing: the fix belongs to the
+server, or to the host's connection profile (`ipv4.routes`).

@@ -13,15 +13,14 @@ source "$(dirname "$(realpath "$0")")/lib.sh"
 
 check_packages() {
     check_pkg ShellCheck android-tools bcc bcc-tools bpftop bpftrace ccache flatpak-builder \
-        gh glab iotop-c nicstat numactl ripgrep shfmt sysprof telnet trace-cmd
+        gh glab iotop-c nicstat numactl ripgrep sysprof telnet trace-cmd
 }
 
-# Fedora's shfmt prints an empty --version, so the OK line takes the rpm
-# version and a round trip proves the binary runs.
+# shfmt is the release binary, owned by no package: a round trip proves it runs.
 check_shfmt() {
     local version
 
-    version=$(rpm -q --qf '%{VERSION}' shfmt 2>&1 || true)
+    version=$(shfmt --version 2>&1 || true)
 
     if [ "$(echo 'x=1' | shfmt 2> /dev/null)" = "x=1" ]; then
         echo "OK: shfmt $version, formats"

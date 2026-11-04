@@ -311,11 +311,15 @@ Files: `build_files/31-git-tools.sh` and its test.
 `gh`, `glab`, `ShellCheck` and `shfmt`, plus the fourteen further packages `32-cli-rpms.sh`
 installs in one transaction: the tracing and profiling set (`bcc`, `bcc-tools`, `bpftop`,
 `bpftrace`, `iotop-c`, `nicstat`, `numactl`, `sysprof`, `trace-cmd`) and `android-tools`,
-`ccache`, `flatpak-builder`, `ripgrep` and `telnet`. All are Fedora 44 packages and none is in
-the base; bazzite-dx and aurora carry most of the same names
-(`bazzite-dx/build_files/20-install-apps.sh`, `aurora/build_scripts/dx/00-dx.sh`). Fedora's
-`shfmt` is the release CI and the edit hook format with, so image, hook and CI agree on the
-formatter and no formatting diff is meaningless ([`conventions.md`](conventions.md)).
+`ccache`, `flatpak-builder`, `ripgrep` and `telnet`. All but `shfmt` are Fedora packages and
+none is in the base; bazzite-dx and aurora carry most of the same names
+(`bazzite-dx/build_files/20-install-apps.sh`, `aurora/build_scripts/dx/00-dx.sh`). Fedora 45
+retired `shfmt` (golang-mvdan-sh-3, "Fails to build",
+https://forge.fedoraproject.org/releng/tickets/issues/13259), so the image takes the binary of
+its latest GitHub release (mvdan/sh), unpinned. The release publishes no checksum file: the
+build trusts TLS to GitHub and requires `shfmt --version` to equal the downloaded tag. CI and
+the edit hook still format with Fedora 44's release ([`conventions.md`](conventions.md)), so
+the image's `shfmt` is newer than theirs and a diff it reports may not be one CI reports.
 
 `ccache` ships `/etc/profile.d/ccache.sh`, which puts `/usr/lib64/ccache` first in the `PATH`
 of every login shell, so `gcc`, `cc`, `g++` and `c++` run through ccache for every account. The
