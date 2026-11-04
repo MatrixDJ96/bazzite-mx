@@ -73,7 +73,7 @@ podman run --rm --network=none -v "$PWD:/ctx:ro,z" --tmpfs /run --tmpfs /tmp --t
 
 ```
 release.yml   workflow_dispatch: reason (becomes the run name), promote_stable (default false),
-              release_tag (default empty)
+              release_tag (default empty), handwritten (default empty)
   version     skopeo login, resolve-base.sh bazzite -> release-tag.sh
               -> release_tag <fedora>.<yyyymmdd>, with .N one past the day's highest suffix
               when a GHCR package of the repository or a GitHub Release already carries
@@ -86,9 +86,10 @@ release.yml   workflow_dispatch: reason (becomes the run name), promote_stable (
   build       reusable-build.yml with release_tag, rechunk and publish; one job per flavour:
                 build -> check-image.sh --no-probe -> compose the chunked image -> check-image.sh
                 -> prove the signing key
-                -> SBOM (syft) -> push :staging -> digest from --digestfile -> cosign sign by
-                digest -> SBOM attached as a referrer with oras and signed
-                -> actions/attest (the GitHub store, not the registry)
+                -> SBOM (syft on a buildah mount) -> packages-<image>.json from it
+                (changelog.sh packages), uploaded as an artifact -> push :staging -> digest
+                from --digestfile -> cosign sign by digest -> SBOM attached as a referrer
+                with oras and signed -> actions/attest (the GitHub store, not the registry)
                 -> release-<flavour>.env uploaded as an artifact
   gate        gate-release.sh release on the three env files, image by digest:
                 labels (title, vendor, version = release_tag, revision = the run's commit)
@@ -99,11 +100,12 @@ release.yml   workflow_dispatch: reason (becomes the run name), promote_stable (
                 gh attestation verify --repo MatrixDJ96/bazzite-mx -> skopeo copy
                 --preserve-digests onto :<tag>, refused when :<tag> already points elsewhere
                 -> :stable, once all three passed, only with promote_stable AND vars.PROMOTE_STABLE
-  release     changelog.sh (the sections of Bazzite's changelog.py: major packages from the
-              SBOMs, commits since the previous release's revision, then All Images and
-              Nvidia Images, one package per new version, and how to rebase, through
-              ujust migrate apply)
-              -> gh release create --latest
+  release     changelog.sh (the sections of Bazzite's changelog.py: the handwritten text or the
+              generated line, major packages from the build jobs' packages files and the
+              previous release's packages.json, the SBOMs when either is missing, commits since
+              the previous release's revision, then All Images and Nvidia Images, one package
+              per new version, and how to rebase, through ujust migrate apply)
+              -> gh release create --latest, packages.json attached for the next release
 ```
 
 Dispatch:
@@ -120,6 +122,15 @@ a name a package or a release carries:
 ```bash
 gh workflow run release.yml --repo MatrixDJ96/bazzite-mx --ref main -f reason=manual \
   -f release_tag='44.YYYYMMDD.N'
+```
+
+`handwritten` puts a small changelog of your own at the top of the release notes, in place of
+the generated `This is an automatically generated changelog for release …` line, as
+`ublue-os/bazzite`'s `handwritten` input does for its `changelog.py`:
+
+```bash
+gh workflow run release.yml --repo MatrixDJ96/bazzite-mx --ref main -f reason=manual \
+  -f handwritten='What changed, in a sentence or two.'
 ```
 
 With `promote_stable` off, or the repository variable `PROMOTE_STABLE` not `true`, the job

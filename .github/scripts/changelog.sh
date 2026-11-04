@@ -8,19 +8,32 @@
 # rebases to ghcr.io/ublue-os. The previous release is the newest in
 # `gh release list`, not a manifest's RepoTags, which an orphan tag would hijack.
 #
-# Usage: changelog.sh release --release-tag <tag> --out <file> <env-file>...
-#          --release-tag <tag>  the tag being released, <fedora>.<yyyymmdd>[.N]
-#          --out <file>         where the notes are written
-#          <env-file>...        one per flavour, from the build job: image_name,
-#                               digest, base_name, base_digest
+# The build job writes packages-<image>.json from its SBOM, the release attaches
+# their union as packages.json, and the next release reads that asset instead of
+# pulling the previous SBOMs.
+#
+# Usage: changelog.sh release --release-tag <tag> --out <file> [--handwritten <text>]
+#          [--packages-dir <dir>] [--packages-out <file>] <env-file>...
+#          --release-tag <tag>   the tag being released, <fedora>.<yyyymmdd>[.N]
+#          --out <file>          where the notes are written
+#          --handwritten <text>  the notes' first paragraph in place of the
+#                                generated line; empty keeps that line
+#          --packages-dir <dir>  where the build jobs' packages-<image>.json are
+#          --packages-out <file> where this release's packages.json is written
+#          <env-file>...         one per flavour, from the build job: image_name,
+#                                digest, base_name, base_digest
+#        changelog.sh packages --sbom <file> --image <name> --version <tag>
+#          --out <file>
 #        changelog.sh --self-test
-# Output: the title on stdout, `<tag>: Stable (Bazzite <version>)`; the notes in
-#   the --out file; `changelog: no package diff for <tag>: …` on stderr when no
-#   flavour could be compared with the previous release.
-# Exit status: 0 notes written; 1 on a bad argument, an image that cannot be
-#   inspected, an SBOM that cannot be read, a release list gh cannot read or a
-#   previous release carrying none of the flavours. A transport error is never
-#   taken for an absence.
+# Output: release: the title on stdout, `<tag>: Stable (Bazzite <version>)`; the
+#   notes in the --out file; `changelog: no package diff for <tag>: …` on stderr
+#   when no flavour could be compared with the previous release, and the reason
+#   on stderr when the previous release's packages.json is not used. packages: the
+#   file {image, version, packages} at --out.
+# Exit status: 0 notes or file written; 1 on a bad argument, an image that
+#   cannot be inspected, an SBOM that cannot be read, a release list gh cannot
+#   read or a previous release carrying none of the flavours. A transport error
+#   on the release list, an image or an SBOM is never taken for an absence.
 # Needs skopeo, oras, jq, gh (GH_TOKEN) and git with the history: the release
 #   workflow fetches 500 commits so the previous release's revision is reached.
 set -euo pipefail
@@ -45,8 +58,9 @@ MAJOR_PACKAGES='[["Kernel", "kernel-core"], ["Kernel (Nvidia LTS)", "kernel-core
     ["Gamescope", "terra-gamescope"], ["Gamescope Session", "gamescope-session"],
     ["MangoHUD", "terra-mangohud"], ["InputPlumber", "inputplumber"],
     ["OpenGamepadUI", "opengamepadui"], ["PowerStation", "powerstation"],
-    ["SteamOS-Manager", "steamos-manager-powerstation"], ["UMU Launcher", "umu-launcher"],
-    ["Bazaar", "bazaar"], ["Distrobox", "distrobox"],
+    ["SteamOS-Manager", "steamos-manager-powerstation"],
+    ["sched_ext Schedulers", "scx-scheds"], ["UMU Launcher", "umu-launcher"],
+    ["Bazaar", "bazaar"], ["Distrobox", "distrobox"], ["UUPD", "uupd"],
     ["Gnome", "gnome-control-center-filesystem"], ["KDE", "plasma-desktop"],
     ["Waydroid", "waydroid"], ["Waydroid (Nvidia)", "waydroid-nvidia"],
     ["Nvidia Open", "nvidia-kmod-common"], ["Nvidia LTS", "nvidia-kmod-common-lts"]]'
@@ -125,6 +139,9 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 RELEASE_TAG=""
 NOTES_FILE=""
+HANDWRITTEN=""
+PACKAGES_DIR=""
+PACKAGES_OUT=""
 ENV_FILES=()
 BASE_VERSION=""
 PREVIOUS_TAG=""
@@ -134,6 +151,10 @@ IMAGE_DIGESTS=()
 
 # Appended by read_previous_packages, read by write_package_changes.
 PACKAGE_DIFF_GAPS=""
+
+# Set by fetch_previous_packages: the previous release's packages.json, empty
+# when it has none to read.
+PREVIOUS_PACKAGES=""
 
 # --- image labels -------------------------------------------------------------
 
@@ -265,6 +286,20 @@ sbom_packages() {
     fi
 }
 
+# package_file_for <file> <image> <version> <out json>: the packages of a
+# packages-<image>.json written for that image and version; fails when the file
+# is missing, not JSON or for another image or version.
+package_file_for() {
+    local file=$1
+    local image=$2
+    local version=$3
+    local out=$4
+
+    jq -e --arg image "$image" --arg version "$version" \
+        'select(.image == $image and .version == $version) | .packages' \
+        "$file" > "$out" 2> /dev/null
+}
+
 # package_tables <images json> <mode>: PACKAGE_TABLES in that mode, major or
 # changes.
 package_tables() {
@@ -277,9 +312,10 @@ package_tables() {
 
 # --- release: what the run resolved -------------------------------------------
 
-# parse_arguments <release arguments>...: RELEASE_TAG, NOTES_FILE and ENV_FILES
-# from the command line; stops the run on an unknown option or one without its
-# value.
+# parse_arguments <release arguments>...: RELEASE_TAG, NOTES_FILE, HANDWRITTEN,
+# PACKAGES_DIR, PACKAGES_OUT and ENV_FILES from the command line; stops the run
+# on an unknown option or one without its value, --handwritten taking an empty
+# one.
 parse_arguments() {
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -291,6 +327,24 @@ parse_arguments() {
             --out)
                 require_option_value "$1" "${2:-}"
                 NOTES_FILE=$2
+                shift 2
+                ;;
+            --handwritten)
+                if [ $# -lt 2 ]; then
+                    exit_with_error "$1 needs a value"
+                fi
+
+                HANDWRITTEN=$2
+                shift 2
+                ;;
+            --packages-dir)
+                require_option_value "$1" "${2:-}"
+                PACKAGES_DIR=$2
+                shift 2
+                ;;
+            --packages-out)
+                require_option_value "$1" "${2:-}"
+                PACKAGES_OUT=$2
                 shift 2
                 ;;
             -*)
@@ -378,19 +432,17 @@ find_previous_revision() {
 }
 
 # read_packages: WORK_DIR/images.json, one {name, curr, prev} per flavour, prev
-# null when the flavour cannot be compared with a previous release. An image of
-# this release without a readable SBOM stops the run.
+# null when the flavour cannot be compared with a previous release.
 read_packages() {
     local i image
 
+    if [ -n "$PREVIOUS_TAG" ]; then
+        fetch_previous_packages
+    fi
+
     for i in "${!IMAGE_NAMES[@]}"; do
         image=${IMAGE_NAMES[$i]}
-
-        if ! fetch_sbom "$image" "${IMAGE_DIGESTS[$i]}" "$WORK_DIR/curr-$i.sbom" \
-            || ! sbom_packages "$WORK_DIR/curr-$i.sbom" "$WORK_DIR/curr-$i.json"; then
-            exit 1
-        fi
-
+        read_current_packages "$i"
         echo null > "$WORK_DIR/prev-$i.json"
 
         if [ -n "$PREVIOUS_TAG" ]; then
@@ -405,16 +457,71 @@ read_packages() {
     jq -s '{images: .}' "$WORK_DIR"/image-*.json > "$WORK_DIR/images.json"
 }
 
+# read_current_packages <index>: WORK_DIR/curr-<index>.json from this run's
+# packages-<image>.json, or from the image's SBOM when the file is missing or
+# describes anything else. An image without either stops the run.
+read_current_packages() {
+    local i=$1
+    local image=${IMAGE_NAMES[$i]}
+
+    if [ -n "$PACKAGES_DIR" ] \
+        && package_file_for "$PACKAGES_DIR/packages-$image.json" "$image" "$RELEASE_TAG" \
+            "$WORK_DIR/curr-$i.json"; then
+        return 0
+    fi
+
+    if ! fetch_sbom "$image" "${IMAGE_DIGESTS[$i]}" "$WORK_DIR/curr-$i.sbom" \
+        || ! sbom_packages "$WORK_DIR/curr-$i.sbom" "$WORK_DIR/curr-$i.json"; then
+        exit 1
+    fi
+}
+
+# fetch_previous_packages: PREVIOUS_PACKAGES, the packages.json attached to the
+# previous release, left empty, the reason on stderr, when gh cannot download
+# one or it is for another release.
+fetch_previous_packages() {
+    local file=$WORK_DIR/previous-packages.json
+    local version
+
+    if ! gh release download "$PREVIOUS_TAG" --repo "$REPO" --pattern packages.json \
+        --output "$file" > /dev/null; then
+        echo "$SCRIPT_NAME: no packages.json on release ${PREVIOUS_TAG}, reading the SBOMs" >&2
+        return 0
+    fi
+
+    if ! jq -e --arg tag "$PREVIOUS_TAG" \
+        '.version == $tag and (.images | type) == "object"' "$file" > /dev/null 2>&1; then
+        version=$(jq -r '.version // empty' "$file" 2> /dev/null || true)
+        echo "$SCRIPT_NAME: packages.json on release ${PREVIOUS_TAG} is for" \
+            "${version:-no release}, reading the SBOMs" >&2
+        return 0
+    fi
+
+    PREVIOUS_PACKAGES=$file
+}
+
 # read_previous_packages <index>: WORK_DIR/prev-<index>.json from the previous
-# release's image of that flavour; a flavour the previous release lacked, or
-# whose image carries no readable SBOM, stays null and is appended to
-# PACKAGE_DIFF_GAPS. A transport error on the image or its SBOM stops the run.
+# release's packages.json or, without one, from its image of that flavour; a
+# flavour the previous release lacked, or whose image carries no readable SBOM,
+# stays null and is appended to PACKAGE_DIFF_GAPS. A transport error on the
+# image or its SBOM stops the run.
 read_previous_packages() {
     local i=$1
     local image=${IMAGE_NAMES[$i]}
     local previous_sbom=$WORK_DIR/prev-$i.sbom
     local error_file=$WORK_DIR/prev-sbom.err
     local digest_in_previous status
+
+    if [ -n "$PREVIOUS_PACKAGES" ]; then
+        jq --arg image "$image" '.images[$image]' "$PREVIOUS_PACKAGES" \
+            > "$WORK_DIR/prev-$i.json"
+
+        if [ "$(< "$WORK_DIR/prev-$i.json")" = null ]; then
+            PACKAGE_DIFF_GAPS+="${PACKAGE_DIFF_GAPS:+, }${image} not in ${PREVIOUS_TAG}"
+        fi
+
+        return 0
+    fi
 
     if ! digest_in_previous=$(previous_digest "$image" "$PREVIOUS_TAG"); then
         exit 1
@@ -451,7 +558,9 @@ read_previous_packages() {
 # to NOTES_FILE together.
 
 write_header() {
-    echo "This is an automatically generated changelog for release \`${RELEASE_TAG}\`."
+    local generated="This is an automatically generated changelog for release \`${RELEASE_TAG}\`."
+
+    printf '%s\n' "${HANDWRITTEN:-$generated}"
     echo
 
     if [ -n "$PREVIOUS_TAG" ]; then
@@ -531,6 +640,18 @@ ujust migrate apply ${RELEASE_TAG}
 EOF
 }
 
+# write_release_packages: this release's packages per image into
+# --packages-out, for the next release's notes; nothing without the option.
+write_release_packages() {
+    if [ -z "$PACKAGES_OUT" ]; then
+        return 0
+    fi
+
+    jq --arg tag "$RELEASE_TAG" \
+        '{version: $tag, images: (.images | map({(.name): .curr}) | add)}' \
+        "$WORK_DIR/images.json" > "$PACKAGES_OUT"
+}
+
 # release <arguments>...: the notes into --out and the title on stdout.
 release() {
     parse_arguments "$@"
@@ -538,6 +659,7 @@ release() {
     read_flavours
     find_previous_revision
     read_packages
+    write_release_packages
 
     {
         write_header
@@ -548,6 +670,39 @@ release() {
     } > "$NOTES_FILE"
 
     echo "${RELEASE_TAG}: Stable (Bazzite ${BASE_VERSION})"
+}
+
+# --- packages: one image's file -----------------------------------------------
+
+# packages <arguments>...: --out, {image, version, packages}, from the --sbom of
+# that --image and --version.
+packages() {
+    local sbom="" image="" version="" out=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --sbom | --image | --version | --out)
+                require_option_value "$1" "${2:-}"
+                printf -v "${1#--}" '%s' "$2"
+                shift 2
+                ;;
+            *)
+                exit_with_error "unknown argument '$1'"
+                ;;
+        esac
+    done
+
+    if [ -z "$sbom" ] || [ -z "$image" ] || [ -z "$version" ] || [ -z "$out" ]; then
+        exit_with_error "packages needs --sbom, --image, --version and --out"
+    fi
+
+    if ! sbom_packages "$sbom" "$WORK_DIR/sbom-packages.json"; then
+        exit 1
+    fi
+
+    jq -n --arg image "$image" --arg version "$version" \
+        --slurpfile packages "$WORK_DIR/sbom-packages.json" \
+        '{image: $image, version: $version, packages: $packages[0]}' > "$out"
 }
 
 # --- self-test ----------------------------------------------------------------
@@ -976,6 +1131,30 @@ EOF
     chmod +x "$dir/bin/oras"
 }
 
+# self_test_write_gh_shim <dir>: a gh on PATH answering release download by
+# GH_SHIM: ok a packages.json of 44.20260903 carrying bazzite-mx, other-tag one of
+# another release, anything else a download that fails.
+self_test_write_gh_shim() {
+    local dir=$1
+
+    cat > "$dir/bin/gh" << 'EOF'
+#!/usr/bin/env bash
+case "${GH_SHIM:-}:$2" in
+    ok:download)
+        echo '{"version":"44.20260903","images":{"bazzite-mx":{"kernel":"0"}}}' > "${!#}"
+        ;;
+    other-tag:download)
+        echo '{"version":"44.20260901","images":{"bazzite-mx":{"kernel":"0"}}}' > "${!#}"
+        ;;
+    *)
+        echo 'release not found' >&2
+        exit 1
+        ;;
+esac
+EOF
+    chmod +x "$dir/bin/gh"
+}
+
 # self_test_fetch_sbom <dir>: an image without an SBOM referrer gives status 2;
 # a transport error gives status 1, never taken for a missing SBOM.
 self_test_fetch_sbom() {
@@ -1062,6 +1241,7 @@ self_test_read_packages() {
 
     self_test_write_oras_shim "$dir"
     self_test_write_skopeo_shim "$dir"
+    self_test_write_gh_shim "$dir"
     digest="sha256:$(printf '%064d' 7)"
 
     if ! output=$(
@@ -1069,7 +1249,8 @@ self_test_read_packages() {
         IMAGE_DIGESTS=("$digest")
         PREVIOUS_TAG=44.20260903
         RELEASE_TAG=44.20260904
-        PATH="$dir/bin:$PATH" ORAS_SHIM=ok SKOPEO_SHIM=absent read_packages
+        PATH="$dir/bin:$PATH" ORAS_SHIM=ok SKOPEO_SHIM=absent GH_SHIM=none read_packages \
+            2> /dev/null
         jq -c . "$WORK_DIR/images.json"
         write_package_changes 2> "$dir/gap.err"
     ); then
@@ -1088,10 +1269,10 @@ self_test_read_packages() {
         IMAGE_NAMES=(bazzite-mx)
         PREVIOUS_TAG=44.20260903
         PATH="$dir/bin:$PATH" ORAS_SHIM=norpm SKOPEO_SHIM=ok read_previous_packages 0 \
-            2> /dev/null
+            2> /dev/null && echo read-ok
         cat "$WORK_DIR/prev-0.json"
         echo "$PACKAGE_DIFF_GAPS"
-    ) || [ "$(head -n1 <<< "$output")" != null ] \
+    ) || [ "$(head -n2 <<< "$output" | paste -sd' ' -)" != 'read-ok null' ] \
         || ! grep -qF 'bazzite-mx:44.20260903 without SBOM' <<< "$output"; then
         fail_self_test "a previous SBOM without RPMs not left null: ${output//$'\n'/ / }"
     fi
@@ -1111,9 +1292,10 @@ self_test_read_packages() {
         IMAGE_NAMES=(bazzite-mx)
         PREVIOUS_TAG=44.20260903
         PATH="$dir/bin:$PATH" ORAS_SHIM=none SKOPEO_SHIM=ok read_previous_packages 0 \
-            2> /dev/null
+            2> /dev/null && echo read-ok
         echo "$PACKAGE_DIFF_GAPS"
-    ) || ! grep -qF 'bazzite-mx:44.20260903 without SBOM' <<< "$output"; then
+    ) || ! grep -qx read-ok <<< "$output" \
+        || ! grep -qF 'bazzite-mx:44.20260903 without SBOM' <<< "$output"; then
         fail_self_test "a previous image without an SBOM not stated as a gap: $output"
     fi
 
@@ -1123,7 +1305,8 @@ self_test_read_packages() {
         IMAGE_NAMES=(bazzite-mx)
         IMAGE_DIGESTS=("$digest")
         PREVIOUS_TAG=44.20260903
-        PATH="$dir/bin:$PATH" ORAS_SHIM=none SKOPEO_SHIM=ok read_packages > /dev/null 2>&1
+        PATH="$dir/bin:$PATH" ORAS_SHIM=none SKOPEO_SHIM=ok GH_SHIM=none read_packages \
+            > /dev/null 2>&1
         echo "the notes went on"
     ) > /dev/null; then
         fail_self_test "an image of this release without its SBOM did not stop the notes"
@@ -1135,10 +1318,90 @@ self_test_read_packages() {
         IMAGE_NAMES=(bazzite-mx)
         IMAGE_DIGESTS=("$digest")
         PREVIOUS_TAG=44.20260903
-        PATH="$dir/bin:$PATH" ORAS_SHIM=ok SKOPEO_SHIM=auth read_packages > /dev/null 2>&1
+        PATH="$dir/bin:$PATH" ORAS_SHIM=ok SKOPEO_SHIM=auth GH_SHIM=none read_packages \
+            > /dev/null 2>&1
         echo "the notes went on"
     ) > /dev/null; then
         fail_self_test "a transport error on the previous image stated as a first release"
+    fi
+}
+
+# self_test_package_files <dir>: an image's file written from its SBOM; a file
+# read for its own version only; the previous packages from the previous
+# release's packages.json, its image never read, a flavour it lacks stated as a
+# gap; a release whose packages.json gh cannot download, or one of another
+# release, left to the SBOMs with the reason; this release's packages.json
+# written per image.
+self_test_package_files() {
+    local dir=$1/packages
+    local output expected
+
+    mkdir -p "$dir/bin"
+    self_test_write_skopeo_shim "$dir"
+    self_test_write_gh_shim "$dir"
+    echo '{"artifacts":[{"type":"rpm","name":"kernel","version":"1"}]}' > "$dir/sbom.json"
+
+    if ! packages --sbom "$dir/sbom.json" --image bazzite-mx --version 44.20260904 \
+        --out "$dir/packages-bazzite-mx.json" \
+        || [ "$(jq -c . "$dir/packages-bazzite-mx.json")" \
+            != '{"image":"bazzite-mx","version":"44.20260904","packages":{"kernel":"1"}}' ]; then
+        fail_self_test "an image's packages file not written from its SBOM"
+    fi
+
+    if ! package_file_for "$dir/packages-bazzite-mx.json" bazzite-mx 44.20260904 \
+        "$dir/read.json" || [ "$(jq -c . "$dir/read.json")" != '{"kernel":"1"}' ]; then
+        fail_self_test "a packages file not read for its own image and version"
+    fi
+
+    REFUSED=$((REFUSED + 1))
+
+    if package_file_for "$dir/packages-bazzite-mx.json" bazzite-mx 44.20260905 \
+        "$dir/read.json"; then
+        fail_self_test "a packages file for another version was read"
+    fi
+
+    if ! output=$(
+        IMAGE_NAMES=(bazzite-mx bazzite-mx-nvidia)
+        PREVIOUS_TAG=44.20260903
+        PATH="$dir/bin:$PATH" GH_SHIM=ok fetch_previous_packages
+        PATH="$dir/bin:$PATH" SKOPEO_SHIM=auth read_previous_packages 0
+        jq -c . "$WORK_DIR/prev-0.json"
+        PATH="$dir/bin:$PATH" SKOPEO_SHIM=auth read_previous_packages 1
+        jq -c . "$WORK_DIR/prev-1.json"
+        echo "$PACKAGE_DIFF_GAPS"
+    ) || [ "$output" != $'{"kernel":"0"}\nnull\nbazzite-mx-nvidia not in 44.20260903' ]; then
+        fail_self_test "the previous packages not read from packages.json: ${output//$'\n'/ / }"
+    fi
+
+    expected=$'release not found\nchangelog: no packages.json on release 44.20260903, reading the'
+    expected+=$' SBOMs\nnone:\n'
+    expected+='changelog: packages.json on release 44.20260903 is for 44.20260901, reading'
+    expected+=$' the SBOMs\nother-tag:'
+
+    if ! output=$(
+        PREVIOUS_TAG=44.20260903
+        PATH="$dir/bin:$PATH" GH_SHIM=none fetch_previous_packages 2>&1 \
+            && echo "none:$PREVIOUS_PACKAGES"
+        PATH="$dir/bin:$PATH" GH_SHIM=other-tag fetch_previous_packages 2>&1 \
+            && echo "other-tag:$PREVIOUS_PACKAGES"
+    ) || [ "$output" != "$expected" ]; then
+        fail_self_test "a release without packages.json, or with another's, not left to the" \
+            "SBOMs with the reason: ${output//$'\n'/ / }"
+    fi
+
+    echo '{"images":[{"name":"bazzite-mx","curr":{"kernel":"1"},"prev":null},
+        {"name":"bazzite-mx-nvidia","curr":{"kernel":"2"},"prev":null}]}' \
+        > "$WORK_DIR/images.json"
+
+    expected='{"version":"44.20260904","images":{"bazzite-mx":{"kernel":"1"},'
+    expected+='"bazzite-mx-nvidia":{"kernel":"2"}}}'
+
+    if ! (
+        RELEASE_TAG=44.20260904
+        PACKAGES_OUT=$dir/packages.json
+        write_release_packages
+    ) || [ "$(jq -c . "$dir/packages.json")" != "$expected" ]; then
+        fail_self_test "this release's packages.json not written per image"
     fi
 }
 
@@ -1174,6 +1437,11 @@ esac
 EOF
     cat > "$dir/bin/gh" << 'EOF'
 #!/usr/bin/env bash
+if [ "$2" = download ]; then
+    cp "$SHIM_ANSWERS/download_$3" "${!#}" 2> /dev/null
+    exit
+fi
+
 fields=$(sed -n 's/.*--json \([^ ]*\).*/\1/p' <<< "$*")
 jq -c --arg fields "$fields" '[.[] | with_entries(select(.key as $key
     | $fields | split(",") | index($key)))]' "$SHIM_ANSWERS/releases"
@@ -1192,16 +1460,21 @@ self_test_answer() {
     echo "$json" > "$dir/answers/$file"
 }
 
-# self_test_release <dir>: release run end to end on two flavours whose bases
-# disagree on their version, against a previous release picked by publication,
-# with one commit since its revision: the title on the highest base, the header,
-# the Major arrows and a major package new since then, the commit, the change
-# table, the rebase commands and nothing on stderr.
+# self_test_release <dir>: release run end to end, with an empty handwritten
+# text as release.yml passes it, on two flavours whose bases disagree on their
+# version, against a previous release picked by publication, with one commit
+# since its revision: the title on the highest base, the header, the Major
+# arrows and a major package new since then, the commit, the change table, the
+# rebase commands and only the SBOM fallback on stderr. Run again from the build
+# jobs' packages files and the previous release's packages.json, with every SBOM
+# pull gone and a handwritten text, it writes the same notes with the text in
+# place of the generated line, and this release's packages.json.
 self_test_release() {
     local dir=$1/release
     local registry=ghcr.io/matrixdj96 base=ghcr.io/ublue-os
     local sbom='{"artifacts":[{"type":"rpm","name":"kernel-core","version":"%s"},
         {"type":"rpm","name":"foo","version":"%s"}%s]}'
+    local handwritten='Hand-written: the `stable` text, as typed.'
     local revision title notes digest referrers
 
     self_test_write_release_shims "$dir"
@@ -1248,10 +1521,9 @@ self_test_release() {
         "$(printf "$sbom" 6.18.1-1.fc44 1.0-1.fc44 '')"
 
     if ! title=$(
-        WORK_DIR=$(mktemp -d -p "$dir")
         PATH="$dir/bin:$PATH" SHIM_ANSWERS=$dir/answers GIT_DIR=$dir/repo/.git \
-            release --release-tag 44.20261009 --out "$dir/notes.md" "$dir/one.env" \
-            "$dir/two.env" 2> "$dir/release.err"
+            "$0" release --release-tag 44.20261009 --out "$dir/notes.md" --handwritten "" \
+            "$dir/one.env" "$dir/two.env" 2> "$dir/release.err"
     ); then
         fail_self_test "release run failed: $(< "$dir/release.err")"
     fi
@@ -1259,7 +1531,8 @@ self_test_release() {
     notes=$(< "$dir/notes.md")
 
     if [ "$title" != '44.20261009: Stable (Bazzite 44.20261006.10)' ] \
-        || [ -s "$dir/release.err" ] \
+        || [ "$(< "$dir/release.err")" \
+            != 'changelog: no packages.json on release 44.20261001.10, reading the SBOMs' ] \
         || [ "$(grep '^###' <<< "$notes" | paste -sd, -)" \
             != '### Major packages,### Commits,### All Images,### How to rebase' ] \
         || ! grep -qxF 'This is an automatically generated changelog for release `44.20261009`.' \
@@ -1285,6 +1558,32 @@ EOF
         fail_self_test "release notes wrong: title '$title', stderr '$(< "$dir/release.err")'," \
             "notes: ${notes//$'\n'/ / }"
     fi
+
+    mkdir -p "$dir/packages"
+    rm -f "$dir/answers"/pull_*
+    echo '{"image":"bazzite-mx","version":"44.20261009","packages":{"kernel-core":"7.2.2-1.fc44",
+        "foo":"1.1-1.fc44","bazaar":"2-1"}}' > "$dir/packages/packages-bazzite-mx.json"
+    echo '{"image":"bazzite-mx-nvidia","version":"44.20261009","packages":{
+        "kernel-core":"6.18.2-1.fc44","foo":"1.1-1.fc44"}}' \
+        > "$dir/packages/packages-bazzite-mx-nvidia.json"
+    self_test_answer "$dir" download_44.20261001.10 '{"version":"44.20261001.10","images":{
+        "bazzite-mx":{"kernel-core":"7.2.1-1.fc44","foo":"1.0-1.fc44"},
+        "bazzite-mx-nvidia":{"kernel-core":"6.18.1-1.fc44","foo":"1.0-1.fc44"}}}'
+
+    if ! (
+        PATH="$dir/bin:$PATH" SHIM_ANSWERS=$dir/answers GIT_DIR=$dir/repo/.git \
+            "$0" release --release-tag 44.20261009 --out "$dir/notes-files.md" \
+            --handwritten "$handwritten" \
+            --packages-dir "$dir/packages" --packages-out "$dir/packages.json" \
+            "$dir/one.env" "$dir/two.env" > /dev/null 2> "$dir/release-files.err"
+    ) || [ -s "$dir/release-files.err" ] \
+        || [ "$(head -n 1 "$dir/notes-files.md")" != "$handwritten" ] \
+        || ! cmp -s <(tail -n +2 "$dir/notes.md") <(tail -n +2 "$dir/notes-files.md") \
+        || [ "$(jq -c '.version, (.images | keys)' "$dir/packages.json" | paste -sd' ' -)" \
+            != '"44.20261009" ["bazzite-mx","bazzite-mx-nvidia"]' ]; then
+        fail_self_test "release from packages files differs: $(< "$dir/release-files.err")," \
+            "$(diff "$dir/notes.md" "$dir/notes-files.md" | head -n 4 | paste -sd' ' -)"
+    fi
 }
 
 self_test() {
@@ -1304,6 +1603,7 @@ self_test() {
     self_test_inspect_retry_note "$dir"
     self_test_fetch_sbom "$dir"
     self_test_read_packages "$dir"
+    self_test_package_files "$dir"
     self_test_release "$dir"
     self_test_inspect_failures "$dir"
 
@@ -1312,7 +1612,9 @@ self_test() {
         "header and commits written," \
         "a retried inspect kept clean," \
         "SBOM absence told from a transport error, packages read with their gaps," \
-        "a release written end to end," \
+        "packages files written and read before the SBOMs," \
+        "a release written end to end from SBOMs and from packages files" \
+        "with a handwritten text," \
         "$REFUSED bad inputs refused"
 }
 
@@ -1326,8 +1628,15 @@ case "${1:-}" in
         shift
         release "$@"
         ;;
+    packages)
+        shift
+        packages "$@"
+        ;;
     *)
         exit_with_error "usage: changelog.sh release --release-tag <tag> --out <file>" \
-            "<env-file>... | --self-test"
+            "[--handwritten <text>] [--packages-dir <dir>] [--packages-out <file>]" \
+            "<env-file>... |" \
+            "packages --sbom <file> --image <name> --version <tag> --out <file> |" \
+            "--self-test"
         ;;
 esac

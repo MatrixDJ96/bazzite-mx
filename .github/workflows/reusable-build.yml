@@ -2,8 +2,8 @@
 # and release.yml. The inputs pick the profile: none for the sandbox (build and
 # probe), rechunk for main (the chunked image, its probe and the signing-key
 # proof), publish for a release (push to :staging, sign, SBOM, attestation, the
-# env file the gate reads). No concurrency group: a callee would collide with
-# its caller's.
+# packages file the release reads, the env file the gate reads). No concurrency
+# group: a callee would collide with its caller's.
 name: Reusable Build
 
 on:
@@ -193,23 +193,39 @@ jobs:
           VERSION: ${{ steps.labels.outputs.version }}
         run: |
           set -euo pipefail
-          rootfs=$RUNNER_TEMP/rootfs
-          mkdir -p "$rootfs"
-
-          podman create --name sbom-source "$CHUNKED" /bin/true > /dev/null
-          podman export sbom-source | tar -C "$rootfs" --no-same-owner -xf -
-          podman rm sbom-source > /dev/null
-          chmod -R u+rwX "$rootfs"
-
           cores=$(nproc)
-          SYFT_PARALLELISM=$((cores * 2)) "$SYFT" \
-            --source-name "$IMAGE_NAME" \
-            --source-version "$VERSION" \
-            "dir:$rootfs" \
-            -o "syft-json=$RUNNER_TEMP/sbom.json"
-          rm -rf "$rootfs"
+
+          SYFT_PARALLELISM=$((cores * 2)) buildah unshare bash -euo pipefail -c '
+            container=$(buildah from --pull=never "$1")
+            trap "buildah rm $container > /dev/null" EXIT
+            mnt=$(buildah mount "$container")
+            "$2" --source-name "$3" --source-version "$4" "dir:$mnt" -o "syft-json=$5"
+          ' bash "$CHUNKED" "$SYFT" "$IMAGE_NAME" "$VERSION" "$RUNNER_TEMP/sbom.json"
           du -h "$RUNNER_TEMP/sbom.json"
           echo "file=$RUNNER_TEMP/sbom.json" >> "$GITHUB_OUTPUT"
+
+      - name: Write Package Versions
+        if: inputs.publish
+        env:
+          SBOM: ${{ steps.sbom.outputs.file }}
+          IMAGE_NAME: ${{ steps.base.outputs.image_name }}
+        run: |
+          set -euo pipefail
+          ./.github/scripts/changelog.sh packages \
+            --sbom "$SBOM" \
+            --image "$IMAGE_NAME" \
+            --version "$RELEASE_TAG" \
+            --out "$RUNNER_TEMP/packages-$IMAGE_NAME.json"
+
+      - name: Upload Package Versions
+        if: inputs.publish
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages-${{ matrix.flavour }}
+          path: ${{ runner.temp }}/packages-${{ steps.base.outputs.image_name }}.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
 
       - name: Login to GHCR
         if: inputs.publish
