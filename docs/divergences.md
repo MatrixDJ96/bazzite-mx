@@ -760,7 +760,8 @@ retag. The family is split on freeing disk: Bazzite and bazzite-dx run
 (`aurora/.github/workflows/reusable-build.yml`,
 `image-template/.github/workflows/build.yml`), the commit past the apt step whose released
 version fails on this runner ([`gotchas.md`](gotchas.md) § `ublue-os/remove-unwanted-software`
-v9 fails on `ubuntu-26.04`). No space-freeing action runs here.
+v9 fails on `ubuntu-26.04`). The build job runs Bazzite's `jlumbroso/free-disk-space` since
+the Fedora 45 base, whose `bazzite-nvidia-open` build ran out of space once (same entry).
 
 Files: `.github/workflows/` and `.github/scripts/`, one owner per script
 ([`architecture.md`](architecture.md)).

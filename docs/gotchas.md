@@ -137,8 +137,15 @@ mounted image instead.
 Its apt step runs `apt-get remove -y powershell --fix-missing` and the 26.04 runner image has
 no such package: `E: Unable to locate package powershell`, exit 100, the job dead before the
 build (measured 2026-09-02). The `df` the action prints first showed 92 GB free of 145 GB on
-that runner, so the image build, the compose archive and the chunked pull fit without freeing
-anything. The action is not used.
+that runner, enough then; the action is not used. On the Fedora 45 base the
+`bazzite-nvidia-open` build died with `no space left on device` while committing the
+`build.sh` layer and passed on the rerun (run 41809966998, 2026-11-04), so the build job opens
+with `jlumbroso/free-disk-space` v2.0.0, the step `ublue-os/bazzite`'s `build.yml` runs on the
+same runner: in its run 41746267574 it saved 9.2 GiB, 88 GB free before and 97 GB after; here,
+in run 41814411965, 27 GiB, with 108 GB free before the chunked pull. Its large-packages line
+`apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel
+libgl1-mesa-dri` fails on the same missing `powershell` and leaves one warning annotation per
+job, kept so the step stays Bazzite's; the other categories still free their share.
 
 ## `skopeo` cannot read `containers-storage:` in a runner job
 
