@@ -33,15 +33,15 @@ dnf_retry -y install \
 
 # The release publishes no checksum file: integrity is TLS to GitHub, and the
 # binary must report the tag it was downloaded from.
-shfmt_tag=$(curl -fsSL --retry 3 --retry-delay 5 -o /dev/null -w '%{url_effective}' \
-    "$SHFMT_LATEST_URL")
+shfmt_tag=$(curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 \
+    -o /dev/null -w '%{url_effective}' "$SHFMT_LATEST_URL")
 shfmt_tag=${shfmt_tag##*/}
 
 if [[ ! "$shfmt_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     fail_build "shfmt: $SHFMT_LATEST_URL resolved to no release tag ('$shfmt_tag')"
 fi
 
-curl -fsSL --retry 3 --retry-delay 5 -o "$BUILD_TMP/shfmt" \
+curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -o "$BUILD_TMP/shfmt" \
     "https://github.com/mvdan/sh/releases/download/$shfmt_tag/shfmt_${shfmt_tag}_linux_amd64"
 install -m 0755 "$BUILD_TMP/shfmt" "$SHFMT_BIN"
 

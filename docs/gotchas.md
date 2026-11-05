@@ -22,7 +22,8 @@ automount over autofs · root's flatpak list · SBOM media type · image-info.js
 cosign 3.1.3 bundle flag · vendor build-log warnings · no BTF from kernel-devel · arithmetic
 error escapes set -e · scriptlet rewrote a .pyc · anonymous GHCR 403 · sysusers m line on a base
 group · groupmod and a /usr/lib/passwd user · foreground booster before KWin · DHCP option 121
-without a default route · /etc stamped at a RUN's commit.
+without a default route · /etc stamped at a RUN's commit · a repository's own
+skip_if_unavailable.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -716,3 +717,17 @@ build RUN ends with the reset of `95-clean-stage.sh` and so ships a stamped `/et
 rpm query of a later RUN rewrites `rpmdb.sqlite-shm`: the last RUN of the Containerfile resets
 them again after `rpm -V`, as `ublue-os/bazzite` resets in `finalize.sh`, a RUN after
 `build.sh`'s, and `check-image.sh` refuses an image with a file off the epoch.
+
+## A repository's own `skip_if_unavailable=True` beats the main setting
+
+`skip_if_unavailable=False` in `[main]` of `dnf.conf`, written by `dnf5 config-manager setopt` or
+passed as `--setopt=skip_if_unavailable=False`, fails `dnf5 makecache` on an unreachable repository
+whose file does not set the option, and skips one whose file says `True`; only
+`--setopt='*.skip_if_unavailable=False'` fails both (measured 2026-11-05 on the Fedora 45 base, dnf5
+with a `127.0.0.1:9` baseurl, offline). The glob is not an option on this base: with it `dnf5
+makecache --refresh` fails on `updates-archive`, whose `repomd.xml` names a `primary.xml.zck` the
+server answers 404 for (`fedoraproject-updates-archive.fedoraproject.org/fedora/45/x86_64/`, same
+date). `00-prep.sh` therefore sets the main value, as `ublue-os/bazzite` does in
+`build_files/build.sh`, and the repositories whose files say `True` (Fedora's `updates-archive`
+and `fedora-cisco-openh264`, the base's COPRs and negativo17, our `mise` and `sunshine`) are still
+skipped when unreachable; an install from one of them still fails on the missing package.

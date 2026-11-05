@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Prepare the build: dnf keeps its cache across builds, its metadata refreshed
-# once here, and the base image's repository files, enabled repositories,
-# recipe sets and module dependencies are recorded, so the gates that run later
-# can tell what the build changed.
+# once here, and fails on a repository it cannot reach unless the repository's
+# own file says skip_if_unavailable=True; the base image's repository files,
+# enabled repositories, recipe sets and module dependencies are recorded, so
+# the gates that run later can tell what the build changed.
 #
 # Usage: run by build.sh as the first script; no arguments.
 # Writes: $BUILD_TMP/dnf.conf.base, restored by 95-clean-stage.sh;
@@ -22,17 +23,14 @@ JUST_DIR=/usr/share/ublue-os/just
 # The backup, its user xattrs (the base's chunkah component) with it, is put
 # back by 95-clean-stage.sh with a rename, so the file the image ships sits on a
 # fresh inode; --preserve=xattr fails, the RUN's tmpfs refusing security.selinux.
-# timeout=60 rides out COPR and mirror flakes.
-keep_dnf_cache() {
+# timeout=60 rides out COPR and mirror flakes; the base's skip_if_unavailable=1
+# would install without an unreachable repository.
+set_build_dnf_options() {
     cp /etc/dnf/dnf.conf "$BUILD_TMP/dnf.conf.base"
     getfattr --absolute-names -d -m '^user\.' /etc/dnf/dnf.conf \
         | sed "s|^# file: .*|# file: $BUILD_TMP/dnf.conf.base|" \
         | setfattr -h -P --restore=-
-    dnf5 config-manager setopt keepcache=1 timeout=60
-
-    if ! grep -q '^keepcache=1' /etc/dnf/dnf.conf; then
-        fail_build "dnf.conf: keepcache=1 not applied"
-    fi
+    dnf5 config-manager setopt keepcache=1 timeout=60 skip_if_unavailable=False
 }
 
 # The cache outlives a build, so metadata it kept could predate the mirrors.
@@ -98,7 +96,7 @@ record_base_module_deps() {
 
 # --- main ---------------------------------------------------------------------
 
-keep_dnf_cache
+set_build_dnf_options
 refresh_dnf_metadata
 record_base_repo_files
 record_base_enabled_repos

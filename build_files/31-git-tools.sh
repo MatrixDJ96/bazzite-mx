@@ -13,7 +13,7 @@ source "$(dirname "$(realpath "$0")")/lib/env.sh"
 GITKRAKEN_URL=https://release.gitkraken.com/linux/gitkraken-amd64.rpm
 RPM_FILE=$BUILD_TMP/gitkraken.rpm
 
-curl -fsSL --retry 3 --retry-delay 5 -o "$RPM_FILE" "$GITKRAKEN_URL"
+curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -o "$RPM_FILE" "$GITKRAKEN_URL"
 
 if ! rpm -K --nosignature "$RPM_FILE" > /dev/null; then
     fail_build "gitkraken.rpm: payload digest check failed"

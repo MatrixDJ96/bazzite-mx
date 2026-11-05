@@ -52,8 +52,8 @@ fetch_release_files() {
         if [ -n "${FIXTURE_DIR:-}" ]; then
             cp "$FIXTURE_DIR/$file" "$work/$file"
         else
-            if ! error=$(curl -fsSL --proto '=https' --retry 3 -o "$work/$file" \
-                "$RELEASES/v${version}/$file" 2>&1); then
+            if ! error=$(curl -fsSL --proto '=https' --retry 3 --retry-all-errors \
+                -o "$work/$file" "$RELEASES/v${version}/$file" 2>&1); then
                 error=${error//$'\n'/ }
                 exit_with_error "cannot fetch $RELEASES/v${version}/$file:" \
                     "${error:-no output from curl}"

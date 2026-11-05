@@ -40,7 +40,9 @@ prepare_btf() {
 
     wanted=$(sed -n 's/^CONFIG_PAHOLE_VERSION=//p' "$kernel_source/.config")
     tag=v$((wanted / 100)).$((wanted % 100))
-    dnf_retry -y install cmake elfutils-devel zlib-devel libbpf-devel
+    # The image stage's 00-prep.sh never runs here, so the strict value rides on the call.
+    dnf_retry -y --setopt=skip_if_unavailable=False install \
+        cmake elfutils-devel zlib-devel libbpf-devel
     mkdir -p "$dir"
     git -C "$dir" init -q
     git -C "$dir" fetch -q --depth 1 "$PAHOLE_URL" "refs/tags/$tag"

@@ -65,7 +65,7 @@ Each script owns one artefact and ships a `--self-test`.
 | `lib/gpg.sh`              | the `KEY_FPR` table, `key_fingerprint` and `assert_key_fingerprint`                                                                              |
 | `kmods/build-kmods.sh`    | the kmod-builder stage: BTF prepared (vmlinux extracted, pahole built from the kernel's tag), then per module fetch, build, strip, stage, assert |
 | `kmods/<name>/source.env` | one module: URL, pinned commit, object path, build arguments                                                                                     |
-| `00-prep.sh`              | dnf keeps its cache, a 60 s request timeout and fresh metadata; the base's repositories, recipe sets and module dependencies are recorded        |
+| `00-prep.sh`              | dnf keeps its cache, a 60 s timeout, fresh metadata and fails on an unreachable repo; the base's repos, recipe sets and module deps are recorded |
 | `01-system-files.sh`      | `rsync` of `system_files/` over the tree, every file on a fresh inode; the fixed-gid groups                                                      |
 | `10-image-info.sh`        | identity: `image-info.json`, os-release, the KDE About page                                                                                      |
 | `11-image-signing.sh`     | the public key and the `policy.json` scope for `ghcr.io/matrixdj96`                                                                              |
