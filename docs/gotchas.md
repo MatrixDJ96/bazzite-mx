@@ -6,24 +6,22 @@ rules themselves live in [`conventions.md`](conventions.md).
 
 Contents, in the order of the entries: torn writeback on 6.17-azure · just duplicate recipe ·
 ujust.sh readonly names · kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set ·
-command | grep -q · modinfo /lib/modules path · modprobe -n -v on a loaded module · podman
-build labels · stub-resolv.conf left in the image · remove-unwanted-software v9 · Fedora 45
-out of disk · skopeo and containers-storage · workflow off the default branch · setup-oras
-versions · cosign verify and referrers · inactive package request · 1Password BrowserSupport gid
-· local RPM blocks the rebase · EXIT trap and local · private install marker · mise dotnet SDK ·
-rollback onto a pruned tag · ghcr-cleanup-action patterns · kbuild fragment compiles nothing ·
-ntfs3 claims fs-ntfs on 6.18 · mount -t ntfs helper · module panics at first use · NTFS drivers'
-modes and case · udisks defaults outside allow · pre-flight without the changed script · OGC
-kernel changelog · NTFSPLUS EINVAL · skel and existing accounts · KXmlGui write-back · flags in
-a command substitution · findmnt --verify on nofail · fstab row with leading whitespace ·
-automount over autofs · root's flatpak list · SBOM media type · image-info.json vs OCI label day
-· FAIL branch before its verdict · sunshine --version home · Docker FORWARD policy and libvirt ·
-# inside an fstab field · 2> /dev/null on a failed redirection · recipe description line ·
-cosign 3.1.3 bundle flag · vendor build-log warnings · no BTF from kernel-devel · arithmetic
+command | grep -q · modinfo /lib/modules path · modprobe -n -v on a loaded module · podman build
+labels · stub-resolv.conf left in the image · remove-unwanted-software v9 · Fedora 45 out of disk ·
+skopeo and containers-storage · workflow off the default branch · setup-oras versions · cosign
+verify and referrers · inactive package request · 1Password BrowserSupport gid · local RPM blocks
+the rebase · private install marker · mise dotnet SDK · rollback onto a pruned tag ·
+ghcr-cleanup-action patterns · kbuild fragment compiles nothing · ntfs3 claims fs-ntfs on 6.18 ·
+mount -t ntfs helper · module panics at first use · NTFS drivers' modes and case · udisks defaults
+outside allow · pre-flight without the changed script · OGC kernel changelog · NTFSPLUS EINVAL ·
+skel and existing accounts · KXmlGui write-back · findmnt --verify on nofail · fstab row with
+leading whitespace · automount over autofs · root's flatpak list · SBOM media type · image-info.json
+vs OCI label day · FAIL branch before its verdict · sunshine --version home · Docker FORWARD policy
+and libvirt · # inside an fstab field · 2> /dev/null on a failed redirection · recipe description
+line · cosign 3.1.3 bundle flag · vendor build-log warnings · no BTF from kernel-devel · arithmetic
 error escapes set -e · scriptlet rewrote a .pyc · anonymous GHCR 403 · sysusers m line on a base
 group · groupmod and a /usr/lib/passwd user · foreground booster before KWin · DHCP option 121
-without a default route · /etc stamped at a RUN's commit · a repository's own
-skip_if_unavailable.
+without a default route · /etc stamped at a RUN's commit · a repository's own skip_if_unavailable.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -232,16 +230,6 @@ re-resolved against the new base, where a local one is the file itself.
 `rpm-ostree upgrade --uninstall=<nevra>` drops the request in the same transaction
 ([`migration.md`](migration.md)).
 
-## An EXIT trap cannot read a `local` of the function that armed it
-
-`bazzite-mx-migrate apply` kept `timer_was_active` as a `local` of `cmd_apply` and armed
-`trap restore_timer EXIT` from there. The trap runs after the function has returned, the local
-is gone, and under `set -u` bash dies with "timer_was_active: unbound variable" once every step
-has run. Measured 2026-09-03 on an already migrated host: `apply` printed step 7 and
-`rpm-ostree status`, then exited 1 and left `uupd.timer` stopped. Running the same steps by
-hand never shows it. State a trap reads lives at script level (`TIMER_WAS_ACTIVE`), and the
-self-test arms the trap in a child shell and requires the restart line.
-
 ## A private marker does not identify an installation the recipe did not make
 
 The tarball carries the build in `bin/build.txt` (3.7.2.87231, equal to the feed's `build`
@@ -262,7 +250,7 @@ so; the other runtimes stay under `installs/`.
 
 ## A rollback deployment whose origin tag was pruned from GHCR boots but never updates
 
-`ujust migrate apply <tag>` and a `bootc switch` onto a dated tag write that tag into the
+`ujust migrate <tag>` and a `bootc switch` onto a dated tag write that tag into the
 deployment's origin. Once `clean.yml` or a cleanup by id has removed the tag from the package,
 the deployment still boots, its commit being local, and `bootc upgrade` on it finds nothing to
 pull: the host reports the rollback as healthy and stale at the same time. Measured 2026-09-04
@@ -412,22 +400,12 @@ rewritten as the full merged layout at Konsole's version, the `ActionProperties`
 2026-09-07: 668 bytes seeded, 3812 bytes and `version="36"` after one start). The shortcut
 holds; a reader comparing the home copy with the skel copy finds them different.
 
-## A step run in a command substitution sets its flags in a subshell
-
-`bazzite-mx-migrate apply` called step 2 as `backup=$(step_2_backup_pin_and_stop_timer)` to
-read the backup directory it printed. The step also set `TIMER_WAS_ACTIVE=1` after stopping
-`uupd.timer`, and that assignment stayed in the subshell: the EXIT trap read 0 and never
-started the timer again. Measured 2026-09-07 in a VM on the first `apply` whose step 2 ran in a
-command substitution, `uupd.timer` inactive after every exit path; the earlier self-test preset
-the flag and could not see it. The step sets the flag as a global and is called plainly, and
-the self-test refuses a `=$(step_2_` in the source.
-
 ## `findmnt --verify` reports an unplugged `nofail` volume as an error
 
 A `nofail` row whose UUID is absent, the external disk that is not plugged in, gets `[E]
 unreachable on boot required source` from `findmnt --verify`, and exit status 1, the option
 notwithstanding (measured 2026-09-07, util-linux of Fedora 44, in a VM with such a row on the
-`ntfs` driver). `bazzite-mx-migrate apply` verifies the rewritten table before writing it,
+`ntfs` driver). `bazzite-mx-migrate` verifies the rewritten table before writing it,
 through `--tab-file`, and stops only on an error the current table does not already carry
 (`host.sh`); the messages are read under `LC_ALL=C`, findmnt localizing them. The verdict is the
 summary line findmnt ends with, never the presence of output: on a table with a row of fewer
@@ -445,8 +423,8 @@ self-test of `bazzite-mx-migrate` carries a 40-row table.
 
 libmount skips the blanks before the first field, so `   UUID=… /mnt/data ntfs3 …` is a row
 `findmnt --tab-file` lists and the helpers' awk counts (measured 2026-09-08 in the build
-image). The rewriters' pattern allows leading blanks, kept as they are, and both self-test
-tables carry an indented row.
+image). The rewriters' pattern allows leading blanks, kept as they are, and the self-test's
+rewrite table carries an indented row.
 
 ## A triggered automount stacks the volume's type over `autofs`
 

@@ -126,23 +126,19 @@ verify-host ACTION="":
 
     sudo "$HELPER"
 
-# Migrate this host to the signed origin of this image. Options: plan | apply, then a tag.
+# Migrate this host to the signed origin of this image. Option: a tag, default stable.
 [group("system")]
-migrate ACTION="plan" TAG="stable":
+migrate TAG="stable":
     #!/usr/bin/bash
     source /usr/lib/ujust/ujust.sh
-    OPTION="{{ ACTION }}"
     TAG="{{ TAG }}"
-    HELPER=/usr/libexec/bazzite-mx-migrate
 
-    if [ "$OPTION" == "help" ]; then
-      echo "Usage: ujust migrate [plan|apply] [TAG]"
-      echo "  plan   Read-only: what apply would do on this host (default)"
-      echo "  apply  Do it, each step asking first except step 2 (update timer stopped);"
-      echo "         the reboot stays yours"
-      echo "  TAG    Tag of the signed origin, default stable; a dated tag pins the host"
-      echo "         to that release."
-      echo "plan prints the steps and refuses a host it cannot migrate, saying what to do first."
+    if [ "$TAG" == "help" ]; then
+      echo "Usage: ujust migrate [TAG]"
+      echo "Lists the changes this host needs to run the signed image, asks once, makes them."
+      echo "  TAG  Tag of the signed image, default stable; a dated tag pins the host to"
+      echo "       that release until ujust migrate stable."
+      echo "The reboot stays yours; then run ujust verify-host."
       exit 0
     fi
 
@@ -151,15 +147,12 @@ migrate ACTION="plan" TAG="stable":
       exit 1
     fi
 
-    case "$OPTION" in
-      plan|apply)
-        sudo "$HELPER" "$OPTION" "$TAG"
-        ;;
-      *)
-        echo "Unknown option: $OPTION (ujust migrate help)"
-        exit 1
-        ;;
-    esac
+    if [[ ! "$TAG" =~ ^(stable|[0-9]+\.[0-9]{8}(\.[0-9]+)?)$ ]]; then
+      echo "Unknown option: $TAG (ujust migrate help)"
+      exit 1
+    fi
+
+    sudo /usr/libexec/bazzite-mx-migrate "$TAG"
 
 # Install this user's development runtimes with mise. Options: status | install
 [group("development")]

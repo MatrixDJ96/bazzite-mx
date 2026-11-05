@@ -179,7 +179,7 @@ check_origin() {
         report_ok "origin tag is stable (updates follow the moving alias)"
     else
         report_fail "origin tag is $origin_tag, not stable (a dated tag never updates):" \
-            "ujust migrate apply stable"
+            "ujust migrate stable"
     fi
 }
 
@@ -194,8 +194,7 @@ check_no_mutations() {
     if [ -z "$layered" ]; then
         report_ok "no layered, local or removed packages and no modules requested"
     else
-        report_fail "rpm-ostree mutations in the origin: $layered (ujust migrate removes" \
-            "package requests; an override needs sudo rpm-ostree override reset --all)"
+        report_fail "rpm-ostree mutations in the origin: $layered (ujust migrate removes them)"
     fi
 
     regenerate=$(jq -r '."regenerate-initramfs" // false' <<< "$BOOTED")

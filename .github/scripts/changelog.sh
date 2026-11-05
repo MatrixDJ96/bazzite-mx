@@ -4,7 +4,7 @@
 #
 # Sections: the release line, the previous release, the major packages, the
 # commits since it, the packages changed on every flavour and on the NVIDIA ones,
-# and how to rebase, through `ujust migrate apply` since bazzite-rollback-helper
+# and how to rebase, through `ujust migrate` since bazzite-rollback-helper
 # rebases to ghcr.io/ublue-os. The previous release is the newest in
 # `gh release list`, not a manifest's RepoTags, which an orphan tag would hijack.
 #
@@ -633,9 +633,9 @@ write_rebase() {
 For current users, type the following to rebase to this version:
 \`\`\`bash
 # For this branch (if latest):
-ujust migrate apply stable
+ujust migrate stable
 # For this specific image:
-ujust migrate apply ${RELEASE_TAG}
+ujust migrate ${RELEASE_TAG}
 \`\`\`
 EOF
 }
@@ -1549,9 +1549,9 @@ self_test_release() {
 For current users, type the following to rebase to this version:
 ```bash
 # For this branch (if latest):
-ujust migrate apply stable
+ujust migrate stable
 # For this specific image:
-ujust migrate apply 44.20261009
+ujust migrate 44.20261009
 ```
 EOF
         )" ]; then

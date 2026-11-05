@@ -151,15 +151,14 @@ in `# form: literal`. The rest is checked by hand at review, like § Prose.
   commands after, `main` last.
 
   ```bash
-  # before: the steps of step_6_fstab_ntfs_errors run on as one block
+  # before: the steps of rewrite_fstab run on as one block
   # after, bazzite-mx-migrate
-      local rewritten rows_left
+      local rewritten added
 
-      if [ -z "$NTFS_ROWS" ]; then
-          return 0
-      fi
+      rewritten=$(mktemp)
+      add_ntfs_errors_option /etc/fstab "$rewritten"
 
-      echo "step 6: ntfs rows of fstab without an errors= option:"
+      if ! fstab_verify_answers /etc/fstab || ! fstab_verify_answers "$rewritten"; then
   ```
 
 - **A line stops at 100 columns.** A long command breaks after `\` with one argument per line;
@@ -236,26 +235,21 @@ in `# form: literal`. The rest is checked by hand at review, like § Prose.
   # before: one self_test holding every fixture and assertion inline
   # after, bazzite-mx-migrate: self_test calls checks named for what they prove
   self_test_fstab_rewrite "$dir"
-  self_test_fstab_verify_compares_errors "$dir"
-  self_test_write_refuses "$dir"
-  …
-  self_test_plan_lists_the_steps "$dir/fx"
-  …
-  self_test_unconfirmed_steps_change_nothing "$dir"
+  self_test_fstab_verify "$dir"
+  self_test_detection "$dir"
+  self_test_changes "$dir"
+  self_test_gates "$dir"
   ```
 
 - **Output to the user is a complete sentence**: what happened, and for a failure what to do
   next. The prefixes a contract reads (`OK:`, `FAIL:`, `ERROR:`, `self-test ok`) stay.
 
   ```bash
-  # before, bazzite-mx-migrate
-  abort "step 5 not confirmed; the pending deployment keeps the changes made so far"
-  # after, describe_what_the_run_changed and abort_declined_step
-  next="reboot into it, or rpm-ostree cleanup -p, then apply again"
-  …
-  echo "what the run changed stands (${changed#, }): $next"
-  …
-  abort "step $step not confirmed; $(describe_what_the_run_changed)"
+  # before
+  abort "pending deployment"
+  # after, bazzite-mx-migrate
+  abort "a deployment waits for the next boot ($PENDING)." \
+      "Reboot, or discard it with sudo rpm-ostree cleanup -p, then run ujust migrate again."
   ```
 
 A rewrite for form proves behaviour unchanged: the same arguments, the same exit status, the

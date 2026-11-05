@@ -40,7 +40,7 @@ unsigned transport. The recipe moves the host onto the signed one afterwards.
 ```bash
 sudo rpm-ostree rebase ostree-unverified-registry:ghcr.io/matrixdj96/bazzite-mx:stable
 systemctl reboot
-ujust migrate apply
+ujust migrate
 systemctl reboot
 ujust verify-host
 ```
@@ -48,9 +48,8 @@ ujust verify-host
 On an NVIDIA machine, name `bazzite-mx-nvidia-open` (Turing and newer) or `bazzite-mx-nvidia`
 (Maxwell, Pascal and Volta) in the first line; an older GPU stays on `bazzite-mx`.
 
-Step 2 of `migrate apply` (the update timer stop) runs without asking; every other step that
-changes the host asks first. The steps and the checks are in
-[`docs/migration.md`](docs/migration.md).
+`migrate` lists the changes it would make to the host and asks once before making them. The
+steps and the checks are in [`docs/migration.md`](docs/migration.md).
 
 ## Verify an image
 

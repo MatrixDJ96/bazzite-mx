@@ -178,7 +178,7 @@ check_verify_host_on_unmigrated_fixture() {
     local fixture=$good/../bad
     local origin="ostree-unverified-registry:ghcr.io/matrixdj96/$image:44.20260831"
     local output fail_lines unreported
-    local mutations='1password firefox sddm-0.21-1.fc44.x86_64 teams-for-linux'
+    local mutations='1password firefox mesa-dri-drivers sddm-0.21-1.fc44.x86_64 teams-for-linux'
     local expected_fails=(
         'bootc status reports'
         'origin is not ostree-image-signed'
@@ -199,6 +199,7 @@ check_verify_host_on_unmigrated_fixture() {
         "requested-packages":["1password"],"requested-local-packages":["teams-for-linux"],
         "requested-base-removals":["firefox"],
         "requested-base-local-replacements":["sddm-0.21-1.fc44.x86_64"],
+        "requested-base-remote-replacements":[["repo=copr:x",["mesa-dri-drivers"]]],
         "regenerate-initramfs":true,"initramfs-args":["--hostonly"]' 44.20260831
     jq 'del(.transports.docker["ghcr.io/matrixdj96"])' "$good/etc/containers/policy.json" \
         > "$fixture/etc/containers/policy.json"

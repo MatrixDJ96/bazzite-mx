@@ -41,7 +41,7 @@ greeting (`/usr/share/ublue-os/motd/env.sh`) prints as the host's image and `che
 asserts, so an unrewritten file calls the host `ghcr.io/ublue-os/bazzite`. Bazzite's rollback
 helper reads `image-name` too: `brh rebase <tag>` builds `ghcr.io/ublue-os/<image-name>:<tag>`,
 a repository that does not exist for this image, so a dated release of this image is reached
-with `ujust migrate apply <tag>` instead. The image a host pulls from at `bootc upgrade` is the
+with `ujust migrate <tag>` instead. The image a host pulls from at `bootc upgrade` is the
 deployment's origin, which `bootc status` prints. The build writes `image-name`,
 `image-vendor`, `image-ref`, `version`, `version-pretty` and `base-version` there,
 `base-version` keeping the base's own `version`; `VARIANT_ID` and `IMAGE_ID` in
@@ -667,21 +667,19 @@ differs from ours and an override whose recipe the base no longer has; its test 
 defined in two files.
 
 `verify-host` answers whether a host is where the image expects it. The name is ours, after
-Bazzite's `verify-image`, which only rewrites the transport for `ghcr.io/ublue-os`. `migrate`
-brings a host to the state this image expects, in one pending deployment, with a confirmation
-per mutating step except step 2, which stops `uupd.timer` unasked, and the reboot left to the
-user. It uses rpm-ostree rather than `bootc switch`: rpm-ostree is visible and produces the same
-origin. What both check and do is
+Bazzite's `verify-image`, which only rewrites the transport for `ghcr.io/ublue-os`. `migrate` brings
+a host to the state this image expects, in one pending deployment, with one confirmation for the
+listed changes and the reboot left to the user. It uses rpm-ostree rather than `bootc switch`:
+rpm-ostree is visible and produces the same origin. What both check and do is
 [`migration.md`](migration.md). `setup-dev` runs `mise ls` for status or `mise install` after
-seeding the config from `/etc/skel`. `install-jetbrains-toolbox` replaces Bazzite's Homebrew
-cask with JetBrains' documented Linux install: read the release feed, download the tarball,
-compare its sha256 with the feed's checksum file, unpack and start it once. The build of a
-Toolbox already unpacked there is read from the tarball's own `bin/build.txt` (the feed's
-`build` field), so a Toolbox of the same build is left alone whoever put it there
-([`gotchas.md`](gotchas.md) § A private marker does not identify an installation the recipe did
-not make). The Portal still offers JetBrains Toolbox through the Homebrew cask (its
-`jetbrains-toolbox-linux` entry); the recipe is the image's route, and using both leaves two
-installs.
+seeding the config from `/etc/skel`. `install-jetbrains-toolbox` replaces Bazzite's Homebrew cask
+with JetBrains' documented Linux install: read the release feed, download the tarball, compare its
+sha256 with the feed's checksum file, unpack and start it once. The build of a Toolbox already
+unpacked there is read from the tarball's own `bin/build.txt` (the feed's `build` field), so a
+Toolbox of the same build is left alone whoever put it there ([`gotchas.md`](gotchas.md) § A private
+marker does not identify an installation the recipe did not make). The Portal still offers JetBrains
+Toolbox through the Homebrew cask (its `jetbrains-toolbox-linux` entry); the recipe is the image's
+route, and using both leaves two installs.
 
 Files: `build_files/70-justfile.sh` and its test,
 `system_files/usr/share/ublue-os/just/95-bazzite-mx.just`, and the helpers

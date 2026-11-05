@@ -5,7 +5,7 @@
 # sourcing script sets its own `set` options.
 #
 # FIXTURE=<dir>: files read under <dir>, command outputs under <dir>/cmd/, for
-# the smoke tests; fstab_verify_output ignores it (migrate apply runs under
+# the smoke tests; fstab_verify_output ignores it (migrate runs under
 # sudo, which drops FIXTURE).
 # Output contract: `ERROR: <reason>` on stderr is what the recipes and the
 # tests read.
@@ -182,7 +182,7 @@ layered_requests() {
     local request_lists='[(.packages // []), (."requested-packages" // []),
         (."requested-local-packages" // []), (."requested-local-fileoverride-packages" // []),
         (."requested-base-local-replacements" // []), (."requested-base-removals" // []),
-        (."requested-modules" // [])]'
+        (."requested-base-remote-replacements" // [] | map(.[1])), (."requested-modules" // [])]'
 
     jq -r "$request_lists | flatten | unique | join(\" \")" <<< "$deployment_json"
 }

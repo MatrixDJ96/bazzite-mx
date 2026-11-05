@@ -105,7 +105,7 @@ release.yml   workflow_dispatch: reason (becomes the run name), promote_stable (
               generated line, major packages from the build jobs' packages files and the
               previous release's packages.json, the SBOMs when either is missing, commits since
               the previous release's revision, then All Images and Nvidia Images, one package
-              per new version, and how to rebase, through ujust migrate apply)
+              per new version, and how to rebase, through ujust migrate)
               -> gh release create --latest, packages.json attached for the next release
 ```
 
