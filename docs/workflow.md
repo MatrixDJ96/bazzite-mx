@@ -106,7 +106,7 @@ release.yml   workflow_dispatch: reason (becomes the run name), promote_stable (
               previous release's packages.json, the SBOMs when either is missing, commits since
               the previous release's revision, then All Images and Nvidia Images, one package
               per new version, and how to rebase, through ujust migrate)
-              -> gh release create --latest, packages.json attached for the next release
+              -> softprops/action-gh-release, latest, packages.json attached for the next release
 ```
 
 Dispatch:
@@ -224,7 +224,7 @@ for public data: without one every row reads `UNKNOWN`.
 | Class      | Item                                                                | Verdicts                    |
 | ---------- | ------------------------------------------------------------------- | --------------------------- |
 | `action`   | each `uses: owner/repo[/path]@<sha> # <version>`                    | `OK`, `STALE`, `UNKNOWN`    |
-| `binary`   | `cosign-release`, `syft-version`, `ORAS_VERSION`, `CHUNKAH_VERSION` | `OK`, `STALE`, `UNKNOWN`    |
+| `binary`   | `cosign-release`, `syft-version`, `CHUNKAH_VERSION`                 | `OK`, `STALE`, `UNKNOWN`    |
 | `runner`   | each `runs-on:` label against the `actions/runner-images` README    | `OK`, `STALE`, `UNKNOWN`    |
 | `workflow` | the state of every workflow of the repository                       | `OK`, `DISABLED`, `UNKNOWN` |
 | `issue`    | every `owner/repo#N` cited in a workflow comment                    | `OK`, `CLOSED`, `UNKNOWN`   |
@@ -240,9 +240,11 @@ and of the docs that name it, the `CI_SHFMT_MINOR` of `lint-edit.sh`, the `44.` 
 examples, and the `$releasever` repositories under `system_files/etc/yum.repos.d/`, Docker
 first, whose `repomd.xml` for the new release has to answer before the base moves.
 
-The `cosign-release` row is the one a bump is read before applying: v3.1.3 already deprecates
+Four rows stay `STALE` on purpose, at the values Bazzite's `.github/workflows/build.yml` and
+`build.py` pin: `syft-version`, `cosign-release`, `CHUNKAH_VERSION` and the
+`sigstore/cosign-installer` action. After an `--apply`, put them back to Bazzite's values. A
+`cosign-release` bump is also read before it lands: v3.1.3 already deprecates
 `--new-bundle-format`, and the signatures a host verifies are the layout that flag turned off
-([`gotchas.md`](gotchas.md) § cosign 3.1.3 deprecates the flag the signature layout needs).
-v3.1.4 also deprecates `--use-signing-config`, which every sign step passes
-(sigstore/cosign#5056 in its release notes). The row goes `OK` to `STALE` on the version that
-removes either like any other.
+([`gotchas.md`](gotchas.md) § cosign 3.1.3 deprecates the flag the signature layout needs), and
+v3.1.4 deprecates `--use-signing-config`, which every sign step passes (sigstore/cosign#5056 in
+its release notes).

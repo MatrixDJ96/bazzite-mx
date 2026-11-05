@@ -725,7 +725,7 @@ Files: `build_files/95-clean-stage.sh` and its test.
 chunkah lays out the main profile's image by component: a packaged file by its RPM, a path carrying
 the `user.component` xattr by that value, which wins over the rpmdb and over the xattr of a parent
 directory, and `user.update-interval` tells it how often the component changes
-(github.com/coreos/chunkah, README, "Customizing the layers"; `src/components/xattr.rs` at v0.7.1).
+(github.com/coreos/chunkah, README, "Customizing the layers"; `src/components/xattr.rs` at v0.7.0).
 Bazzite tags its own unpackaged files that way in `build_files/finalize.sh` (`assign_chunk`,
 8df8ba17, d5e29d55, d3495a95), and the base's xattrs reach our build: the hooks and recipes we add
 and the `image-info.json` we rewrite under `/usr/share/ublue-os` would ride in its `ublue-os` and
@@ -772,9 +772,9 @@ separate job verifies the image before any tag points at it. `:stable` moves in 
 behind two switches, or on a dispatch of `promote.yml` that verifies again, where the family's
 moves on every run.
 
-**Fewer actions, more bash.** `nick-fields/retry`, `softprops/action-gh-release`, `setup-oras`
-([`gotchas.md`](gotchas.md) § `setup-oras` installs only the ORAS versions embedded in its own
-release) and renovate are replaced by scripts of ours with `--self-test`s. Bazzite's version
+**No renovate, a stricter version step.** Renovate is replaced by `refresh-pins.sh` and its
+`--self-test`; the push retry, ORAS and the release use Bazzite's actions (`nick-fields/retry`,
+`oras-project/setup-oras`, `softprops/action-gh-release`). Bazzite's version
 step swallows its tag probe with `|| true`; ours stops on a probe that fails. bazzite-dx reads
 the base's version label; `watch-upstream.sh` compares base digests, which also move on a
 retag. The family is split on freeing disk: Bazzite and bazzite-dx run
@@ -790,9 +790,8 @@ v9 fails on `ubuntu-26.04`). The build job runs `jlumbroso/free-disk-space` sinc
 45 base, whose `bazzite-nvidia-open` build ran out of space once, with Bazzite's options
 (e0700423; [`gotchas.md`](gotchas.md) § The Fedora 45 build can run out of disk on
 `ubuntu-26.04`).
-Bazzite pins chunkah by digest (`build.py`, `quay.io/coreos/chunkah:latest@sha256:…`); the build
-job pulls the tag `CHUNKAH_VERSION`, which `refresh-pins.sh` reports, and verifies its signature
-first.
+Bazzite pins chunkah by digest (`build.py`); the build job pulls the same version by tag and
+verifies its signature first.
 
 Files: `.github/workflows/` and `.github/scripts/`, one owner per script
 ([`architecture.md`](architecture.md)).

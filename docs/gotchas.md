@@ -8,7 +8,7 @@ Contents, in the order of the entries: torn writeback on 6.17-azure · just dupl
 ujust.sh readonly names · kvmfr qemu.conf edit · kvmfr under sudo · grep -v on an empty set ·
 command | grep -q · modinfo /lib/modules path · modprobe -n -v on a loaded module · podman build
 labels · stub-resolv.conf left in the image · remove-unwanted-software v9 · Fedora 45 out of disk ·
-skopeo and containers-storage · workflow off the default branch · setup-oras versions · cosign
+skopeo and containers-storage · workflow off the default branch · cosign
 verify and referrers · inactive package request · 1Password BrowserSupport gid · local RPM blocks
 the rebase · private install marker · mise dotnet SDK · rollback onto a pruned tag ·
 ghcr-cleanup-action patterns · kbuild fragment compiles nothing · ntfs3 claims fs-ntfs on 6.18 ·
@@ -166,16 +166,6 @@ a branch (measured 2026-09-02). `gh workflow run release.yml --ref <branch>` res
 the same way. Runs of such a workflow are read from the repository-wide endpoint filtered on
 `.path` (`watch-upstream.sh`), and a workflow is dispatched on a branch only once its file is
 on the default branch too.
-
-## `setup-oras` installs only the ORAS versions embedded in its own release
-
-`oras-project/setup-oras` v2.0.1 resolves `version` against a list shipped in the action,
-`src/lib/data/releases.json`, which runs from 1.0.0 to 1.3.3 (re-read 2026-09-06 at v2.0.1).
-Any other version fails with "official ORAS CLI releases does not contain version 1.3.4"
-(measured 2026-09-03, after the push and the signature of `:staging`). v2.0.2 added 1.3.4 on
-2026-09-29, 33 days after ORAS released it (read 2026-10-01). `install-oras.sh` installs from
-the ORAS release directly, the tarball refused unless its sha256 matches the release's
-checksums file.
 
 ## `cosign verify --key` reads a certificate-signed referrer before the `.sig`
 

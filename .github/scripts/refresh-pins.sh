@@ -31,8 +31,7 @@ WORKFLOWS=${WORKFLOWS:-.github/workflows}
 FIXTURE_DIR=${FIXTURE_DIR:-}
 
 # The binaries the workflows install: <workflow key>=<owner/repo of the binary>.
-BINARIES="cosign-release=sigstore/cosign syft-version=anchore/syft ORAS_VERSION=oras-project/oras
-CHUNKAH_VERSION=coreos/chunkah"
+BINARIES="cosign-release=sigstore/cosign syft-version=anchore/syft CHUNKAH_VERSION=coreos/chunkah"
 
 PINNED_USES='uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(/[A-Za-z0-9_./-]+)?@[0-9a-f]{40}( *# *[^ ]+)?'
 
@@ -166,8 +165,7 @@ check_actions() {
     done
 }
 
-# check_binaries: one row per installed binary against the latest release,
-# compared without the v that ORAS_VERSION lacks.
+# check_binaries: one row per installed binary against the latest release.
 check_binaries() {
     local pair key repo pinned latest tag latest_sha date
 
@@ -185,7 +183,7 @@ check_binaries() {
 
         read -r tag latest_sha date <<< "$latest"
 
-        if [ "${pinned#v}" = "${tag#v}" ]; then
+        if [ "$pinned" = "$tag" ]; then
             print_row binary "$key ($repo)" "$pinned" "$tag" OK "$date"
         else
             print_row binary "$key ($repo)" "$pinned" "$tag" STALE "latest $tag ($date)"
@@ -325,9 +323,9 @@ apply_actions() {
 }
 
 # apply_binaries: every installed binary pinned behind the latest release is
-# rewritten to it, in the form the workflow already uses (with or without v).
+# rewritten to it.
 apply_binaries() {
-    local pair key repo pinned latest tag latest_sha date new
+    local pair key repo pinned latest tag latest_sha date
 
     for pair in $BINARIES; do
         key=${pair%%=*}
@@ -341,18 +339,12 @@ apply_binaries() {
 
         read -r tag latest_sha date <<< "$latest"
 
-        if [ "${pinned#v}" = "${tag#v}" ]; then
+        if [ "$pinned" = "$tag" ]; then
             continue
         fi
 
-        new=$tag
-
-        if [[ "$pinned" != v* ]]; then
-            new=${tag#v}
-        fi
-
-        sed -i -E "s|^( *${key}: *\"?)${pinned//./\\.}(\"?)|\1${new}\2|" "$WORKFLOWS"/*.yml
-        echo "applied: ${key} ${pinned} -> ${new}"
+        sed -i -E "s|^( *${key}: *\"?)${pinned//./\\.}(\"?)|\1${tag}\2|" "$WORKFLOWS"/*.yml
+        echo "applied: ${key} ${pinned} -> ${tag}"
         REWRITTEN=$((REWRITTEN + 1))
     done
 }
@@ -368,8 +360,8 @@ apply() {
 # --- self-test ----------------------------------------------------------------
 
 # self_test_write_workflow <dir>: one workflow with a pin per verdict the table
-# can print: stale, current, drifted-comment and vanished actions, four binary
-# pins, one current without a v and one without a readable release, a listed, a
+# can print: stale, current, drifted-comment and vanished actions, three binary
+# pins, one stale, one current and one without a readable release, a listed, a
 # deprecated and an unlisted runner and a cited issue.
 self_test_write_workflow() {
     local dir=$1
@@ -389,8 +381,7 @@ jobs:
           syft-version: v1.0.0
       - uses: acme/tool@5555555555555555555555555555555555555555 # v0.1.0
         env:
-          ORAS_VERSION: 0.9.0
-          tool-version: 0.1.0
+          tool-version: v0.1.0
   y:
     runs-on: ubuntu-18.04
     # see acme/lib#7
@@ -428,7 +419,7 @@ self_test_write_release() {
 # self_test_write_fixtures <dir>: the API answers behind the workflow: acme/old
 # has a newer release, acme/current's annotated tag resolves to its pin,
 # acme/drift's release is its pinned sha under a newer tag than its comment,
-# acme/vanished and syft have no release, cosign and oras have newer ones, the
+# acme/vanished and syft have no release, cosign has a newer one, the
 # tool binary is at acme/tool's release, the README lists ubuntu-26.04 as
 # preview, ubuntu-24.04 plainly and ubuntu-18.04 as deprecated, one workflow is
 # active and one disabled, and the cited issue is closed.
@@ -460,8 +451,6 @@ self_test_write_fixtures() {
 
     self_test_write_release "$dir" sigstore/cosign v3.1.3 2026-08-06 \
         '{"type":"commit","sha":"11926fa5bbbbde47e88fc006b625a17769b743b2"}'
-    self_test_write_release "$dir" oras-project/oras v1.0.0 2026-08-27 \
-        '{"type":"commit","sha":"6666666666666666666666666666666666666666"}'
 
     self_test_write_fixture "$dir" repos/actions/runner-images/readme \
         "{\"content\":\"$(printf '%s\n' "$readme_rows" | base64 -w0)\"}"
@@ -543,7 +532,6 @@ self_test_check() {
     self_test_expect_row "$table" '^action +\| acme/drift@4444.* \| STALE +\| comment says '
     self_test_expect_row "$table" '^action +\| acme/vanished@3333.* \| UNKNOWN '
     self_test_expect_row "$table" '^binary +\| cosign-release .* \| v3.1.2 +\| v3.1.3 +\| STALE '
-    self_test_expect_row "$table" '^binary +\| ORAS_VERSION .* \| 0.9.0 +\| v1.0.0 +\| STALE '
     self_test_expect_row "$table" '^binary +\| syft-version .* \| UNKNOWN '
     self_test_expect_row "$table" \
         '^runner +\| ubuntu-26.04 .* \| OK +\| listed, still marked preview'
@@ -553,7 +541,7 @@ self_test_check() {
     self_test_expect_row "$table" \
         '^workflow +\| .github/workflows/b.yml .* \| DISABLED .*/actions/workflows/b.yml/enable\)$'
     self_test_expect_row "$table" '^issue +\| acme/lib#7 .* \| CLOSED '
-    self_test_expect_row "$table" '^binary +\| tool-version .* \| 0.1.0 +\| v0.1.0 +\| OK '
+    self_test_expect_row "$table" '^binary +\| tool-version .* \| v0.1.0 +\| v0.1.0 +\| OK '
     self_test_expect_row "$table" '^runner +\| ubuntu-24.04 .* \| OK +\| listed$'
     self_test_expect_row "$table" '^workflow +\| .github/workflows/a.yml .* \| OK +\| active$'
 }
@@ -571,7 +559,7 @@ self_test_expect_pin() {
 }
 
 # self_test_apply <dir>: apply rewrites the stale and drifted actions and the
-# two binaries, in the form each already uses, and spares the three current pins
+# stale binary, and spares the three current pins
 # and the two whose release is unreadable (known-bad: rewritten to an empty sha
 # or version). The count catches a rewritten current pin, which reads the same.
 self_test_apply() {
@@ -588,16 +576,14 @@ self_test_apply() {
         "did not rewrite a version comment behind its tag"
     self_test_expect_pin "$workflow" 'cosign-release: v3.1.3' \
         "did not rewrite the binary version"
-    self_test_expect_pin "$workflow" 'ORAS_VERSION: 1.0.0' \
-        "did not keep the v-less form of the oras version"
     self_test_expect_pin "$workflow" \
         'acme/vanished@3333333333333333333333333333333333333333 # v3.0.0' \
         "rewrote an action whose release is unreadable"
     self_test_expect_pin "$workflow" 'syft-version: v1.0.0' \
         "rewrote a binary whose release is unreadable"
 
-    if [ "$REWRITTEN" -ne 4 ]; then
-        fail_self_test "apply rewrote $REWRITTEN pins, not the 4 behind their release"
+    if [ "$REWRITTEN" -ne 3 ]; then
+        fail_self_test "apply rewrote $REWRITTEN pins, not the 3 behind their release"
     fi
 }
 
@@ -626,8 +612,8 @@ self_test() {
         fail_self_test "the no-argument form is not --check: ${output//$'\n'/ }"
     fi
 
-    echo "self-test ok: 15 verdicts on fixtures (STALE, OK, UNKNOWN, DISABLED, CLOSED)," \
-        "apply rewrote 4 pins and spared 5, a WORKFLOWS without workflows refused"
+    echo "self-test ok: 14 verdicts on fixtures (STALE, OK, UNKNOWN, DISABLED, CLOSED)," \
+        "apply rewrote 3 pins and spared 5, a WORKFLOWS without workflows refused"
 }
 
 # --- main ---------------------------------------------------------------------

@@ -492,10 +492,10 @@ Where each one runs:
   tags that move: `:staging` at every release run's push, `:stable` only through the gate or
   `promote.yml`.
 - Binaries the workflows install take their version from an input or an env var
-  (`cosign-release`, `syft-version`, `ORAS_VERSION`, `CHUNKAH_VERSION`), never "latest", and
-  `refresh-pins.sh` reads exactly those four names.
-- Retries are loops in the step or the tool's own flag (`skopeo inspect --retry-times 3`),
-  never an action: one pin fewer for a `for` loop.
+  (`cosign-release`, `syft-version`, `CHUNKAH_VERSION`), never "latest", and `refresh-pins.sh`
+  reads exactly those three names; ORAS is the default of the pinned `setup-oras`, as in Bazzite.
+- A retry is the tool's own flag (`skopeo inspect --retry-times 3`), a loop in a script, or
+  `nick-fields/retry` on the push to GHCR, where Bazzite uses it.
 - A cron's minute sits off `:00`, because the `schedule` event is delayed at the start of every
   hour (GitHub docs). A scheduled workflow never publishes on its own: it dispatches
   `release.yml`, which keeps its single trigger and puts the reason in its run name. A scheduled
