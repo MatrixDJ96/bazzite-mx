@@ -10,7 +10,7 @@ on:
     inputs:
       reason:
         description: >-
-          Why this release runs (manual, weekly, upstream:<12 hex per base>); shown as the run name
+          Why this release runs (manual, weekly, upstream <base version>); shown as the run name
         type: string
         required: true
       promote_stable:

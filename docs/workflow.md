@@ -181,7 +181,8 @@ run red, with no dispatch; a blank release list counts as no release, as `change
 - no release run is queued or running;
 - no release with the same reason started in the last 24 hours.
 
-The reason it passes is `upstream:<12 hex per base>`.
+The reason it passes is `upstream <base version>`, the distinct versions of the three bases
+joined by `+`.
 
 The watcher fails closed. A base that cannot be resolved, an image that cannot be inspected or
 a `:stable` without the label make the run red and dispatch nothing; the next cron retries. A

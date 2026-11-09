@@ -9,7 +9,7 @@
 #
 # Usage: watch-upstream.sh check
 #          one line per flavour, then verdict=current|stale|absent and
-#          reason=upstream:<12 hex per base digest, joined by +>
+#          reason=upstream <base version, distinct ones joined by +>
 #        watch-upstream.sh decide --verdict <v> --reason <r> --promote-var <p>
 #                                 [--dry-run]
 #          dispatch=true|false: true on a stale verdict with PROMOTE_STABLE set
@@ -109,9 +109,9 @@ ours_inspect() {
 
 # --- the verdict --------------------------------------------------------------
 
-# read_base <flavour> <fixture dir>: sets image_name and base_digest in the
-# caller from the flavour's base coords; status 1 with the UNKNOWN reason when
-# they cannot be read.
+# read_base <flavour> <fixture dir>: sets image_name, base_digest and
+# base_version in the caller from the flavour's base coords; status 1 with the
+# UNKNOWN reason when they cannot be read.
 read_base() {
     local flavour=$1
     local dir=$2
@@ -124,6 +124,7 @@ read_base() {
 
     image_name=$(sed -n 's/^image_name=//p' <<< "$coords")
     base_digest=$(sed -n 's/^base_digest=//p' <<< "$coords")
+    base_version=$(sed -n 's/^base_version=//p' <<< "$coords")
 }
 
 # compare_flavour <flavour> <image name> <base digest> <fixture dir>: prints the
@@ -174,11 +175,11 @@ compare_flavour() {
 
 # check <fixture dir>: one line per flavour, then the verdict (stale when any
 # flavour is, absent when every one is, current otherwise) and the reason built
-# from the three base digests; status 1 on the first UNKNOWN flavour.
+# from the base versions; status 1 on the first UNKNOWN flavour.
 check() {
     local dir=$1
-    local flavour image_name base_digest flavour_state verdict
-    local stale=0 absent=0 total=0 short_digests=""
+    local flavour image_name base_digest base_version flavour_state verdict
+    local stale=0 absent=0 total=0 versions=""
 
     for flavour in $FLAVOURS; do
         total=$((total + 1))
@@ -187,7 +188,7 @@ check() {
             return 1
         fi
 
-        short_digests="${short_digests:+$short_digests+}${base_digest:7:12}"
+        versions+="$base_version"$'\n'
 
         if ! compare_flavour "$flavour" "$image_name" "$base_digest" "$dir"; then
             return 1
@@ -212,7 +213,7 @@ check() {
     fi
 
     emit "verdict=$verdict"
-    emit "reason=upstream:$short_digests"
+    emit "reason=upstream $(sort -u <<< "${versions%$'\n'}" | paste -sd+)"
 }
 
 # --- the decision -------------------------------------------------------------
@@ -460,12 +461,12 @@ self_test_write_ours() {
 self_test_write_fixtures() {
     local dir=$1
 
-    printf 'image_name=bazzite-mx\nbase_digest=%s\n' "$SELF_TEST_DIGEST_A" \
-        > "$dir/base-bazzite.env"
-    printf 'image_name=bazzite-mx-nvidia-open\nbase_digest=%s\n' "$SELF_TEST_DIGEST_B" \
-        > "$dir/base-bazzite-nvidia-open.env"
-    printf 'image_name=bazzite-mx-nvidia\nbase_digest=%s\n' "$SELF_TEST_DIGEST_C" \
-        > "$dir/base-bazzite-nvidia.env"
+    printf 'image_name=bazzite-mx\nbase_digest=%s\nbase_version=45.20261105\n' \
+        "$SELF_TEST_DIGEST_A" > "$dir/base-bazzite.env"
+    printf 'image_name=bazzite-mx-nvidia-open\nbase_digest=%s\nbase_version=45.20261105\n' \
+        "$SELF_TEST_DIGEST_B" > "$dir/base-bazzite-nvidia-open.env"
+    printf 'image_name=bazzite-mx-nvidia\nbase_digest=%s\nbase_version=45.20261105.1\n' \
+        "$SELF_TEST_DIGEST_C" > "$dir/base-bazzite-nvidia.env"
 
     self_test_write_ours "$dir/ours-bazzite-mx.json" "$SELF_TEST_DIGEST_A"
     self_test_write_ours "$dir/ours-bazzite-mx-nvidia-open.json" "$SELF_TEST_DIGEST_B"
@@ -492,15 +493,15 @@ self_test_expect_check() {
 }
 
 # self_test_verdicts <dir>: current images give current and the reason from the
-# three base digests; one stale image gives stale with its line; one absent
+# distinct base versions; one stale image gives stale with its line; one absent
 # image still gives current; three absent images give absent.
 self_test_verdicts() {
     local dir=$1
 
     self_test_expect_check "$dir" '^verdict=current$' \
         "current images not reported current" "on current images"
-    self_test_expect_check "$dir" '^reason=upstream:9556db65991d\+c765d566dfbd\+ca1d0b10df80$' \
-        "reason not derived from the base digests" "on current images"
+    self_test_expect_check "$dir" '^reason=upstream 45\.20261105\+45\.20261105\.1$' \
+        "reason not derived from the distinct base versions" "on current images"
 
     self_test_write_ours "$dir/ours-bazzite-mx.json" "$SELF_TEST_DIGEST_NEW"
     self_test_expect_check "$dir" '^verdict=stale$' \
@@ -643,7 +644,7 @@ self_test_runs_read_failure() {
 
     REFUSED=$((REFUSED + 1))
 
-    if output=$(run_decide --verdict stale --reason upstream:aaaa --promote-var true 2>&1); then
+    if output=$(run_decide --verdict stale --reason 'upstream 45.1' --promote-var true 2>&1); then
         fail_self_test "decide answered on runs it could not read: ${output//$'\n'/ }"
     fi
 
@@ -705,7 +706,7 @@ self_test_expect_decision() {
 self_test_decisions() {
     local output
 
-    if ! output=$(decide stale upstream:aaaa true '[]' false); then
+    if ! output=$(decide stale 'upstream 45.1' true '[]' false); then
         fail_self_test "decide failed on a clean slate"
     fi
 
@@ -714,21 +715,21 @@ self_test_decisions() {
     fi
 
     self_test_expect_decision false "verdict current dispatched" \
-        current upstream:aaaa true '[]' false
+        current 'upstream 45.1' true '[]' false
     self_test_expect_decision false "an unset PROMOTE_STABLE dispatched" \
-        stale upstream:aaaa '' '[]' false
+        stale 'upstream 45.1' '' '[]' false
     self_test_expect_decision false "PROMOTE_STABLE=false dispatched" \
-        stale upstream:aaaa false '[]' false
+        stale 'upstream 45.1' false '[]' false
     self_test_expect_decision false "a running release did not coalesce" \
-        stale upstream:aaaa true "$(self_test_run 'Release: weekly' in_progress)" false
+        stale 'upstream 45.1' true "$(self_test_run 'Release: weekly' in_progress)" false
     self_test_expect_decision false "a finished run with the same reason did not coalesce" \
-        stale upstream:aaaa true \
-        "$(self_test_run 'Release: upstream:aaaa' completed)" false
+        stale 'upstream 45.1' true \
+        "$(self_test_run 'Release: upstream 45.1' completed)" false
     self_test_expect_decision true "a run with another reason blocked the dispatch" \
-        stale upstream:aaaa true \
-        "$(self_test_run 'Release: upstream:bbbb' completed)" false
+        stale 'upstream 45.1' true \
+        "$(self_test_run 'Release: upstream 45.2' completed)" false
 
-    output=$(decide stale upstream:aaaa true '[]' true)
+    output=$(decide stale 'upstream 45.1' true '[]' true)
 
     if [ "$(grep '^dispatch=' <<< "$output")" != dispatch=false ]; then
         fail_self_test "dry run dispatched: $output"
