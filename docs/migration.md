@@ -119,7 +119,7 @@ The changes, each listed only when the host needs it, in this order:
 | use the image's initramfs                | `rpm-ostree initramfs --disable`                                                         | without it bootc stays incompatible                                                       |
 | delete the ntfsplus kernel arguments     | `rpm-ostree kargs --delete` for each                                                     | a leftover of ntfsplus on the kernel command line                                         |
 | switch to the signed image               | `rpm-ostree rebase ostree-image-signed:docker://ghcr.io/matrixdj96/<image>:<tag>`        | same image, signed transport                                                              |
-| add `errors=remount-ro` to the NTFS rows | writes the new `fstab` only if `findmnt --verify` finds no new error, backup kept        | NTFSPLUS mounts a dirty or hibernated volume read-only only under it                      |
+| add `errors=remount-ro` to the NTFS rows | writes the new `fstab` only if `findmnt --verify` finds no new error, backup kept        | NTFSPLUS mounts a dirty volume read-only only under it                                    |
 | move the leftover files into the backup  | moves ntfsplus files and modules-load files naming `msi_ec` or `acpi_ec` into the backup | the image and `setup-msi` load those modules: anything else naming them is a leftover     |
 
 GHCR keeps every dated tag younger than 90 days and the 7 newest older ones
@@ -180,7 +180,7 @@ reason when a check could not run; this is the map from the line to the recipe.
 | `NVIDIA GPU present but the image is ...`                                     | wrong flavour, or a GPU no NVIDIA flavour drives: older than Maxwell, or passed to a guest   | a signed rebase, shown below; in the second case none: stay on `bazzite-mx`      |
 | `no NVIDIA GPU on the bus but the image is ...`                               | wrong flavour for the hardware                                                               | a signed rebase, shown below, to `bazzite-mx`                                    |
 | `nvidia module not loaded`                                                    | the driver did not come up, or the flavour's driver does not cover the GPU's generation      | `nvidia-smi`, `journalctl -k -b`; for that GPU, the signed rebase to its flavour |
-| `fstab: <target> is ntfs without errors=remount-ro`                           | a dirty or hibernated volume would mount writable                                            | `ujust migrate` adds the option                                                  |
+| `fstab: <target> is ntfs without errors=remount-ro`                           | a dirty volume would mount writable                                                          | `ujust migrate` adds the option                                                  |
 | `fstab: <target> uses type <type>, not ntfs`                                  | an NTFS row on neither kernel driver                                                         | edit the row: `ntfs`, or `ntfs-3g` for FUSE                                      |
 | `fstab: <target> is <type> but not mounted`                                   | on `ntfs3` usually a dirty volume, on `ntfs` a refused option or the module (Secure Boot on) | `journalctl -b \| grep ntfs`; dirty: full Windows shutdown or `ntfsfix -d <dev>` |
 | `fstab: <target> is <type> but its device <source> is absent`                 | the volume is unplugged and its row lacks `nofail`, so the boot waits for it                 | plug it in, or add `nofail` to the row                                           |
@@ -209,10 +209,11 @@ NTFSPLUS. `INFO: fstab rows on ntfs-3g` reports volumes deliberately left on FUS
 `INFO: fstab: <target> (<type>, nofail): device absent, not mounted` is an external volume that
 is not plugged in, which its `nofail` row allows for, and
 `INFO: fstab: <target> (<type>, noauto): not mounted, as the row asks` a volume mounted by hand.
-`INFO: fstab: <target> (<type>) is mounted read-only` is a dirty or hibernated volume, or one
-remounted read-only by an I/O error: for a dirty one, a full Windows shutdown or
-`ntfsfix -d <dev>`, then mount it again. Three more lines are skips: `not an MSI host`,
-`MSI host without the setup-msi opt-in` and `no NTFS entry in fstab`.
+`INFO: fstab: <target> (<type>) is mounted read-only` is a dirty or hibernated volume, one with
+errors found at mount or one remounted read-only by an I/O error, the kernel log saying which:
+for a dirty one, a full Windows shutdown or `ntfsfix -d <dev>`, then mount it again; for errors,
+chkdsk in Windows. Three more lines are skips: `not an MSI host`, `MSI host without the
+setup-msi opt-in` and `no NTFS entry in fstab`.
 
 ## Notes per class of host
 

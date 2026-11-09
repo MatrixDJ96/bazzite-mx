@@ -354,8 +354,7 @@ check_fstab_row() {
         return 0
     fi
 
-    # Under errors=continue, NTFSPLUS's default, a dirty or hibernated volume
-    # mounts writable.
+    # Under errors=continue, NTFSPLUS's default, a dirty volume mounts writable.
     if [ "$type" = ntfs ] && [[ $options != *,errors=* ]]; then
         report_fail "fstab: $target is ntfs without errors=remount-ro" \
             "(ujust migrate adds it)"
@@ -373,8 +372,9 @@ check_fstab_row() {
 
         if [[ $options != *,ro,* ]] && mount_read_only "$target"; then
             report_info "fstab: $target ($type) is mounted read-only: a dirty or hibernated" \
-                "volume, or an I/O error since the mount (journalctl -k -b | grep -i $type);" \
-                "a dirty one: a full Windows shutdown or ntfsfix -d <dev>, then mount it again"
+                "volume, errors found at mount or an I/O error since" \
+                "(journalctl -k -b | grep -i $type); a dirty one: a full Windows shutdown or" \
+                "ntfsfix -d <dev>, then mount it again; errors: chkdsk in Windows"
         fi
     elif [ "$mounted" = autofs ] && [[ $options == *,x-systemd.automount,* ]]; then
         report_ok "fstab: $target is $type, armed by systemd's automount"

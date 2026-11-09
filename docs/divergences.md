@@ -557,37 +557,74 @@ Files: `build_files/50-kmods.sh` and its test, `build_files/kmods/build-kmods.sh
 
 ## NTFSPLUS on every flavour
 
-NTFSPLUS is the from-scratch read/write NTFS driver on iomap and folios that Linux 7.1 carries
-as `fs/ntfs`, written by Namjae Jeon, the author of exFAT and ksmbd. It and `ntfs3` coexist by
-design (`fs/ntfs3/Kconfig`: `depends on !NTFS_FS || m`). The image builds the author's
-standalone packaging of the same code (`namjaejeon/linux-ntfs`) for all three flavours alike,
-under `updates/`, which depmod searches before the in-tree `kernel/` (kmod's `tools/depmod.c`),
-pinned by hand to a merge commit of `main`: `ntfs-next` is force-pushed and its tip may be
-mid-rework. The module is `ntfs.ko` and registers the filesystem type `ntfs`: "ntfsplus" is the
-project's name, never the module's nor the mount type's. Its kbuild fragment is gated on
-`CONFIG_NTFS_FS`, so `source.env` forces the symbol on the make line
-([`gotchas.md`](gotchas.md) § A kbuild fragment gated on a kernel config symbol compiles
-nothing and exits 0). Like the MSI modules, `ntfs.ko` is unsigned and the kernel refuses it
-when Secure Boot is on, so the image requires Secure Boot off: with it on, the type `ntfs` has
-no driver on 7.2, the image's module shadowing the kernel's signed one.
+NTFSPLUS is the read/write NTFS driver on iomap and folios that Linux 7.1 carries as `fs/ntfs`,
+Namjae Jeon's rework of the classic read-only `ntfs` (he also maintains Linux's exfat and ksmbd). It
+and `ntfs3` coexist by design (`fs/ntfs3/Kconfig`: `depends on !NTFS_FS || m`). The image builds our
+fork of the author's standalone packaging of the same code for all three flavours alike, under
+`updates/`, which depmod searches before the in-tree `kernel/` (kmod's `tools/depmod.c`). The fork,
+`MatrixDJ96/linux-ntfs`, keeps a branch `bazzite-mx` in three layers: the author's `ntfs-next`,
+which runs ahead of his `main` and carries most of the `ntfs:` fixes of Linux `master`, with the
+fork's CI commit on top; the `ntfs:` commits of Linux `master` that `ntfs-next` lacks,
+cherry-picked; then the fixes upstream has not merged yet. Of the Linux `master` commits, the branch
+leaves out the named-stream and file-flag features Linux 7.4 adds; 5aec1efb11ab, whose direct
+pointer into the MFT record needs `mrec_lock` held across the user copy and the folio lock; and
+dc863955bae5, which reports the birth time of a symbolic link. `ntfs: serialize resident iomap reads
+with mrec_lock` (d9e00c457d4a) is cherry-picked from Namjae Jeon's port on his `resident_mrec`
+branch (3bbdd318e5b7), narrowed to hold `mrec_lock` for the record lookup and copy alone, since
+without 5aec1efb11ab nothing reads the record after the copy; his `ntfs: release resident zero iomap
+page on old kernels` (d6409d547e82), from the same branch and not in Linux `master`, releases the
+page on every kernel, since without 5aec1efb11ab every kernel copies the resident value to a
+temporary page. `ntfs-next` carries two commits in an earlier revision than the one Linux merged,
+and the branch keeps that revision. In `ntfs: add non-resident WOF decompression` (2bef615ebf28) the
+branch's revision clears the flags above the low byte on a `system.dos_attrib` write, sparse and
+reparse included, where the merged form keeps them; the merged form also refuses a
+`system.ntfs_attrib` write that would change sparse or reparse on a WOF file. In `ntfs: use dynamic
+MFT tail reservation` (6d8c197c9992) the merged form rounds down the first record number that must
+not hold a new `$MFT` extent, where the branch rounds it up; when no tail reserve fits, the merged
+form also extends `$MFT` by one record fewer than the branch. Besides d6409d547e82, the unmerged
+fixes are Hyunchul Lee's `ntfs: accept native AF_UNIX reparse points` from namjaejeon/linux-ntfs#97,
+for the sockets Windows creates; Wahid Khan's `ntfs: do not read an index block outside
+$INDEX_ALLOCATION` (linux-fsdevel/vfs PR 3138), without which d9e00c457d4a hangs a lookup in a
+directory whose `$INDEX_ROOT` points to a missing `$INDEX_ALLOCATION`; and our `ntfs: do not treat
+an interrupted read as volume corruption`, for namjaejeon/linux-ntfs#98, where a reader killed
+mid-read turned the whole volume read-only under `errors=remount-ro`. Four more are ours too, each
+green in KVM on 6.18, 7.2 and 7.3, three of them on resident files: a read or write fault no longer
+waits for `mrec_lock` under the folio lock, where it could deadlock against the file turning
+non-resident; stores through a shared mapping reach the MFT record on writeback instead of being
+lost; a punched hole is zeroed in the record, not only in the page cache. The fourth fixes a
+truncate that fails to zero the tail of a non-resident file: on kernels before 6.19 it returned with
+`invalidate_lock` held, and the file's later truncates and faults waited forever. Every commit above
+the fork's CI commit leaves the branch once `ntfs-next` carries it. The fork's CI boots the image's
+kernels and the newest ogc one with the branch and with plain `ntfs-next`, runs the upstream tests
+on both, and moves the fork's tag `stable` to the tested tip of `bazzite-mx` when the branch fails
+nothing `ntfs-next` passes and logs no kernel warning. The build follows that tag unpinned and logs
+the commit it built, and turns on `CONFIG_NTFS_FS_WOF_COMPRESSION`, which reads the files Windows
+keeps under system compression and which no base kernel enables. The module is `ntfs.ko` and
+registers the filesystem type `ntfs`: "ntfsplus" is the project's name, never the module's nor the
+mount type's. Its kbuild fragment is gated on `CONFIG_NTFS_FS`, so `source.env` forces the symbol on
+the make line ([`gotchas.md`](gotchas.md) § A kbuild fragment gated on a kernel config symbol
+compiles nothing and exits 0). Like the MSI modules, `ntfs.ko` is unsigned and the kernel refuses it
+when Secure Boot is on, so the image requires Secure Boot off: with it on, the type `ntfs` has no
+driver on 7.2, the image's module shadowing the kernel's signed one.
 
-The 7.2 kernel of `bazzite` and `bazzite-nvidia-open` builds `fs/ntfs` as a module of the same
-name, so the image's `ntfs.ko` takes its place and the kernel's type `ntfs` stays NTFSPLUS, in
-newer code: the pin carries mainline `ntfs:` fixes that v7.2.9 lacks, among them the
-`invalidate_lock` in `ntfs_filemap_page_mkwrite` and the `$MFTMirr` write offset. The 6.18
-kernel of `bazzite-nvidia` has no `fs/ntfs`, and once it sets `CONFIG_NTFS_FS` its `ntfs3`
-registers a read-only `ntfs` type of its own and carries the `fs-ntfs` alias
-([`gotchas.md`](gotchas.md) § The 6.18 `ntfs3` claims `fs-ntfs` once the kernel sets
-`CONFIG_NTFS_FS`). Of two drivers registering one type the first loaded gets it: `ntfs3` only
-warns when the name is taken, while NTFSPLUS fails its load. On such a kernel `55-ntfsplus.sh`
-writes `/usr/lib/modprobe.d/bazzite-mx-ntfs.conf`, `alias fs-ntfs ntfs` and
-`softdep ntfs3 pre: ntfs`: an alias in the configuration wins over the aliases a module carries,
-used "as a last resort" (modprobe.d(5)), and the softdep loads NTFSPLUS before every `ntfs3`, so
-the type `ntfs` is NTFSPLUS's on 6.18 as on 7.2. kmod ignores a softdep that fails to load
-(`kmod_module_probe_insert_module` in kmod 34.2's `libkmod/libkmod-module.c`), so with Secure
-Boot on `ntfs3` still loads, and once it is loaded its read-only `ntfs` takes the type. The
-build fails unless `fs-ntfs` resolves to `updates/ntfs.ko` alone, and, where the file ships,
-unless `ntfs3` inserts `updates/ntfs.ko` first.
+The 7.2 kernel of `bazzite` and `bazzite-nvidia-open` builds `fs/ntfs` as a module of the same name,
+so the image's `ntfs.ko` takes its place and the kernel's type `ntfs` stays NTFSPLUS, in newer code:
+the branch carries `ntfs:` fixes of Linux 7.3 and 7.4 that the 7.2 kernel lacks, the `$MFTMirr`
+write offset among them. The 7.2 kernel in turn carries 5aec1efb11ab, which the branch leaves out;
+d9e00c457d4a in its merged revision, which holds `mrec_lock` until `ntfs_read_iomap_end()`; and
+6d8c197c9992 in its merged revision. The 6.18 kernel of `bazzite-nvidia` has no `fs/ntfs`, and once
+it sets `CONFIG_NTFS_FS` its `ntfs3` registers a read-only `ntfs` type of its own and carries the
+`fs-ntfs` alias ([`gotchas.md`](gotchas.md) § The 6.18 `ntfs3` claims `fs-ntfs` once the kernel sets
+`CONFIG_NTFS_FS`). Of two drivers registering one type the first loaded gets it: `ntfs3` only warns
+when the name is taken, while NTFSPLUS fails its load. On such a kernel `55-ntfsplus.sh` writes
+`/usr/lib/modprobe.d/bazzite-mx-ntfs.conf`, `alias fs-ntfs ntfs` and `softdep ntfs3 pre: ntfs`: an
+alias in the configuration wins over the aliases a module carries, used "as a last resort"
+(modprobe.d(5)), and the softdep loads NTFSPLUS before every `ntfs3`, so the type `ntfs` is
+NTFSPLUS's on 6.18 as on 7.2. kmod ignores a softdep that fails to load
+(`kmod_module_probe_insert_module` in kmod 34.2's `libkmod/libkmod-module.c`), so with Secure Boot
+on `ntfs3` still loads, and once it is loaded its read-only `ntfs` takes the type. The build fails
+unless `fs-ntfs` resolves to `updates/ntfs.ko` alone, and, where the file ships, unless `ntfs3`
+inserts `updates/ntfs.ko` first.
 
 The type `ntfs` reaches the kernel: the build removes the two generic `mount.ntfs` and
 `mount.ntfs-fuse` links ntfs-3g installs, under both spellings, `/usr/bin` and the
@@ -602,11 +639,11 @@ volumes labelled `steamgames` that `jupiter-sd-mounting-btrfs` mounts on its own
 (`99-steamos-automount.rules`, `99-framework-steam-automount.rules`), which
 `/usr/libexec/hwsupport/steamos-automount.sh` of the Bazzite base mounts as `lowntfs-3g`.
 
-NTFSPLUS defaults to `errors=continue`, which disarms its checks at mount: a volume Windows left
-dirty, or hibernated with `hiberfil.sys` in its root, would mount read-write without a warning
-and a dirty one have its flag cleared at unmount, where `ntfs3` refuses a dirty volume
-(`super.c` of `namjaejeon/linux-ntfs` at the commit `source.env` pins, `fs/ntfs3/super.c`).
-`errors=remount-ro` mounts those two read-only (`Mounting read-only` in the kernel log), so
+NTFSPLUS defaults to `errors=continue`, which disarms its dirty check at mount: a volume Windows
+left dirty would mount read-write without a warning and have its flag cleared at unmount, where
+`ntfs3` refuses a dirty volume (`super.c` of the tag `source.env` follows, `fs/ntfs3/super.c`).
+A volume hibernated with `hiberfil.sys` in its root mounts read-only under every `errors=`.
+`errors=remount-ro` mounts a dirty one read-only too (`Mounting read-only` in the kernel log), so
 fstab rows and udisks mounts carry it; a `mount -t ntfs` by hand takes it on its command line.
 `ujust migrate` adds it to every `ntfs` row of fstab without an `errors=` option, and
 `verify-host` fails such a row. udisks' builtin `ntfs:ntfs_defaults` is `uid`, `gid` and
@@ -615,14 +652,14 @@ fstab rows and udisks mounts carry it; a `mount -t ntfs` by hand takes it on its
 with both keys, each the builtin set plus `errors=remount-ro`: a key there replaces the builtin
 set whole, and the defaults must be a subset of the allowed options (udisks, «Configurable mount
 options»), which `tests/55-ntfsplus.sh` compares with the builtin sets. NTFSPLUS never reads
-whether `$LogFile` is clean (no `ntfs_is_logfile_clean` at the pin), so the option does not
+whether `$LogFile` is clean (no `ntfs_is_logfile_clean` at the tag), so the option does not
 cover a volume fast startup left with pending log records and no dirty flag, a data volume being
 the usual one: it mounts read-write and its `$LogFile` is emptied (`load_system_files`). Fast
 startup off in Windows covers it. A volume mounted read-only by the option says so in the kernel
 log and in an `INFO:` line of `verify-host`; it is writable again after Windows shuts down fully
 and a remount.
 
-NTFSPLUS accepts only its own options (`ntfs_parameters` in `super.c` at the pin): `uid`, `gid`,
+NTFSPLUS accepts only its own options (`ntfs_parameters` in `super.c` at the tag): `uid`, `gid`,
 `umask`, `dmask`, `fmask`, `nls`, `iocharset`, `errors`, `show_sys_files`, `showmeta`,
 `case_sensitive`, `disable_sparse`, `mft_zone_multiplier`, `preallocated_size`, `sys_immutable`,
 `nohidden`, `hide_dot_files`, `windows_names`, `acl`, `discard`, `sparse`, `nocase`,
@@ -640,8 +677,8 @@ from NTFS drives, stays enabled for every user.
 A module built for the wrong kernel API dies at its first mount with vermagic and modinfo green
 ([`gotchas.md`](gotchas.md) § A kernel module can pass vermagic and modinfo and panic at its
 first use), and fstab mounts fire at boot before the journal is on disk. The build has no
-kernel to mount with, so a pin bump takes a mount on a booted host of each kernel series
-before it ships. Recovery after a boot panic: pick the previous deployment in the boot menu,
+kernel to mount with: the fork's CI mounts in a guest booted on each kernel the images ship
+before it moves the tag. Recovery after a boot panic: pick the previous deployment in the boot menu,
 then make it the default with `rpm-ostree rollback && systemctl reboot`.
 
 Files: `build_files/55-ntfsplus.sh` and its test, `build_files/kmods/ntfsplus/source.env`,

@@ -55,8 +55,8 @@ gh workflow run build.yml --repo MatrixDJ96/bazzite-mx --ref <branch> -f rechunk
   requires the failure; what an assertion counts comes from an independent record, never from
   the thing under test (`docs/conventions.md` § Positive control).
 - Vendor RPMs and GitHub releases stay unpinned; a pin enters only against an observed problem,
-  cited. The base digest, the module commits and the vendor keys (`KEY_FPR` in `lib/gpg.sh`)
-  are pinned on purpose.
+  cited. The base digest, the `msi-ec` and `acpi_ec` commits and the vendor keys (`KEY_FPR` in
+  `lib/gpg.sh`) are pinned on purpose; NTFSPLUS follows our fork's `stable` tag.
 - A third-party package comes from a `.repo` vendored under `system_files/etc/yum.repos.d/`,
   every section `enabled=0`, installed with `install_from_repo`: `90-validate-repos.sh` fails
   the build on a repository left enabled or modified.

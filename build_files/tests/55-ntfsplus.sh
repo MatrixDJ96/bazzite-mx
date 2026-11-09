@@ -2,8 +2,8 @@
 # Smoke test of 55-ntfsplus.sh: the ntfs.ko under updates/ takes fs-ntfs alone,
 # and where the kernel's ntfs3 claims fs-ntfs too, ntfs3 loads NTFSPLUS first,
 # elsewhere the image adds no modprobe file; no generic mount.ntfs helper, the
-# FUSE route kept, and udisks's ntfs options with errors=remount-ro. The runtime
-# mount is proven on a booted host.
+# FUSE route kept, and udisks's ntfs options with errors=remount-ro. The fork's
+# CI proves the runtime mount on the images' kernels before it moves the tag.
 #
 # Usage: run by tests/run.sh inside the image (offline, on the cleaned tree).
 # Output: one `OK: <what>` or `FAIL: <what>` line per check, on stdout.

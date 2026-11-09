@@ -303,7 +303,9 @@ NTFS row in fstab kernel-panicked seconds after `Switching root`, before
 `systemd-journal-flush`. The journal held nothing, pstore was empty, and the evidence lived on
 the console alone (three panics, 2026-08-28). A build-time guard cannot catch this class, the
 breakage being a runtime API mismatch and a real mount needing a booted target kernel. Every
-pin bump therefore takes the runtime proof on a booted host.
+module change therefore takes the runtime proof on a booted kernel: for NTFSPLUS the fork's CI
+boots the images' kernels before it moves the tag the build follows, for a pinned module a bump
+takes a booted host.
 
 ## The two NTFS kernel drivers agree on modes and case under a mask, with permissive exceptions
 

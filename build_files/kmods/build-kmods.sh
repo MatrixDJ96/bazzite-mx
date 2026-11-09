@@ -4,11 +4,12 @@
 # the kernel image, pahole built from the tag CONFIG_PAHOLE_VERSION names.
 #
 # Usage: build-kmods.sh              build every module (the kmod-builder stage)
-#        build-kmods.sh --self-test  assert_module and kernel_version on known
-#                                    inputs, the base's in-tree msi-ec as the
-#                                    positive control
+#        build-kmods.sh --self-test  assert_module, kernel_version and
+#                                    source_ref on known inputs, the base's
+#                                    in-tree msi-ec as the positive control
 # Writes: /out/<kver>/updates/<KO_NAME>.ko per module, stripped of debug info
-#   with its BTF kept, one source.env of this directory per module.
+#   with its BTF kept, one source.env of this directory per module, pinned to a
+#   COMMIT or following a TAG.
 # Exit status: 0 done; 1 on a `FAIL: …` line or a usage error.
 set -euo pipefail
 
@@ -56,31 +57,50 @@ prepare_btf() {
 
 # --- one module ---------------------------------------------------------------
 
-# Sets URL, COMMIT, KO_NAME, KO_BUILD_PATH, KO_VERSION and KO_BUILD_ARGS from
-# <source.env>.
+# Sets URL, COMMIT or TAG, KO_NAME, KO_BUILD_PATH, KO_VERSION and
+# KO_BUILD_ARGS from <source.env>.
 read_source_env() {
     local source_env=$1
 
-    unset URL COMMIT KO_NAME KO_BUILD_PATH KO_VERSION KO_BUILD_ARGS
+    unset URL COMMIT TAG KO_NAME KO_BUILD_PATH KO_VERSION KO_BUILD_ARGS
     # shellcheck disable=SC1090
     source "$source_env"
 }
 
-# A fetch by commit id into <dir>, so the pin is what lands, checked after.
+# The ref to fetch: COMMIT, a pin, or refs/tags/TAG, followed; one of the two,
+# never both.
+source_ref() {
+    local name=$1
+
+    if [ -n "${COMMIT:-}" ] && [ -z "${TAG:-}" ]; then
+        echo "$COMMIT"
+    elif [ -n "${TAG:-}" ] && [ -z "${COMMIT:-}" ]; then
+        echo "refs/tags/$TAG"
+    else
+        fail_build "$name: source.env sets COMMIT '${COMMIT:-}' and TAG '${TAG:-}'," \
+            "exactly one is required"
+    fi
+}
+
+# A fetch into <dir>; a pin is checked to be what landed, a tag's commit is
+# recorded in COMMIT for the log.
 fetch_source() {
     local name=$1
     local dir=$2
-    local checked_out
+    local ref checked_out
 
+    ref=$(source_ref "$name")
     rm -rf "$dir"
     mkdir -p "$dir"
     git -C "$dir" init -q
-    git -C "$dir" fetch -q --depth 1 "$URL" "$COMMIT"
+    git -C "$dir" fetch -q --depth 1 "$URL" "$ref"
     git -C "$dir" -c advice.detachedHead=false checkout -q FETCH_HEAD
 
     checked_out=$(git -C "$dir" rev-parse HEAD)
 
-    if [ "$checked_out" != "$COMMIT" ]; then
+    if [ -n "${TAG:-}" ]; then
+        COMMIT=$checked_out
+    elif [ "$checked_out" != "$COMMIT" ]; then
         fail_build "$name: checkout is $checked_out, not $COMMIT"
     fi
 }
@@ -116,7 +136,8 @@ stage_module() {
     fi
 
     log "kmod $name: $KO_NAME.ko for $kernel, $(stat -c %s "$staged") bytes," \
-        "version '${KO_VERSION:-}', commit $COMMIT${KO_BUILD_ARGS:+, make args '$KO_BUILD_ARGS'}"
+        "version '${KO_VERSION:-}'," \
+        "commit $COMMIT${TAG:+ (tag $TAG)}${KO_BUILD_ARGS:+, make args '$KO_BUILD_ARGS'}"
 }
 
 # --- the build ----------------------------------------------------------------
@@ -199,14 +220,31 @@ self_test_kernel_version() {
     rm -rf "$trees"
 }
 
+# A pin and a tag each give their ref; both or neither is refused.
+self_test_source_ref() {
+    if [ "$(COMMIT=abc TAG='' source_ref t)" != abc ] \
+        || [ "$(COMMIT='' TAG=b source_ref t)" != refs/tags/b ]; then
+        fail_build "self-test: a pin or a tag did not give its ref"
+    fi
+
+    if (COMMIT=abc TAG=b source_ref t) > /dev/null 2>&1; then
+        fail_build "self-test: COMMIT and TAG together passed"
+    fi
+
+    if (COMMIT='' TAG='' source_ref t) > /dev/null 2>&1; then
+        fail_build "self-test: neither COMMIT nor TAG passed"
+    fi
+}
+
 self_test() {
     local kernel
 
     kernel=$(kernel_version)
     self_test_assert_module "$kernel"
     self_test_kernel_version
+    self_test_source_ref
 
-    echo "self-test ok: 1 good module, 5 bad inputs refused"
+    echo "self-test ok: 1 good module, 2 refs given, 7 bad inputs refused"
 }
 
 # --- main ---------------------------------------------------------------------

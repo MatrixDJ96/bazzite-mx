@@ -286,8 +286,9 @@ known-bad still red after it. The rules above add to the earlier bullets of this
 - Nothing is pinned to a release for vendor RPMs and GitHub releases: the build resolves the
   latest, and a pin enters only against an observed problem, with the observation cited. Two
   exceptions. The base image is pinned to the digest CI resolved (`resolve-base.sh`), so the
-  three flavours build against a known base; the out-of-tree kernel modules are pinned to a
-  full commit, so a rebuild against a new base kernel cannot also change the module's source.
+  three flavours build against a known base; the MSI kernel modules are pinned to a full
+  commit, so a rebuild against a new base kernel cannot also change the module's source, while
+  NTFSPLUS follows the tag its fork's CI moves only after testing the images' kernels.
   pahole is neither latest nor pinned: the kmod-builder stage builds it from the tag the
   kernel's `CONFIG_PAHOLE_VERSION` names, so it moves with the base kernel.
 - A vendor's signing key is pinned on purpose: the armored key ships under
@@ -304,9 +305,10 @@ known-bad still red after it. The rules above add to the earlier bullets of this
   application keep their `/opt/...` form, so its smoke test checks them with `readlink` and not
   with `-x`: the link dangles in the build.
 - An out-of-tree kernel module is a `build_files/kmods/<name>/source.env`, built by the
-  kmod-builder stage against the base's own `kernel-devel`. It carries `URL`, the full
-  `COMMIT`, `KO_NAME`, `KO_BUILD_PATH`, `KO_VERSION`, and `KO_BUILD_ARGS` when kbuild needs a
-  config symbol forced on the make line. The builder proves the checkout is the pinned commit.
+  kmod-builder stage against the base's own `kernel-devel`. It carries `URL`, either the full
+  `COMMIT` of a pin or the `TAG` it follows, `KO_NAME`, `KO_BUILD_PATH`, `KO_VERSION`, and
+  `KO_BUILD_ARGS` when kbuild needs a config symbol forced on the make line. The builder proves
+  the checkout is the pinned commit, or logs the commit the tag named.
   Then `assert_module` requires a readable module stamped for the image's kernel and, when
   `KO_VERSION` is set, that `MODULE_VERSION`. The modules are unsigned: when modprobe refuses
   one, the helper's `ERROR:` line carries modprobe's own reason and names Secure Boot as the
