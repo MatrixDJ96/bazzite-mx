@@ -102,7 +102,9 @@ release.yml   workflow_dispatch: reason (becomes the run name), promote_stable (
                 --preserve-digests onto :<tag>, refused when :<tag> already points elsewhere
                 -> :stable, once all three passed, only with promote_stable AND vars.PROMOTE_STABLE
   release     changelog.sh (the sections of Bazzite's changelog.py: the handwritten text or the
-              generated line, major packages from the build jobs' packages files and the
+              generated line, a link to the Bazzite release it builds on, major packages
+              (kernels, firmware, Mesa, Gamescope, MangoHUD, KDE, Nvidia, then Docker, Podman,
+              QEMU, libvirt, VS Code, Sunshine) from the build jobs' packages files and the
               previous release's packages.json, the SBOMs when either is missing, commits since
               the previous release's revision, then All Images and Nvidia Images, one package
               per new version, and how to rebase, through ujust migrate)
