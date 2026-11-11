@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # NTFSPLUS as the type `ntfs` on every flavour: 50-kmods.sh installed ntfs.ko
-# under updates/, ahead of the 7.2 kernel's own fs/ntfs. The 6.18 kernel of
+# under updates/, ahead of the 7.3 kernel's own fs/ntfs. The 6.18 kernel of
 # bazzite-nvidia has no fs/ntfs, and once it sets CONFIG_NTFS_FS its ntfs3
 # registers a read-only `ntfs` of its own, so there the image routes fs-ntfs to
 # NTFSPLUS and loads NTFSPLUS before ntfs3. The generic mount.ntfs helpers go,
@@ -54,7 +54,7 @@ route_legacy_ntfs() {
 
     {
         echo "# ntfs3 of this kernel registers a read-only ntfs too: NTFSPLUS takes the"
-        echo "# type, as on the 7.2 kernel (build_files/55-ntfsplus.sh)."
+        echo "# type, as on the 7.3 kernel (build_files/55-ntfsplus.sh)."
         echo "alias fs-ntfs ntfs"
         echo "softdep ntfs3 pre: ntfs"
     } > "$ROUTING"

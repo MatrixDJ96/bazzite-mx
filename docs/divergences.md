@@ -562,38 +562,34 @@ Namjae Jeon's rework of the classic read-only `ntfs` (he also maintains Linux's 
 and `ntfs3` coexist by design (`fs/ntfs3/Kconfig`: `depends on !NTFS_FS || m`). The image builds our
 fork of the author's standalone packaging of the same code for all three flavours alike, under
 `updates/`, which depmod searches before the in-tree `kernel/` (kmod's `tools/depmod.c`). The fork,
-`MatrixDJ96/linux-ntfs`, keeps a branch `bazzite-mx` in three layers: the author's `ntfs-next`,
-which runs ahead of his `main` and carries most of the `ntfs:` fixes of Linux `master`, with the
-fork's CI commit on top; the `ntfs:` commits of Linux `master` that `ntfs-next` lacks,
-cherry-picked; then the fixes upstream has not merged yet. Of the Linux `master` commits, the branch
-leaves out the named-stream and file-flag features Linux 7.4 adds; 5aec1efb11ab, whose direct
-pointer into the MFT record needs `mrec_lock` held across the user copy and the folio lock; and
-dc863955bae5, which reports the birth time of a symbolic link. `ntfs: serialize resident iomap reads
-with mrec_lock` (d9e00c457d4a) is cherry-picked from Namjae Jeon's port on his `resident_mrec`
-branch (3bbdd318e5b7), narrowed to hold `mrec_lock` for the record lookup and copy alone, since
-without 5aec1efb11ab nothing reads the record after the copy; his `ntfs: release resident zero iomap
-page on old kernels` (d6409d547e82), from the same branch and not in Linux `master`, releases the
-page on every kernel, since without 5aec1efb11ab every kernel copies the resident value to a
-temporary page. `ntfs-next` carries two commits in an earlier revision than the one Linux merged,
-and the branch keeps that revision. In `ntfs: add non-resident WOF decompression` (2bef615ebf28) the
-branch's revision clears the flags above the low byte on a `system.dos_attrib` write, sparse and
-reparse included, where the merged form keeps them; the merged form also refuses a
-`system.ntfs_attrib` write that would change sparse or reparse on a WOF file. In `ntfs: use dynamic
-MFT tail reservation` (6d8c197c9992) the merged form rounds down the first record number that must
-not hold a new `$MFT` extent, where the branch rounds it up; when no tail reserve fits, the merged
-form also extends `$MFT` by one record fewer than the branch. Besides d6409d547e82, the unmerged
-fixes are Hyunchul Lee's `ntfs: accept native AF_UNIX reparse points` from namjaejeon/linux-ntfs#97,
-for the sockets Windows creates; Wahid Khan's `ntfs: do not read an index block outside
-$INDEX_ALLOCATION` (linux-fsdevel/vfs PR 3138), without which d9e00c457d4a hangs a lookup in a
-directory whose `$INDEX_ROOT` points to a missing `$INDEX_ALLOCATION`; and our `ntfs: do not treat
-an interrupted read as volume corruption`, for namjaejeon/linux-ntfs#98, where a reader killed
-mid-read turned the whole volume read-only under `errors=remount-ro`. Four more are ours too, each
-green in KVM on 6.18, 7.2 and 7.3, three of them on resident files: a read or write fault no longer
-waits for `mrec_lock` under the folio lock, where it could deadlock against the file turning
-non-resident; stores through a shared mapping reach the MFT record on writeback instead of being
-lost; a punched hole is zeroed in the record, not only in the page cache. The fourth fixes a
-truncate that fails to zero the tail of a non-resident file: on kernels before 6.19 it returned with
-`invalidate_lock` held, and the file's later truncates and faults waited forever. Every commit above
+`MatrixDJ96/linux-ntfs`, keeps a branch `bazzite-mx` in four layers: the author's `ntfs-next`, which
+runs ahead of his `main` and carries most of the `ntfs:` fixes of Linux `master`, with the fork's CI
+commit on top; the `ntfs:` commits of Linux `master` that `ntfs-next` lacks, cherry-picked; the
+fixes upstream has not merged yet; then ours. Of the Linux `master` commits, the branch leaves out
+the VFS API changes from Linux 7.4 on, as the image's kernels stop at 7.3. `ntfs-next` carries the
+named streams, the `$LINUXFLAGS` file flags and the persistent `noatime` of Linux 7.4, and so does
+the branch: a named stream is reached through its ioctls, and as `file:stream` only with the mount
+option `streams_interface=windows`, off by default. `ntfs-next` also carries 5aec1efb11ab and
+d9e00c457d4a, which point iomap at the value in the MFT record and hold `mrec_lock` from the
+resident iomap lookup until `->iomap_end()`, across the copy to or from the user buffer, so an
+`O_DIRECT` read of a resident file into its own mapping, or a `pwrite()` from it, waits forever for
+the lock its own task holds; our `ntfs: copy resident values instead of pointing into the MFT
+record` copies the value under `mrec_lock` and releases the lock before returning. `ntfs-next`
+carries two commits in an earlier revision than the one Linux merged, and the branch keeps that
+revision. In `ntfs: add non-resident WOF decompression` (2bef615ebf28) the branch's revision clears
+the flags above the low byte on a `system.dos_attrib` write, sparse and reparse included, where the
+merged form keeps them; the merged form also refuses a `system.ntfs_attrib` write that would change
+sparse or reparse on a WOF file. In `ntfs: use dynamic MFT tail reservation` (6d8c197c9992) the
+merged form rounds down the first record number that must not hold a new `$MFT` extent, where the
+branch rounds it up; when no tail reserve fits, the merged form also extends `$MFT` by one record
+fewer than the branch. The unmerged fix is Hyunchul Lee's `ntfs: accept native AF_UNIX reparse
+points` from namjaejeon/linux-ntfs#97, for the sockets Windows creates. Besides the copy, four
+commits are ours, each green in KVM on 6.18 and 7.3: `ntfs: do not treat an interrupted read as
+volume corruption`, for namjaejeon/linux-ntfs#98, where a reader killed mid-read turned the whole
+volume read-only under `errors=remount-ro`; and three on resident files and streams: a read or write
+fault never waits for `mrec_lock` under the folio lock, where it could deadlock against the file
+turning non-resident; stores through a shared mapping reach the MFT record on writeback instead of
+being lost; a punched hole is zeroed in the record, not only in the page cache. Every commit above
 the fork's CI commit leaves the branch once `ntfs-next` carries it. The fork's CI boots the image's
 kernels and the newest ogc one with the branch and with plain `ntfs-next`, runs the upstream tests
 on both, and moves the fork's tag `stable` to the tested tip of `bazzite-mx` when the branch fails
@@ -605,22 +601,21 @@ mount type's. Its kbuild fragment is gated on `CONFIG_NTFS_FS`, so `source.env` 
 the make line ([`gotchas.md`](gotchas.md) § A kbuild fragment gated on a kernel config symbol
 compiles nothing and exits 0). Like the MSI modules, `ntfs.ko` is unsigned and the kernel refuses it
 when Secure Boot is on, so the image requires Secure Boot off: with it on, the type `ntfs` has no
-driver on 7.2, the image's module shadowing the kernel's signed one.
+driver on 7.3, the image's module shadowing the kernel's signed one.
 
-The 7.2 kernel of `bazzite` and `bazzite-nvidia-open` builds `fs/ntfs` as a module of the same name,
+The 7.3 kernel of `bazzite` and `bazzite-nvidia-open` builds `fs/ntfs` as a module of the same name,
 so the image's `ntfs.ko` takes its place and the kernel's type `ntfs` stays NTFSPLUS, in newer code:
-the branch carries `ntfs:` fixes of Linux 7.3 and 7.4 that the 7.2 kernel lacks, the `$MFTMirr`
-write offset among them. The 7.2 kernel in turn carries 5aec1efb11ab, which the branch leaves out;
-d9e00c457d4a in its merged revision, which holds `mrec_lock` until `ntfs_read_iomap_end()`; and
-6d8c197c9992 in its merged revision. The 6.18 kernel of `bazzite-nvidia` has no `fs/ntfs`, and once
-it sets `CONFIG_NTFS_FS` its `ntfs3` registers a read-only `ntfs` type of its own and carries the
-`fs-ntfs` alias ([`gotchas.md`](gotchas.md) § The 6.18 `ntfs3` claims `fs-ntfs` once the kernel sets
-`CONFIG_NTFS_FS`). Of two drivers registering one type the first loaded gets it: `ntfs3` only warns
-when the name is taken, while NTFSPLUS fails its load. On such a kernel `55-ntfsplus.sh` writes
-`/usr/lib/modprobe.d/bazzite-mx-ntfs.conf`, `alias fs-ntfs ntfs` and `softdep ntfs3 pre: ntfs`: an
-alias in the configuration wins over the aliases a module carries, used "as a last resort"
-(modprobe.d(5)), and the softdep loads NTFSPLUS before every `ntfs3`, so the type `ntfs` is
-NTFSPLUS's on 6.18 as on 7.2. kmod ignores a softdep that fails to load
+the branch carries `ntfs:` fixes of Linux 7.4 that the 7.3 kernel lacks. The 7.3 kernel in turn
+carries 5aec1efb11ab and d9e00c457d4a with the pointer into the MFT record the branch replaces with
+a copy, and 6d8c197c9992 in its merged revision. The 6.18 kernel of `bazzite-nvidia` has no
+`fs/ntfs`, and once it sets `CONFIG_NTFS_FS` its `ntfs3` registers a read-only `ntfs` type of its
+own and carries the `fs-ntfs` alias ([`gotchas.md`](gotchas.md) § The 6.18 `ntfs3` claims `fs-ntfs`
+once the kernel sets `CONFIG_NTFS_FS`). Of two drivers registering one type the first loaded gets
+it: `ntfs3` only warns when the name is taken, while NTFSPLUS fails its load. On such a kernel
+`55-ntfsplus.sh` writes `/usr/lib/modprobe.d/bazzite-mx-ntfs.conf`, `alias fs-ntfs ntfs` and
+`softdep ntfs3 pre: ntfs`: an alias in the configuration wins over the aliases a module carries,
+used "as a last resort" (modprobe.d(5)), and the softdep loads NTFSPLUS before every `ntfs3`, so the
+type `ntfs` is NTFSPLUS's on 6.18 as on 7.3. kmod ignores a softdep that fails to load
 (`kmod_module_probe_insert_module` in kmod 34.2's `libkmod/libkmod-module.c`), so with Secure Boot
 on `ntfs3` still loads, and once it is loaded its read-only `ntfs` takes the type. The build fails
 unless `fs-ntfs` resolves to `updates/ntfs.ko` alone, and, where the file ships, unless `ntfs3`
