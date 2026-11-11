@@ -26,6 +26,23 @@ OUT=/out
 SOURCES=/tmp/kmods-src
 PAHOLE_URL=https://git.kernel.org/pub/scm/devel/pahole/pahole.git
 
+# fetch_retry <dir> <url> <ref>: git has no retry of its own, and one HTTP 5xx
+# would fail the flavour's whole build.
+fetch_retry() {
+    local try
+
+    for try in 1 2 3 4; do
+        if git -C "$1" fetch -q --depth 1 "$2" "$3"; then
+            return 0
+        fi
+
+        log "git fetch $2 $3 failed (try $try of 5), retrying in 60 s"
+        sleep 60
+    done
+
+    git -C "$1" fetch -q --depth 1 "$2" "$3"
+}
+
 # --- BTF ----------------------------------------------------------------------
 
 # kbuild writes BTF with pahole against vmlinux and warns on a pahole other
@@ -46,7 +63,7 @@ prepare_btf() {
         cmake elfutils-devel zlib-devel libbpf-devel
     mkdir -p "$dir"
     git -C "$dir" init -q
-    git -C "$dir" fetch -q --depth 1 "$PAHOLE_URL" "refs/tags/$tag"
+    fetch_retry "$dir" "$PAHOLE_URL" "refs/tags/$tag"
     git -C "$dir" -c advice.detachedHead=false checkout -q FETCH_HEAD
     cmake -Wno-deprecated -S "$dir" -B "$dir/build" -DCMAKE_BUILD_TYPE=Release \
         -DLIBBPF_EMBEDDED=OFF -DCMAKE_C_FLAGS=-w
@@ -93,7 +110,7 @@ fetch_source() {
     rm -rf "$dir"
     mkdir -p "$dir"
     git -C "$dir" init -q
-    git -C "$dir" fetch -q --depth 1 "$URL" "$ref"
+    fetch_retry "$dir" "$URL" "$ref"
     git -C "$dir" -c advice.detachedHead=false checkout -q FETCH_HEAD
 
     checked_out=$(git -C "$dir" rev-parse HEAD)
