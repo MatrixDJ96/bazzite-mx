@@ -1,88 +1,93 @@
-# Bazzite-MX
+<h1><img src="site/logo.svg" alt="" width="48" height="48" align="absmiddle"> Bazzite-MX</h1>
 
-A personal [bootc](https://bootc-dev.github.io/bootc/) image on top of
-[Bazzite](https://bazzite.gg) (KDE desktop, `stable` stream): the system layer only, with
-applications left to Flatpak and mutable userspace to distrobox.
+[![release](https://img.shields.io/github/v/release/MatrixDJ96/bazzite-mx?label=release&color=7657ff)](https://github.com/MatrixDJ96/bazzite-mx/releases/latest)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-Three flavours, one recipe; only the base image and the image name differ:
+## About & Features
 
-| Image                                       | Base                                          | For                         |
-| ------------------------------------------- | --------------------------------------------- | --------------------------- |
-| `ghcr.io/matrixdj96/bazzite-mx`             | `ghcr.io/ublue-os/bazzite:stable`             | AMD / Intel graphics        |
-| `ghcr.io/matrixdj96/bazzite-mx-nvidia-open` | `ghcr.io/ublue-os/bazzite-nvidia-open:stable` | NVIDIA Turing and newer GPU |
-| `ghcr.io/matrixdj96/bazzite-mx-nvidia`      | `ghcr.io/ublue-os/bazzite-nvidia:stable`      | NVIDIA Maxwell to Volta GPU |
+Bazzite-MX is [Bazzite](https://bazzite.gg) KDE turned into a development and virtualization
+workstation, gaming included. Everything ships in a signed
+[bootc](https://bootc-dev.github.io/bootc/) image that updates and rolls back with the system,
+rebuilt on every new Bazzite `stable` image.
 
-`:stable` is the tag a host follows, and it moves onto a release only through the gate that
-verified its signature. What the image changes over Bazzite, and why, is
-[`docs/divergences.md`](docs/divergences.md).
+- **[CLI tools](docs/divergences.md#command-line-tools):** `gh`, `glab`, `shellcheck`, `shfmt`,
+  `ripgrep` and `telnet`.
+- **[Development](docs/divergences.md#visual-studio-code):** VS Code, GitKraken, mise and full
+  git.
+- **[Containers](docs/divergences.md#docker-ce):** Docker CE and Podman, with Compose.
+- **[Virtualization](docs/divergences.md#virtualization-and-quickemu):** libvirt, QEMU/KVM,
+  virt-manager and quickemu.
+- **[Streaming](docs/divergences.md#sunshine):** Sunshine as a native RPM, with KMS capture.
+- **[Filesystems](docs/divergences.md#ntfsplus-on-every-flavour):** NTFSPLUS in place of
+  ntfs-3g, and GParted.
+- **[MSI laptops](docs/divergences.md#msi-laptop-kernel-modules-and-mcontrolcenter):** fan,
+  battery and keyboard control with `msi-ec` and MControlCenter.
 
-## What the image adds
+## Installation
 
-- Hardware: `msi-ec` and `acpi_ec` for MSI laptops, plus MControlCenter (`ujust setup-msi`).
-- Containers and VMs: Docker CE, libvirt, QEMU/KVM, swtpm (`ujust setup-virtualization`).
-- Development: VS Code, GitKraken, `gh`, `glab`, ShellCheck, shfmt, mise (`ujust setup-dev`).
-- The JetBrains Toolbox installer (`ujust install-jetbrains-toolbox`).
-- Desktop: Firefox, gparted and 1Password as RPMs; Firefox and virt-manager Flatpaks denied.
-- Sunshine with the KMS capabilities its RPM carries (`ujust setup-sunshine`).
-- KDE defaults: clock seconds, a panel per screen, Ctrl+C to copy in Konsole.
-- Signing trust for `ghcr.io/matrixdj96/*`: a host pulls only what this repository signed.
-- NTFSPLUS, built from our fork of its author's tree, as the type `ntfs` on all three flavours.
-- Host recipes `ujust migrate` and `ujust verify-host`.
+> [!WARNING]
+> Turn Secure Boot off: the NTFSPLUS and MSI modules are unsigned. With Windows drives in
+> `/etc/fstab` or a Windows dual boot, read
+> [NTFSPLUS](docs/divergences.md#ntfsplus-on-every-flavour) first.
 
-## Switch a Bazzite host
+From Bazzite KDE (not GNOME), pick the `<image>` for your GPU: `bazzite-mx` (AMD, Intel),
+`bazzite-mx-nvidia-open` (GTX 16, RTX) or `bazzite-mx-nvidia` (GTX 750 to GTX 10).
 
-The image requires Secure Boot off (`bootctl status`): its NTFSPLUS and MSI modules are
-unsigned ([`docs/divergences.md`](docs/divergences.md) § NTFSPLUS on every flavour).
-
-A stock Bazzite trusts no key for `ghcr.io/matrixdj96`, so the first rebase goes through the
-unsigned transport. The recipe moves the host onto the signed one afterwards.
+**1.** Rebase to it and reboot:
 
 ```bash
-sudo rpm-ostree rebase ostree-unverified-registry:ghcr.io/matrixdj96/bazzite-mx:stable
-systemctl reboot
-ujust migrate
-systemctl reboot
+sudo rpm-ostree rebase ostree-unverified-registry:ghcr.io/matrixdj96/<image>:stable
+```
+
+**2.** Switch to the signed image and reboot:
+
+```bash
+ujust migrate stable
+```
+
+**3.** Check that everything is in place:
+
+```bash
 ujust verify-host
 ```
 
-On an NVIDIA machine, name `bazzite-mx-nvidia-open` (Turing and newer) or `bazzite-mx-nvidia`
-(Maxwell, Pascal and Volta) in the first line; an older GPU stays on `bazzite-mx`.
+## Recipes
 
-`migrate` lists the changes it would make to the host and asks once before making them. The
-steps and the checks are in [`docs/migration.md`](docs/migration.md).
+| Recipe                             | Description                                                    |
+| ---------------------------------- | -------------------------------------------------------------- |
+| `ujust setup-dev install`          | Installs the default mise runtimes (Node, Python, Java, .NET). |
+| `ujust install-jetbrains-toolbox`  | Installs the latest JetBrains Toolbox release.                 |
+| `ujust setup-virtualization kvmfr` | Sets up the kvmfr module for Looking Glass.                    |
+| `ujust setup-sunshine enable`      | Starts Sunshine streaming automatically at login.              |
+| `ujust setup-msi enable`           | Loads the MSI EC modules and installs MControlCenter.          |
+| `ujust setup-panels`               | Adds a custom taskbar to each secondary monitor.               |
 
-## Verify an image
+`ujust <recipe> help` lists every option of a recipe.
 
-```bash
-cosign verify --key https://raw.githubusercontent.com/MatrixDJ96/bazzite-mx/main/cosign.pub \
-  ghcr.io/matrixdj96/bazzite-mx:stable
-gh attestation verify oci://ghcr.io/matrixdj96/bazzite-mx:stable --repo MatrixDJ96/bazzite-mx
-```
+## Verification
 
-`gh attestation verify` wants a GitHub login first (`gh auth login`, or `GH_TOKEN` in the
-environment), public repository or not.
-
-The key is [`cosign.pub`](cosign.pub), the one the image itself trusts.
-
-## Build it yourself
+With [`cosign.pub`](cosign.pub) from this repository:
 
 ```bash
-# resolve-base.sh pins the base to its current digest, the way CI does
-eval "$(./.github/scripts/resolve-base.sh bazzite)"   # or bazzite-nvidia-open, bazzite-nvidia
-podman build --build-arg BASE_IMAGE="$base_image" --build-arg IMAGE_NAME="$image_name" \
-    --tag localhost/bazzite-mx .
+cosign verify --key cosign.pub ghcr.io/matrixdj96/<image>:stable
 ```
 
-## Documentation
+## Build Your Own
 
-- [`AGENTS.md`](AGENTS.md): the project guide for anyone working on the repo.
-- [`docs/architecture.md`](docs/architecture.md): build flow, layout, build state, the gates.
-- [`docs/conventions.md`](docs/conventions.md): the rules for scripts, recipes, tests and CI.
-- [`docs/divergences.md`](docs/divergences.md): what changes over Bazzite, and why.
-- [`docs/gotchas.md`](docs/gotchas.md): surprises found here, each with how it was found.
-- [`docs/migration.md`](docs/migration.md): bringing a host onto the image, re-checking one.
-- [`docs/workflow.md`](docs/workflow.md): branches, the release run, retention.
+```bash
+./.github/scripts/preflight-build.sh <flavour>
+```
+
+`<flavour>` is `bazzite` (the default), `bazzite-nvidia-open` or `bazzite-nvidia`; it needs
+podman, skopeo and jq.
+
+## Special Thanks
+
+- [Bazzite](https://github.com/ublue-os/bazzite) and
+  [Universal Blue](https://universal-blue.org/), the base this image builds on.
+- [bazzite-dx](https://github.com/ublue-os/bazzite-dx) and
+  [Aurora](https://github.com/ublue-os/aurora), for their developer setups.
 
 ## License
 
-Apache-2.0, see [`LICENSE`](LICENSE).
+[Apache-2.0](LICENSE)
