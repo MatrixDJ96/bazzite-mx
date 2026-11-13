@@ -583,10 +583,14 @@ sparse or reparse on a WOF file. In `ntfs: use dynamic MFT tail reservation` (6d
 merged form rounds down the first record number that must not hold a new `$MFT` extent, where the
 branch rounds it up; when no tail reserve fits, the merged form also extends `$MFT` by one record
 fewer than the branch. The unmerged fix is Hyunchul Lee's `ntfs: accept native AF_UNIX reparse
-points` from namjaejeon/linux-ntfs#97, for the sockets Windows creates. Besides the copy, four
+points` from namjaejeon/linux-ntfs#97, for the sockets Windows creates. Besides the copy, five
 commits are ours, each green in KVM on 6.18 and 7.3: `ntfs: do not treat an interrupted read as
 volume corruption`, for namjaejeon/linux-ntfs#98, where a reader killed mid-read turned the whole
-volume read-only under `errors=remount-ro`; and three on resident files and streams: a read or write
+volume read-only under `errors=remount-ro`; `ntfs: do not allocate a second cluster when extending
+the mft bitmap`, which restores the shape of Linux's 3f5836568741 where `ntfs-next`'s revision
+(727786c9a968) let the adjacent-cluster path fall through into the allocator, so the next extension
+failed to merge its runlist and set the volume read-only after about 65000 new files; and three on
+resident files and streams: a read or write
 fault never waits for `mrec_lock` under the folio lock, where it could deadlock against the file
 turning non-resident; stores through a shared mapping reach the MFT record on writeback instead of
 being lost; a punched hole is zeroed in the record, not only in the page cache. Every commit above
