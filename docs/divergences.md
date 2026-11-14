@@ -409,33 +409,34 @@ Files: `build_files/40-desktop-apps.sh` and `build_files/80-fix-opt.sh` with the
 
 ## Sunshine
 
-Bazzite dropped its Sunshine RPM, and its `setup-sunshine` installs the Flatpak per host
+Bazzite dropped its Sunshine RPM, and its `setup-sunshine` installs Sunshine per host as a Flatpak
+or a Homebrew formula
 (`bazzite/system_files/desktop/shared/usr/share/ublue-os/just/82-bazzite-sunshine.just`). The
-RPM is in the image because the Flatpak cannot do what the fleet uses it for: Flatpak does not
-support KMS capture, which needs elevated privileges (LizardByte/Sunshine,
-`docs/getting_started.md`). The package comes from the COPR the Sunshine docs name, vendored
-with `enabled=0` and the file's `priority=1` dropped, which would otherwise let the repository
-override Fedora's packages on a host that enabled it. Its `/usr/bin/sunshine` carries
-`cap_sys_admin,cap_sys_nice=p`, which KMS capture needs and which also means a compromised
-process holds `CAP_SYS_ADMIN` for the user running it, accepted because the unit is opt-in and
-the hosts are single-user. That premise holds only once the user has set the portal's
-credentials. Once enabled, Sunshine listens on every address and its portal admits the LAN
-(`bind_address` empty and `origin_web_ui_allowed = lan` by default; LizardByte/Sunshine,
-`docs/configuration.md`), the base's `FedoraWorkstation` zone admits TCP and UDP 1025-65535
-(`/usr/lib/firewalld/zones/FedoraWorkstation.xml`). So `enable` writes
-`origin_web_ui_allowed = pc` to `~/.config/sunshine/sunshine.conf` when the file has no such
-key, leaving a value the user set: the portal answers this PC alone, and the stream stays
-reachable from the LAN. `/api/password` skips that origin check while no username exists
-(LizardByte/Sunshine, `src/confighttp.cpp`: `savePassword` calls `authenticate` only once one
-is set), so when `~/.config/sunshine/sunshine_state.json` has no username `enable` asks for the
-portal's credentials and writes them with `sunshine --creds` before the service starts, the
-password passing through the command line of that one call. It restarts a running Sunshine only
-when it wrote one of the two files, which Sunshine reads at start (LizardByte/Sunshine,
-`src/httpcommon.cpp`, `src/config.cpp`), so a stream in progress survives an `enable` with
-nothing to write. The package's menu entry `Sunshine` (`dev.lizardbyte.app.Sunshine.desktop`)
-started the unit with `systemctl start --u`, past both, and its action ran `sunshine` directly:
-the build rewrites the entry to run `ujust setup-sunshine enable` in a terminal and drops the
-action.
+Flatpak has no KMS capture, which needs elevated privileges (LizardByte/Sunshine,
+`docs/troubleshooting.md`); the formula gets it from `/usr/libexec/sunshine-postinst`, which sets
+`cap_sys_admin,cap_sys_nice+p` (Bazzite f45d06e5). The image ships the RPM, so Sunshine updates with
+the image and needs no per-host install. The package comes from the COPR the Sunshine docs name,
+vendored with `enabled=0` and the file's `priority=1` dropped, which would otherwise let the
+repository override Fedora's packages on a host that enabled it. Its `/usr/bin/sunshine` carries
+`cap_sys_admin,cap_sys_nice=p`, which KMS capture needs and which also means a compromised process
+holds `CAP_SYS_ADMIN` for the user running it, accepted because the unit is opt-in and the hosts are
+single-user. That premise holds only once the user has set the portal's credentials. Once enabled,
+Sunshine listens on every address and its portal admits the LAN (`bind_address` empty and
+`origin_web_ui_allowed = lan` by default; LizardByte/Sunshine, `docs/configuration.md`), the base's
+`FedoraWorkstation` zone admits TCP and UDP 1025-65535
+(`/usr/lib/firewalld/zones/FedoraWorkstation.xml`). So `enable` writes `origin_web_ui_allowed = pc`
+to `~/.config/sunshine/sunshine.conf` when the file has no such key, leaving a value the user set:
+the portal answers this PC alone, and the stream stays reachable from the LAN. `/api/password` skips
+that origin check while no username exists (LizardByte/Sunshine, `src/confighttp.cpp`:
+`savePassword` calls `authenticate` only once one is set), so when
+`~/.config/sunshine/sunshine_state.json` has no username `enable` asks for the portal's credentials
+and writes them with `sunshine --creds` before the service starts, the password passing through the
+command line of that one call. It restarts a running Sunshine only when it wrote one of the two
+files, which Sunshine reads at start (LizardByte/Sunshine, `src/httpcommon.cpp`, `src/config.cpp`),
+so a stream in progress survives an `enable` with nothing to write. The package's menu entry
+`Sunshine` (`dev.lizardbyte.app.Sunshine.desktop`) started the unit with `systemctl start --u`, past
+both, and its action ran `sunshine` directly: the build rewrites the entry to run `ujust
+setup-sunshine enable` in a terminal and drops the action.
 
 Streaming stays opt-in: the RPM's user unit is disabled for every user with
 `systemctl --global disable`, asserted after the install rather than assumed from the presets,
@@ -583,10 +584,14 @@ sparse or reparse on a WOF file. In `ntfs: use dynamic MFT tail reservation` (6d
 merged form rounds down the first record number that must not hold a new `$MFT` extent, where the
 branch rounds it up; when no tail reserve fits, the merged form also extends `$MFT` by one record
 fewer than the branch. The unmerged fix is Hyunchul Lee's `ntfs: accept native AF_UNIX reparse
-points` from namjaejeon/linux-ntfs#97, for the sockets Windows creates. Besides the copy, four
+points` from namjaejeon/linux-ntfs#97, for the sockets Windows creates. Besides the copy, five
 commits are ours, each green in KVM on 6.18 and 7.3: `ntfs: do not treat an interrupted read as
 volume corruption`, for namjaejeon/linux-ntfs#98, where a reader killed mid-read turned the whole
-volume read-only under `errors=remount-ro`; and three on resident files and streams: a read or write
+volume read-only under `errors=remount-ro`; `ntfs: do not allocate a second cluster when extending
+the mft bitmap`, which restores the shape of Linux's 3f5836568741 where `ntfs-next`'s revision
+(727786c9a968) let the adjacent-cluster path fall through into the allocator, so the next extension
+failed to merge its runlist and set the volume read-only after about 65000 new files; and three on
+resident files and streams: a read or write
 fault never waits for `mrec_lock` under the folio lock, where it could deadlock against the file
 turning non-resident; stores through a shared mapping reach the MFT record on writeback instead of
 being lost; a punched hole is zeroed in the record, not only in the page cache. Every commit above
@@ -722,20 +727,25 @@ nothing.
 
 ## The cleaned stage
 
-The last build script puts back what the build's own transactions changed under `/etc` and
-`/usr`, so a host boots an image that carries the features and nothing of the machine that
-produced them. Three effects reach a host and belong here.
+The last build script puts back what the build's own transactions changed under `/etc` and `/usr`,
+so a host boots an image that carries the features and nothing of the machine that produced them.
+Bazzite's own build ends with a similar cleanup: it moves its accounts to `/usr/lib` (f6743763),
+drops their `/etc/shadow` and `/etc/gshadow` lines (`relocate_accounts` in
+`bazzite/build_files/finalize.sh`, 5b1a3994) and empties the dnf5 system state
+(`bazzite/build_files/cleanup.sh`, 721c8424). This stage covers the transactions our build runs on
+that base and treats the shadow files differently, as below. Three effects reach a host and belong
+here.
 
 The accounts created in the build are moved out of `/etc/passwd` and `/etc/group` into
-`/usr/lib/passwd` and `/usr/lib/group`, and the `-` backups removed. Their `/etc/shadow` lines
-are left where they are: the base ships that file with dozens of entries whose accounts live in
-`/usr/lib` already, so the few this stage adds change nothing a host reads. The move takes
-`docker`, `libvirt` and `qemu` among others; NSS resolves them through `altfiles`, and `/etc`
-goes back to `root` and `wheel` alone. Without the move `bootc container lint --fatal-warnings`
-refuses the image, its sysusers check reading an account line in `/etc` as machine state (§
-Docker CE for what the boot hook then copies back). A package's sysusers `m` line on a group of
-the base, `qemu` in `kvm` and `clevis` in `tss`, reaches only `/etc/gshadow`, the group's line
-living in `/usr/lib/group`: the stage carries the member there, or `qemu:///system` would run
+`/usr/lib/passwd` and `/usr/lib/group`, and the `-` backups removed. Their `/etc/shadow` and
+`/etc/gshadow` lines are left where they are: the base ships both files with dozens of entries whose
+accounts and groups live in `/usr/lib` already, so the few this stage adds change nothing a host
+reads. The move takes `docker`, `libvirt` and `qemu` among others; NSS resolves them through
+`altfiles`, and `/etc` goes back to `root` and `wheel` alone. Without the move `bootc container lint
+--fatal-warnings` refuses the image, its sysusers check reading an account line in `/etc` as machine
+state (§ Docker CE for what the boot hook then copies back). A package's sysusers `m` line on a
+group of the base, `qemu` in `kvm` and `clevis` in `tss`, reaches only `/etc/gshadow`, the group's
+line living in `/usr/lib/group`: the stage carries the member there, or `qemu:///system` would run
 QEMU outside `kvm` and away from `/dev/udmabuf` (`0660 root:kvm`; [`gotchas.md`](gotchas.md) § A
 sysusers `m` line on a group of the base reaches only `/etc/gshadow`).
 
@@ -806,24 +816,22 @@ moves on every run.
 
 **No renovate, a stricter version step.** Renovate is replaced by `refresh-pins.sh` and its
 `--self-test`; the push retry, ORAS and the release use Bazzite's actions (`nick-fields/retry`,
-`oras-project/setup-oras`, `softprops/action-gh-release`). Bazzite's version
-step swallows its tag probe with `|| true`; ours stops on a probe that fails. bazzite-dx reads
-the base's version label; `watch-upstream.sh` compares base digests, which also move on a
-retag. The family is split on freeing disk: Bazzite and bazzite-dx run
+`oras-project/setup-oras`, `softprops/action-gh-release`). Bazzite's version step treats a failed
+tag probe as no tags (`list_tags()` in `bazzite/build.py`, 896b04c3); ours stops on a probe that
+fails. bazzite-dx reads the base's version label; `watch-upstream.sh` compares base digests, which
+also move on a retag. The family is split on freeing disk: Bazzite and bazzite-dx run
 `jlumbroso/free-disk-space` (`bazzite/.github/workflows/build.yml`,
 `bazzite-dx/.github/workflows/build.yml`), Bazzite having dropped
 `AdityaGarg8/remove-unwanted-software` in a45a310e and taken `jlumbroso/free-disk-space` in
 595c121e; aurora's `stable-f44`, which builds its Fedora 44 images, and image-template pin
-`ublue-os/remove-unwanted-software` at `695eb75b`
-(`aurora/.github/workflows/reusable-build.yml`,
-`image-template/.github/workflows/build.yml`), the commit past the apt step whose released
-version fails on this runner ([`gotchas.md`](gotchas.md) § `ublue-os/remove-unwanted-software`
-v9 fails on `ubuntu-26.04`). The build job runs `jlumbroso/free-disk-space` since the Fedora
-45 base, whose `bazzite-nvidia-open` build ran out of space once, with Bazzite's options
-(e0700423; [`gotchas.md`](gotchas.md) § The Fedora 45 build can run out of disk on
-`ubuntu-26.04`).
-Bazzite pins chunkah by digest (`build.py`); the build job pulls the same version by tag and
-verifies its signature first.
+`ublue-os/remove-unwanted-software` at `695eb75b` (`aurora/.github/workflows/reusable-build.yml`,
+`image-template/.github/workflows/build.yml`), the commit past the apt step whose released version
+fails on this runner ([`gotchas.md`](gotchas.md) § `ublue-os/remove-unwanted-software` v9 fails on
+`ubuntu-26.04`). The build job runs `jlumbroso/free-disk-space` since the Fedora 45 base, whose
+`bazzite-nvidia-open` build ran out of space once, with Bazzite's options (e0700423;
+[`gotchas.md`](gotchas.md) § The Fedora 45 build can run out of disk on `ubuntu-26.04`). Bazzite
+pins chunkah by digest (`build.py`); the build job pulls the same version by tag and verifies its
+signature first.
 
 Files: `.github/workflows/` and `.github/scripts/`, one owner per script
 ([`architecture.md`](architecture.md)).
