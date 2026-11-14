@@ -730,9 +730,10 @@ nothing.
 
 The last build script puts back what the build's own transactions changed under `/etc` and
 `/usr`, so a host boots an image that carries the features and nothing of the machine that
-produced them. Bazzite does the same for its own build since a90ed70c (`relocate_accounts` in
-`bazzite/build_files/finalize.sh`, the libdnf5 state in `build_files/cleanup.sh`); this stage
-covers the transactions that run after it. Three effects reach a host and belong here.
+produced them. Since a90ed70c Bazzite moves the accounts of its own build to `/usr/lib` and
+drops their `/etc/shadow` lines (`relocate_accounts` in `bazzite/build_files/finalize.sh`) and
+empties the libdnf5 state (`build_files/cleanup.sh`); this stage covers the transactions that
+run after it. Three effects reach a host and belong here.
 
 The accounts created in the build are moved out of `/etc/passwd` and `/etc/group` into
 `/usr/lib/passwd` and `/usr/lib/group`, and the `-` backups removed. Their `/etc/shadow` lines
