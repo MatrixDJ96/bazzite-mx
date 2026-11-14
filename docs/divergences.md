@@ -409,11 +409,13 @@ Files: `build_files/40-desktop-apps.sh` and `build_files/80-fix-opt.sh` with the
 
 ## Sunshine
 
-Bazzite dropped its Sunshine RPM, and its `setup-sunshine` installs the Flatpak per host
-(`bazzite/system_files/desktop/shared/usr/share/ublue-os/just/82-bazzite-sunshine.just`). The
-RPM is in the image because the Flatpak cannot do what the fleet uses it for: Flatpak does not
-support KMS capture, which needs elevated privileges (LizardByte/Sunshine,
-`docs/getting_started.md`). The package comes from the COPR the Sunshine docs name, vendored
+Bazzite dropped its Sunshine RPM, and its `setup-sunshine` installs Sunshine per host
+(`bazzite/system_files/desktop/shared/usr/share/ublue-os/just/82-bazzite-sunshine.just`): the
+Flatpak, which does not support KMS capture, as that needs elevated privileges
+(LizardByte/Sunshine, `docs/getting_started.md`), or the Homebrew formula, which
+`/usr/libexec/sunshine-postinst` gives `cap_sys_admin,cap_sys_nice+p` for KMS capture (Bazzite
+f45d06e5). The RPM puts Sunshine in the image instead, updated with it and outside any per-host
+install. The package comes from the COPR the Sunshine docs name, vendored
 with `enabled=0` and the file's `priority=1` dropped, which would otherwise let the repository
 override Fedora's packages on a host that enabled it. Its `/usr/bin/sunshine` carries
 `cap_sys_admin,cap_sys_nice=p`, which KMS capture needs and which also means a compromised
@@ -728,7 +730,9 @@ nothing.
 
 The last build script puts back what the build's own transactions changed under `/etc` and
 `/usr`, so a host boots an image that carries the features and nothing of the machine that
-produced them. Three effects reach a host and belong here.
+produced them. Bazzite does the same for its own build since a90ed70c (`relocate_accounts` in
+`bazzite/build_files/finalize.sh`, the libdnf5 state in `build_files/cleanup.sh`); this stage
+covers the transactions that run after it. Three effects reach a host and belong here.
 
 The accounts created in the build are moved out of `/etc/passwd` and `/etc/group` into
 `/usr/lib/passwd` and `/usr/lib/group`, and the `-` backups removed. Their `/etc/shadow` lines
@@ -811,7 +815,8 @@ moves on every run.
 **No renovate, a stricter version step.** Renovate is replaced by `refresh-pins.sh` and its
 `--self-test`; the push retry, ORAS and the release use Bazzite's actions (`nick-fields/retry`,
 `oras-project/setup-oras`, `softprops/action-gh-release`). Bazzite's version
-step swallows its tag probe with `|| true`; ours stops on a probe that fails. bazzite-dx reads
+step treats a failed tag probe as no tags (`list_tags()` in `bazzite/build.py`, 896b04c3); ours
+stops on a probe that fails. bazzite-dx reads
 the base's version label; `watch-upstream.sh` compares base digests, which also move on a
 retag. The family is split on freeing disk: Bazzite and bazzite-dx run
 `jlumbroso/free-disk-space` (`bazzite/.github/workflows/build.yml`,
