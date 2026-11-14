@@ -649,7 +649,7 @@ through NSS: on a v1 host whose `/etc/group` had `docker:x:959:…`, the image's
 (`/usr/lib/passwd`, dynamic gid 959) resolved its primary group to `docker`, and `groupmod -o -g
 995 docker` stopped on «user 'wsdd' does not exist in /etc/passwd», exit 10, after the gid walk
 had already run: `ublue-system-setup.service` failed at every boot and `docker` kept 959.
-Reported from `sonny-l14g6` on bazzite-63 44.20261027, reproduced 2026-11-03 in the pre-flight
+Reported from a host on bazzite-63 44.20261027, reproduced 2026-11-03 in the pre-flight
 image without the fixture prefix; under `--prefix` groupmod reads only the prefix's files, so
 the smoke test never saw it. `10-bazzite-mx-groups.sh` rewrites the gid field of the group's
 `/etc/group` line instead, and `tests/21-container-runtime.sh` requires a user on the old gid to
@@ -659,10 +659,10 @@ keep it.
 
 `plasma-foreground-booster.service` (Terra's `plasma-foreground-booster-dmemcg`, source
 `pixelcluster/kcgroups`) is wanted by `plasma-workspace.target` with no `After=` on
-`plasma-kwin_wayland.service`. On the hub's first boot of 45.20261104 it started at 20.479 s,
+`plasma-kwin_wayland.service`. On one host's first boot of 45.20261104 it started at 20.479 s,
 KWin at 20.521 s: `foreground_booster` found no Wayland display, aborted with a core dump, and
 its `Restart=on-failure` brought it up on the second try. On 44 it lost no race: started at
-25.5 s on the hub, after KWin on three boots of `ldesktop-matrix`. Measured 2026-11-04. The
+25.5 s on that host, after KWin on three boots of a second host. Measured 2026-11-04. The
 image leaves the base's unit as it is; each release test reads the user journal for the abort.
 
 ## NetworkManager 1.58 drops the DHCP router when option 121 has no default route
