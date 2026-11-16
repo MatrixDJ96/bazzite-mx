@@ -6,7 +6,7 @@
 # Usage: run by build.sh; no arguments.
 # Writes: the packages; ublue-os-libvirt-workarounds.service enabled; the
 #   base's bazzite-libvirtd-setup.service removed; the virt-manager
-#   Flatpak denied in the base's Flatpak filter; the Portal's virtualization
+#   Flatpak blocked in the base's Bazaar blocklist; the Portal's virtualization
 #   group removed, its virt-on and virt-off being Bazzite's options.
 # Exit status: 0 done; the build stops on a `FAIL: …` line.
 
@@ -73,7 +73,7 @@ install_virtualization_packages() {
     install_from_repo copr:copr.fedorainfracloud.org:ublue-os:packages ublue-os-libvirt-workarounds
 
     # The virt-manager Flatpak would be a twin of the RPM.
-    deny_flatpak 'org.virt_manager.virt-manager/*'
+    block_in_bazaar org.virt_manager.virt-manager
 }
 
 # Bazzite's `virt-on`, run on a host before it came to the image, leaves the

@@ -58,7 +58,7 @@ Each script owns one artefact and ships a `--self-test`.
 | `lib/env.sh`              | sourced first: `CTX`, `BUILD_FILES`, `BUILD_TMP`, `BUILD_STATE`, `PYTHONDONTWRITEBYTECODE`, then every library but `kmod.sh`                     |
 | `lib/log.sh`              | `group`, `endgroup`, `log`, `fail_build`                                                                                                         |
 | `lib/repos.sh`            | `install_from_repo`, `enabled_repos`, `dnf_retry`                                                                                                |
-| `lib/flatpak.sh`          | `deny_flatpak <ref>`: one deny line in the base's Flatpak filter                                                                                 |
+| `lib/bazaar.sh`           | `block_in_bazaar <app-id>`: one unconditional entry in the base's Bazaar blocklist                                                               |
 | `lib/just.sh`             | `recipe_set`, `remove_portal_group <id>`; output captured before any grep                                                                        |
 | `lib/kmod.sh`             | `kernel_version`, `assert_module`; shared with the kmod-builder stage                                                                            |
 | `lib/gpg.sh`              | the `KEY_FPR` table, `key_fingerprint` and `assert_key_fingerprint`                                                                              |
@@ -75,7 +75,7 @@ Each script owns one artefact and ships a `--self-test`.
 | `31-git-tools.sh`         | GitKraken and git-credential-libsecret                                                                                                           |
 | `32-cli-rpms.sh`          | the Fedora command-line and system-administration packages                                                                                       |
 | `33-mise.sh`              | mise from its COPR; activation and defaults come from `system_files/`                                                                            |
-| `40-desktop-apps.sh`      | Firefox, gparted, 1Password, and the Firefox Flatpak denied                                                                                      |
+| `40-desktop-apps.sh`      | Firefox, gparted, 1Password, and the Firefox Flatpak blocked                                                                                     |
 | `41-sunshine.sh`          | Sunshine from its COPR, its user unit left disabled, its menu entry routed to the recipe                                                         |
 | `45-kde-defaults.sh`      | logs the Plasma update scripts, skel files and login hook `system_files/` ships                                                                  |
 | `50-kmods.sh`             | installs the staged modules under `updates/`, runs depmod, asserts each                                                                          |

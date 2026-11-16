@@ -392,7 +392,7 @@ in `PATH` when the hook calls the application.
   build had, and a test that touches dnf5 cannot leave a log behind for `bootc container lint`.
 - A check several tests make is a function of `tests/lib.sh`, sourced first: `check_pkg`,
   `check_unit_state`, `check_rpm_key`, `check_key_fingerprint`, `check_repo_reads_key`,
-  `check_self_test`, `check_desktop_file`, `check_recipe_help`, `check_flatpak_deny`,
+  `check_self_test`, `check_desktop_file`, `check_recipe_help`, `check_bazaar_block`,
   `check_portal_group_removed`, and `on_one_line` for a probe's output quoted in a `FAIL:`
   line. A check made once stays in its test.
 

@@ -9,7 +9,7 @@ source "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/../lib/just.sh"
 # shellcheck source=../lib/gpg.sh
 source "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/../lib/gpg.sh"
 
-FLATPAK_BLOCKLIST=/usr/share/ublue-os/flatpak-blocklist
+BAZAAR_BLOCKLIST=/usr/share/ublue-os/bazaar/blocklist.yaml
 
 # on_one_line <fallback> [<separator>]: stdin on one line, the separator (a
 # blank) between its lines, or the fallback when stdin is empty. A FAIL line
@@ -183,18 +183,26 @@ check_recipe_help() {
     fi
 }
 
-# check_flatpak_deny <ref>: the base's Flatpak filter carries `deny <ref>` once.
-check_flatpak_deny() {
-    local ref=$1
-    local count lines
+# check_bazaar_block <app-id>: the base's Bazaar blocklist, parsed as YAML,
+# names the id once across its unconditional `block:` lists.
+check_bazaar_block() {
+    local app=$1
+    local count
 
-    count=$(grep -cxF "deny $ref" "$FLATPAK_BLOCKLIST" 2> /dev/null || true)
+    count=$(
+        python3 - "$app" "$BAZAAR_BLOCKLIST" 2>&1 << 'EOF' || true
+import sys, yaml
+app, path = sys.argv[1:]
+with open(path) as f:
+    lists = yaml.safe_load(f)["blocklists"]
+print(sum((b.get("block") or []).count(app) for b in lists if not b.get("conditions")))
+EOF
+    )
 
-    if [ -f "$FLATPAK_BLOCKLIST" ] && [ "$count" -eq 1 ]; then
-        echo "OK: $FLATPAK_BLOCKLIST denies $ref (once)"
+    if [ "$count" = 1 ]; then
+        echo "OK: $BAZAAR_BLOCKLIST blocks $app (once)"
     else
-        lines=$(cat "$FLATPAK_BLOCKLIST" 2>&1 | tr '\n' ';' || true)
-        echo "FAIL: $FLATPAK_BLOCKLIST: ${lines:-empty}"
+        echo "FAIL: $BAZAAR_BLOCKLIST: $app counted $(on_one_line 'nothing' <<< "$count")"
     fi
 }
 

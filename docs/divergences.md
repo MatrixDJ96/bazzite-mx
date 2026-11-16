@@ -172,7 +172,7 @@ explicit package list on the modular daemons (weak dependencies are off in the b
 `dnf.conf`; https://libvirt.org/daemons.html) that Fedora 44's own preset enables
 (`/usr/lib/systemd/system-preset/90-default.preset`). The build asserts `virtqemud.socket`
 enabled and `libvirtd.service` disabled, so a preset change stops the build, and the
-virt-manager Flatpak is denied through the base's Flatpak filter, the RPM being in the image.
+virt-manager Flatpak is blocked in the base's Bazaar blocklist, the RPM being in the image.
 
 The preset enables more than the QEMU pair. `libvirt` is a metapackage, and the drivers it
 brings arrive with the preset lines that start them: `virtqemud`, `virtxend`, `virtlxcd` and
@@ -258,7 +258,7 @@ enables and which would enable and start the monolithic `libvirtd` at the first 
 that ran `virt-on` before it came to the image. The recipe's help (`ujust setup-virtualization
 help`) gives the kvmfr undo, which frees the 128 MiB the module holds at every boot.
 
-Files: `build_files/22-virtualization.sh` and its test, `build_files/lib/flatpak.sh`,
+Files: `build_files/22-virtualization.sh` and its test, `build_files/lib/bazaar.sh`,
 `build_files/lib/just.sh`, `system_files/usr/lib/modprobe.d/bazzite-mx-kvm.conf`,
 `system_files/usr/lib/tmpfiles.d/bazzite-mx-virt.conf`,
 `system_files/usr/share/ublue-os/just/84-bazzite-virt.just`,
@@ -354,10 +354,10 @@ Files: `build_files/33-mise.sh` and its test, `system_files/etc/profile.d/mise.s
 **Firefox.** Bazzite removes `firefox` and `firefox-langpacks` in favour of the Flatpak. The
 RPM is back because of 1Password's browser integration: native messaging goes through
 `/opt/1Password/1Password-BrowserSupport`, a host binary a sandboxed Firefox does not reach out
-of the box. The Flatpak is denied through Bazzite's own filter: `bazzite-flatpak-manager`
-points Flathub's filter at its blocklist with `flatpak remote-modify --filter` when its version
-or the image name changes, as the rebase onto this image does, and the remote reads the file by
-path (flatpak-remote-modify(1), flatpak-remote-add(1)); a host that already has it keeps it.
+of the box. The Flatpak is blocked in Bazaar the way Bazzite blocks Steam and Lutris, by an
+id in `/usr/share/ublue-os/bazaar/blocklist.yaml`, since Bazzite dropped its Flathub filter
+(ublue-os/bazzite f26be33f): Bazaar hides it from search and browsing, the `flatpak` command
+line is unaffected (https://github.com/kolunmi/bazaar/blob/main/docs/overview.md#blocklists).
 The RPM reads its defaults from `/usr/lib64/firefox/browser/defaults/preferences/`, and
 Bazzite's `/usr/share/ublue-os/firefox-config/01-bazzite-global.js` reaches only the Flatpak,
 which `bazzite-flatpak-manager` copies it into, so the build installs that file there too: the
@@ -404,7 +404,7 @@ rpm-ostree, chunkah "does not guarantee unique layers per xattr component"
 (github.com/coreos/chunkah, README), so a component can share a layer with others.
 
 Files: `build_files/40-desktop-apps.sh` and `build_files/80-fix-opt.sh` with their tests,
-`build_files/lib/flatpak.sh`, `system_files/etc/yum.repos.d/1password.repo`,
+`build_files/lib/bazaar.sh`, `system_files/etc/yum.repos.d/1password.repo`,
 `system_files/etc/pki/rpm-gpg/RPM-GPG-KEY-1password`.
 
 ## Sunshine

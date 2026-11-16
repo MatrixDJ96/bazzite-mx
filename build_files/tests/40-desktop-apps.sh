@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test of 40-desktop-apps.sh: Firefox, gparted and 1Password. The
-# Flatpak filter, Bazzite's Firefox defaults, the vendored 1Password
+# Bazaar blocklist, Bazzite's Firefox defaults, the vendored 1Password
 # repository and key, the polkit actions, the relocated groups and the /opt
 # symlinks.
 #
@@ -34,31 +34,15 @@ check_applications() {
     fi
 }
 
-# Our deny line once, the base's lines still there, nothing that is not a
-# rule.
-check_flatpak_blocklist() {
-    local not_a_rule lines
+# Our entry once, the base's Steam and Lutris entries still there.
+check_bazaar_blocklist() {
+    local app
 
-    check_flatpak_deny 'org.mozilla.firefox/*'
+    check_bazaar_block org.mozilla.firefox
 
-    if grep -q '^deny com.valvesoftware.Steam/\*$' "$FLATPAK_BLOCKLIST" 2> /dev/null \
-        && grep -q '^deny net.lutris.Lutris/\*$' "$FLATPAK_BLOCKLIST" 2> /dev/null; then
-        echo "OK: $FLATPAK_BLOCKLIST keeps the base's deny lines (Steam, Lutris)"
-    else
-        lines=$(cat "$FLATPAK_BLOCKLIST" 2>&1 | tr '\n' ';' || true)
-        echo "FAIL: $FLATPAK_BLOCKLIST lost the base's lines: ${lines:-empty}"
-    fi
-
-    not_a_rule=$(grep -vE '^(#|$|(allow|deny) [^ ]+$)' "$FLATPAK_BLOCKLIST" 2> /dev/null \
-        | head -n1 || true)
-
-    if [ ! -s "$FLATPAK_BLOCKLIST" ]; then
-        echo "FAIL: $FLATPAK_BLOCKLIST missing or empty"
-    elif [ -z "$not_a_rule" ]; then
-        echo "OK: every line of $FLATPAK_BLOCKLIST is an allow/deny rule"
-    else
-        echo "FAIL: $FLATPAK_BLOCKLIST has a line that is not a rule: $not_a_rule"
-    fi
+    for app in com.valvesoftware.Steam net.lutris.Lutris; do
+        check_bazaar_block "$app"
+    done
 }
 
 # The base's own file is the record: the RPM's copy must equal it.
@@ -156,7 +140,7 @@ check_opt_links() {
 # --- main ---------------------------------------------------------------------
 
 check_applications
-check_flatpak_blocklist
+check_bazaar_blocklist
 check_firefox_defaults
 check_onepassword_repo
 check_polkit_policy
