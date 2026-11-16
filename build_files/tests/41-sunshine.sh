@@ -15,7 +15,7 @@ source "$(dirname "$(realpath "$0")")/lib.sh"
 
 KEY=/etc/pki/rpm-gpg/RPM-GPG-KEY-copr-lizardbyte-stable
 SUNSHINE_REPO=/etc/yum.repos.d/sunshine.repo
-UNIT=app-dev.lizardbyte.app.Sunshine.service
+UNIT='app-dev.lizardbyte.app.Sunshine.service'
 UNIT_FILE=/usr/lib/systemd/user/$UNIT
 UDEV_RULES=/usr/lib/udev/rules.d/60-sunshine.rules
 MODULES_LOAD=/usr/lib/modules-load.d/60-sunshine.conf
