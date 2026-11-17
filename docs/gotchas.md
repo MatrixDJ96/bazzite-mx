@@ -21,7 +21,8 @@ and libvirt · # inside an fstab field · 2> /dev/null on a failed redirection �
 line · cosign 3.1.3 bundle flag · vendor build-log warnings · no BTF from kernel-devel · arithmetic
 error escapes set -e · scriptlet rewrote a .pyc · anonymous GHCR 403 · sysusers m line on a base
 group · groupmod and a /usr/lib/passwd user · foreground booster before KWin · DHCP option 121
-without a default route · /etc stamped at a RUN's commit · a repository's own skip_if_unavailable.
+without a default route · /etc stamped at a RUN's commit · a repository's own skip_if_unavailable ·
+git.kernel.org from a runner.
 
 ## Torn writeback on a 6.17-azure runner kernel
 
@@ -700,3 +701,14 @@ date). `00-prep.sh` therefore sets the main value, as `ublue-os/bazzite` does in
 `build_files/build.sh`, and the repositories whose files say `True` (Fedora's `updates-archive`
 and `fedora-cisco-openh264`, the base's COPRs and negativo17, our `mise` and `sunshine`) are still
 skipped when unreachable; an install from one of them still fails on the missing package.
+
+## git.kernel.org drops connections from GitHub runners
+
+The kmod builder fetched pahole's tag from `git.kernel.org`: an HTTP 502 on 2026-11-11, then
+connection timeouts on 2026-11-16 (two jobs) and on 2026-11-17, when two of three flavours of
+one release logged `Failed to connect to git.kernel.org:443` after about 132 s on all five
+tries of `fetch_retry`, while the third flavour fetched it. `build-kmods.sh` fetches it from
+`github.com/acmel/dwarves`, the mirror kept by pahole's maintainer, which stays inside
+GitHub's network: every tag it holds is the same tag object as on `git.kernel.org` (`v1.31` is
+tag `4d202bc` on commit `1f2805b` on both), and only `v1.23` and `v1.25` are missing (measured
+2026-11-17).

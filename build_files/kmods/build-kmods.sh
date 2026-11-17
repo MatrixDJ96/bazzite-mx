@@ -24,7 +24,7 @@ source "$HERE/../lib/repos.sh"
 KMODS_DIR=$HERE
 OUT=/out
 SOURCES=/tmp/kmods-src
-PAHOLE_URL=https://git.kernel.org/pub/scm/devel/pahole/pahole.git
+PAHOLE_URL=https://github.com/acmel/dwarves.git
 
 # fetch_retry <dir> <url> <ref>: git has no retry of its own, and one HTTP 5xx
 # would fail the flavour's whole build.
